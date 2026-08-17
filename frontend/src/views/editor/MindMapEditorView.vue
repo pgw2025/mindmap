@@ -21,6 +21,7 @@ import { useMindMapsStore } from '@/stores/mindmaps'
 import { useVersionsStore } from '@/stores/versions'
 import { useAuthStore } from '@/stores/auth'
 import NodeToolbar from './NodeToolbar.vue'
+import RichTextEditor from './RichTextEditor.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -52,6 +53,25 @@ const searchMatchCount = ref(0)
 const searchCurrentIndex = ref(0)
 
 /** 转换后端节点树为 simple-mind-map 格式 */
+/** 后端 NodeShape 数字 → simple-mind-map 形状字符串 */
+const shapeMap: Record<number, string> = {
+  0: 'rectangle',
+  1: 'roundedRectangle',
+  2: 'circle',
+  3: 'ellipse',
+  4: 'diamond',
+  5: 'parallelogram'
+  // 6=Underline: simple-mind-map 无对应形状，默认 rectangle
+}
+
+/** 后端 EdgeStyle 数字 → simple-mind-map lineDasharray */
+const edgeStyleMap: Record<number, string> = {
+  0: 'none',
+  1: '6,4',
+  2: '2,2',
+  3: 'none' // Curve 通过布局控制，虚线同实线
+}
+
 function convertToMindMapData(nodes: NodeDto[]): unknown {
   if (nodes.length === 0) return null
 
@@ -59,16 +79,27 @@ function convertToMindMapData(nodes: NodeDto[]): unknown {
   const roots: unknown[] = []
 
   for (const n of nodes) {
+    const data: Record<string, unknown> = {
+      // 图标 emoji 拼接到标题前显示（simple-mind-map 的 icon 数组系统需预定义 iconList，不适用 emoji）
+      text: n.icon ? `${n.icon} ${n.title}` : n.title,
+      expand: !n.isCollapsed
+    }
+    // 样式属性（simple-mind-map 直接从 data 对象读取）
+    if (n.color) data.color = n.color
+    if (n.fontSize) data.fontSize = n.fontSize
+    if (n.fontFamily) data.fontFamily = n.fontFamily
+    // 背景色：simple-mind-map 用 fillColor（节点形状填充色），非 backgroundColor（容器CSS背景色）
+    if (n.backgroundColor) data.fillColor = n.backgroundColor
+    if (n.borderColor) data.borderColor = n.borderColor
+    if (n.shape != null && n.shape in shapeMap) data.shape = shapeMap[n.shape]
+    if (n.edgeColor) data.lineColor = n.edgeColor
+    if (n.edgeStyle != null && n.edgeStyle in edgeStyleMap) data.lineDasharray = edgeStyleMap[n.edgeStyle]
+    if (n.note) data.note = n.note
+
     const nodeData = {
       id: n.id,
-      data: {
-        text: n.title,
-        title: n.title,
-        content: n.content ?? '',
-        note: n.note ?? ''
-      },
-      children: [] as unknown[],
-      _backend: n
+      data,
+      children: [] as unknown[]
     }
     nodeMap.set(n.id, nodeData)
   }
@@ -232,7 +263,16 @@ async function syncToBackend() {
       if (!backendNode) continue
 
       const updates: NodeUpdatePayload = {}
-      if (backendNode.title !== tn.text) updates.title = tn.text
+      // 比较时考虑 icon 前缀：text = icon + ' ' + title
+      const expectedText = (backendNode.icon ? backendNode.icon + ' ' : '') + backendNode.title
+      if (expectedText !== tn.text) {
+        // 从 text 中去掉 icon 前缀提取 title
+        let newTitle = tn.text
+        if (backendNode.icon && tn.text.startsWith(backendNode.icon + ' ')) {
+          newTitle = tn.text.substring(backendNode.icon.length + 1)
+        }
+        if (backendNode.title !== newTitle) updates.title = newTitle
+      }
       if (backendNode.isCollapsed !== tn.isCollapsed) updates.isCollapsed = tn.isCollapsed
       if (backendNode.sortOrder !== tn.sortOrder) updates.sortOrder = tn.sortOrder
 
@@ -592,6 +632,43 @@ async function handleTitleBlur() {
   }
 }
 
+/** 富文本节点内容编辑面板 */
+const contentModalVisible = ref(false)
+const editingNodeTitle = ref('')
+const editingNodeContent = ref('')
+const editingNodeNote = ref('')
+const savingContent = ref(false)
+
+function openContentEditor() {
+  if (!selectedNodeId.value) return
+  const node = nodesStore.findNode(selectedNodeId.value)
+  if (!node) return
+  editingNodeTitle.value = node.title
+  editingNodeContent.value = node.content || ''
+  editingNodeNote.value = node.note || ''
+  contentModalVisible.value = true
+}
+
+async function saveNodeContent() {
+  if (!selectedNodeId.value) return
+  savingContent.value = true
+  try {
+    const payload: NodeUpdatePayload = {
+      title: editingNodeTitle.value,
+      content: editingNodeContent.value || undefined,
+      note: editingNodeNote.value || undefined
+    }
+    await nodesStore.update(selectedNodeId.value, payload)
+    reloadMindMap()
+    contentModalVisible.value = false
+    message.success('内容已保存')
+  } catch (e) {
+    message.error((e as Error).message || '保存失败')
+  } finally {
+    savingContent.value = false
+  }
+}
+
 /** 初始化空导图 */
 async function initEmptyMindMap() {
   const payload: NodeCreatePayload = {
@@ -734,6 +811,14 @@ watch(() => route.params.id, () => {
           title="粘贴 (Ctrl+V)"
         >
           📋
+        </button>
+        <button
+          class="btn-tool"
+          :disabled="!selectedNodeId"
+          @click="openContentEditor"
+          title="编辑节点内容"
+        >
+          📝
         </button>
         <span class="action-divider"></span>
         <button class="btn-action-save" @click="openCreateVersion" title="保存为版本快照">
@@ -905,6 +990,52 @@ watch(() => route.params.id, () => {
         </div>
       </NDrawerContent>
     </NDrawer>
+
+    <!-- 富文本节点内容编辑弹窗 -->
+    <NModal
+      v-model:show="contentModalVisible"
+      preset="card"
+      title="📝 编辑节点内容"
+      style="width: 600px; max-width: 92vw"
+      :mask-closable="false"
+    >
+      <div class="content-edit-body">
+        <div class="field-group">
+          <label class="field-label">标题</label>
+          <NInput
+            v-model:value="editingNodeTitle"
+            placeholder="节点标题"
+            maxlength="200"
+          />
+        </div>
+        <div class="field-group">
+          <label class="field-label">正文内容</label>
+          <RichTextEditor v-model="editingNodeContent" />
+        </div>
+        <div class="field-group">
+          <label class="field-label">备注</label>
+          <NInput
+            v-model:value="editingNodeNote"
+            type="textarea"
+            placeholder="节点备注（可选）"
+            :autosize="{ minRows: 2, maxRows: 4 }"
+            maxlength="2000"
+          />
+        </div>
+      </div>
+      <template #footer>
+        <NSpace justify="end">
+          <NButton @click="contentModalVisible = false">取消</NButton>
+          <NButton
+            type="primary"
+            :loading="savingContent"
+            @click="saveNodeContent"
+          >
+            {{ savingContent ? '保存中...' : '保存' }}
+          </NButton>
+        </NSpace>
+      </template>
+    </NModal>
   </div>
 </template>
 
@@ -1195,6 +1326,24 @@ watch(() => route.params.id, () => {
       font-size: 15px;
     }
   }
+}
+
+.content-edit-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--app-text-secondary, #666);
 }
 
 .drawer-header {
