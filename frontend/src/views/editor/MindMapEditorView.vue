@@ -1,18 +1,25 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useMessage, useDialog, NInput, NDrawer, NDrawerContent, NButton, NPopconfirm, NSpace, NModal, NCard, NEmpty, NSpin, NTag } from 'naive-ui'
+import { useMessage, useDialog, NInput, NDrawer, NDrawerContent, NButton, NPopconfirm, NSpace, NModal, NCard, NEmpty, NSpin, NTag, NDropdown } from 'naive-ui'
 import MindMap from 'simple-mind-map'
 import Search from 'simple-mind-map/src/plugins/Search.js'
+import Export from 'simple-mind-map/src/plugins/Export.js'
+import ExportPDF from 'simple-mind-map/src/plugins/ExportPDF.js'
+import ExportXMind from 'simple-mind-map/src/plugins/ExportXMind.js'
 
-// 注册搜索插件
+// 注册插件
 MindMap.usePlugin(Search)
+MindMap.usePlugin(Export)
+MindMap.usePlugin(ExportPDF)
+MindMap.usePlugin(ExportXMind)
 import type { NodeDto, NodeCreatePayload, NodeUpdatePayload } from '@/api/nodes'
 import type { MindMapDetail } from '@/api/mindmaps'
 import { fetchMindMap } from '@/api/mindmaps'
 import { useNodesStore } from '@/stores/nodes'
 import { useMindMapsStore } from '@/stores/mindmaps'
 import { useVersionsStore } from '@/stores/versions'
+import { useAuthStore } from '@/stores/auth'
 import NodeToolbar from './NodeToolbar.vue'
 
 const route = useRoute()
@@ -464,6 +471,62 @@ function formatVersionTime(iso: string): string {
   return d.toLocaleDateString() + ' ' + d.toLocaleTimeString().slice(0, 5)
 }
 
+/** 导出功能 */
+const exporting = ref(false)
+
+const exportOptions = [
+  { label: 'PNG 图片', key: 'png' },
+  { label: 'SVG 矢量图', key: 'svg' },
+  { label: 'PDF 文档', key: 'pdf' },
+  { label: 'JSON 数据', key: 'json' },
+  { label: 'Markdown', key: 'md' },
+  { label: 'XMind', key: 'xmind' },
+  { label: 'FreeMind (.mm)', key: 'freemind' }
+]
+
+async function handleExport(format: string) {
+  if (exporting.value) return
+  exporting.value = true
+  const fileName = mapDetail.value?.title || '思维导图'
+  try {
+    if (format === 'freemind') {
+      // 后端导出 FreeMind
+      const url = `/api/mindmaps/${mindMapId.value}/export/freemind`
+      const token = useAuthStore().accessToken
+      const resp = await fetch(url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      })
+      if (!resp.ok) throw new Error(`导出失败: ${resp.status}`)
+      const blob = await resp.blob()
+      downloadBlob(blob, `${fileName}.mm`)
+      message.success('FreeMind 导出成功')
+    } else {
+      // simple-mind-map Export 插件导出（instanceName='doExport'）
+      if (!mindMapInstance?.doExport) {
+        throw new Error('导出插件未加载')
+      }
+      await mindMapInstance.doExport.export(format, true, fileName)
+      message.success(`${format.toUpperCase()} 导出成功`)
+    }
+  } catch (e) {
+    const err = e as Error
+    message.error(err.message || '导出失败')
+  } finally {
+    exporting.value = false
+  }
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
 /** 撤销/重做后刷新画布 */
 async function handleUndo() {
   await nodesStore.undo()
@@ -679,6 +742,15 @@ watch(() => route.params.id, () => {
         <button class="btn-action-history" @click="openVersions" title="查看版本历史">
           🕘 历史
         </button>
+        <NDropdown
+          trigger="click"
+          :options="exportOptions"
+          @select="handleExport"
+        >
+          <button class="btn-action-export" :class="{ 'is-loading': exporting }" title="导出导图" :disabled="exporting">
+            {{ exporting ? '⏳ 导出中...' : '📤 导出' }}
+          </button>
+        </NDropdown>
         <span class="action-divider"></span>
         <button class="btn-tool" @click="handleZoomIn" title="放大">+</button>
         <button class="btn-tool" @click="handleZoomOut" title="缩小">−</button>
@@ -1081,6 +1153,37 @@ watch(() => route.params.id, () => {
   }
 }
 
+.btn-action-export {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border: 1px solid var(--app-border, #e0e0e6);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s;
+  background: #fff;
+  color: var(--app-text-primary, #333);
+
+  &:hover:not(:disabled):not(.is-loading) {
+    background: var(--app-hover-bg, #f0f0f0);
+    border-color: var(--app-primary, #18a058);
+    color: var(--app-primary, #18a058);
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  &.is-loading {
+    border-color: var(--app-primary, #18a058);
+    color: var(--app-primary, #18a058);
+  }
+}
+
 .create-version-body {
   .tip {
     margin: 0 0 16px;
@@ -1200,12 +1303,14 @@ watch(() => route.params.id, () => {
   }
 
   .btn-action-save span:not(.icon),
-  .btn-action-history span:not(.icon) {
+  .btn-action-history span:not(.icon),
+  .btn-action-export span:not(.icon) {
     display: none;
   }
 
   .btn-action-save,
-  .btn-action-history {
+  .btn-action-history,
+  .btn-action-export {
     padding: 6px 8px;
     font-size: 16px;
   }

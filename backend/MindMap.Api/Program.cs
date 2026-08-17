@@ -76,6 +76,7 @@ builder.Services.AddScoped<ITagService, TagService>();
 builder.Services.AddScoped<IMindMapService, MindMapService>();
 builder.Services.AddScoped<INodeService, NodeService>();
 builder.Services.AddScoped<IMindMapVersionService, MindMapVersionService>();
+builder.Services.AddScoped<IExportService, ExportService>();
 
 // ---- Controllers + 全局异常 ----
 builder.Services.AddControllers(options => options.Filters.Add<GlobalExceptionFilter>())

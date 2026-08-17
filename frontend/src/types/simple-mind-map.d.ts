@@ -3,6 +3,21 @@ declare module 'simple-mind-map/src/plugins/Search.js' {
   export default Search
 }
 
+declare module 'simple-mind-map/src/plugins/Export.js' {
+  const Export: { instanceName: string }
+  export default Export
+}
+
+declare module 'simple-mind-map/src/plugins/ExportPDF.js' {
+  const ExportPDF: { instanceName: string }
+  export default ExportPDF
+}
+
+declare module 'simple-mind-map/src/plugins/ExportXMind.js' {
+  const ExportXMind: { instanceName: string }
+  export default ExportXMind
+}
+
 declare module 'simple-mind-map' {
   export default class MindMap {
     static readonly TREE: string
@@ -23,6 +38,10 @@ declare module 'simple-mind-map' {
       searchNext(callback?: () => void): void
       searchPrev(callback?: () => void): void
       endSearch(): void
+    }
+
+    doExport?: {
+      export(type: string, isDownload?: boolean, name?: string, ...args: unknown[]): Promise<unknown>
     }
 
     constructor(opt?: {
