@@ -19,6 +19,7 @@ public class AppDbContext : DbContext
     public DbSet<MindMapEntity> MindMaps => Set<MindMapEntity>();
     public DbSet<Node> Nodes => Set<Node>();
     public DbSet<MindMapVersion> MindMapVersions => Set<MindMapVersion>();
+    public DbSet<MindMapShare> MindMapShares => Set<MindMapShare>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

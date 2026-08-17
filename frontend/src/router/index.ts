@@ -31,6 +31,12 @@ const routes: RouteRecordRaw[] = [
     name: 'mindmap-edit',
     component: () => import('@/views/editor/MindMapEditorView.vue'),
     meta: { title: '编辑导图' }
+  },
+  {
+    path: '/share/:token',
+    name: 'share-view',
+    component: () => import('@/views/ShareView.vue'),
+    meta: { title: '分享导图', public: true }
   }
 ]
 
