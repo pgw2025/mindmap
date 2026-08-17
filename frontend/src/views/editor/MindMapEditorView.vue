@@ -120,6 +120,88 @@ function convertToMindMapData(nodes: NodeDto[]): unknown {
   return roots[0]
 }
 
+/** 触摸事件 → 鼠标事件桥接（simple-mind-map 默认不绑定 touch 事件） */
+let touchBridgeBound = false
+function bindTouchBridge() {
+  const el = mindMapRef.value
+  if (!el || touchBridgeBound) return
+  touchBridgeBound = true
+
+  /** 派发合成鼠标事件到指定 target */
+  function dispatchMouse(type: string, touch: Touch, target: Element) {
+    const evt = new MouseEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      detail: 1,
+      clientX: touch.clientX,
+      clientY: touch.clientY,
+      button: 0,
+      buttons: type === 'mouseup' ? 0 : 1
+    })
+    // 保留 hasTouchEvent 标记供判断来源
+    ;(evt as any)._fromTouch = true
+    target.dispatchEvent(evt)
+  }
+
+  /** 元素 + 指定坐标下的实际目标 */
+  function elemAtPoint(el: Element, x: number, y: number): Element {
+    const hit = document.elementFromPoint(x, y)
+    if (hit && (el === hit || el.contains(hit))) return hit
+    return el
+  }
+
+  let downTarget: Element | null = null
+  let lastTouch: Touch | null = null
+  let moved = false
+
+  el.addEventListener('touchstart', (e: TouchEvent) => {
+    // 多指：交给浏览器处理（捏合缩放）
+    if (e.touches.length > 1) {
+      downTarget = null
+      return
+    }
+    const t = e.touches[0]
+    lastTouch = t
+    moved = false
+    downTarget = elemAtPoint(el, t.clientX, t.clientY)
+    dispatchMouse('mousedown', t, downTarget)
+  }, { passive: true, capture: false })
+
+  el.addEventListener('touchmove', (e: TouchEvent) => {
+    if (e.touches.length > 1 || !lastTouch || !downTarget) return
+    const t = e.touches[0]
+    // 触发拖拽后阻止页面滚动
+    if (moved || Math.abs(t.clientX - lastTouch.clientX) > 4 || Math.abs(t.clientY - lastTouch.clientY) > 4) {
+      moved = true
+      e.preventDefault()
+    }
+    lastTouch = t
+    dispatchMouse('mousemove', t, downTarget)
+  }, { passive: false, capture: false })
+
+  el.addEventListener('touchend', () => {
+    if (!lastTouch || !downTarget) {
+      downTarget = null
+      lastTouch = null
+      return
+    }
+    dispatchMouse('mouseup', lastTouch, downTarget)
+    downTarget = null
+    lastTouch = null
+    moved = false
+  }, { passive: true, capture: false })
+
+  el.addEventListener('touchcancel', () => {
+    if (lastTouch && downTarget) {
+      dispatchMouse('mouseup', lastTouch, downTarget)
+    }
+    downTarget = null
+    lastTouch = null
+    moved = false
+  }, { passive: true })
+}
+
 /** 初始化 simple-mind-map */
 function initMindMap() {
   if (!mindMapRef.value) {
@@ -152,6 +234,9 @@ function initMindMap() {
   if (mindMapData) {
     mindMapInstance.setData(mindMapData)
   }
+
+  // 移动端触摸事件桥接到鼠标事件（simple-mind-map 默认只绑定 mouse 事件）
+  bindTouchBridge()
 
   // 监听选中节点：node_active 回调参数为 (node, activeNodeList)
   mindMapInstance.on('node_active', (...args: unknown[]) => {
@@ -1321,6 +1406,7 @@ watch(() => route.params.id, () => {
   align-items: center;
   gap: 16px;
   padding: 12px 16px;
+  padding-top: calc(12px + var(--safe-top, 0px));
   background: var(--app-card-bg, #fff);
   border-bottom: 1px solid var(--app-border, #e0e0e6);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
@@ -1508,11 +1594,16 @@ watch(() => route.params.id, () => {
   width: 100%;
   height: 100%;
   background: var(--app-bg, #f5f7fa);
+  /* 阻止浏览器默认手势（移动端滚动/双指缩放）抢占节点拖拽 */
+  touch-action: pan-x pan-y;
+  -ms-touch-action: pan-x pan-y;
 
   // simple-mind-map 内部样式覆盖
   :deep(.mind-map) {
     width: 100%;
     height: 100%;
+    /* SVG 内部允许触摸操作以派发事件 */
+    touch-action: none;
   }
 }
 
@@ -1784,27 +1875,51 @@ watch(() => route.params.id, () => {
 
 @media (max-width: 767px) {
   .editor-header {
-    padding: 8px 12px;
-    gap: 8px;
+    padding: 8px 10px;
+    gap: 6px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    &::-webkit-scrollbar {
+      display: none;
+    }
   }
 
-  .btn-back .text {
-    display: none;
+  .btn-back {
+    flex: 0 0 auto;
+    .text {
+      display: none;
+    }
   }
 
   .editor-title {
-    max-width: 150px;
+    flex: 0 1 120px;
+    max-width: 120px;
+    min-width: 60px;
   }
 
   .title-input {
-    font-size: 14px;
+    font-size: 13px;
     padding: 6px 8px;
+  }
+
+  .editor-actions {
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    &::-webkit-scrollbar {
+      display: none;
+    }
   }
 
   .btn-tool {
     width: 32px;
     height: 32px;
     font-size: 14px;
+    flex: 0 0 auto;
   }
 
   .btn-action-save span:not(.icon),
@@ -1820,6 +1935,38 @@ watch(() => route.params.id, () => {
   .btn-action-export {
     padding: 6px 8px;
     font-size: 16px;
+    flex: 0 0 auto;
+  }
+
+  .action-divider {
+    margin: 0 2px;
+    height: 20px;
+  }
+
+  /* 移动端搜索栏更紧凑 */
+  .search-bar {
+    top: 8px;
+    left: 8px;
+    padding: 4px 6px;
+    gap: 2px;
+  }
+
+  .search-input {
+    width: 120px;
+    font-size: 12px;
+    padding: 4px 8px;
+  }
+
+  .search-nav-btn {
+    width: 24px;
+    height: 24px;
+    font-size: 10px;
+  }
+
+  /* 移动端 loading 不遮挡工具栏 */
+  .loading-wrap {
+    background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(2px);
   }
 }
 </style>

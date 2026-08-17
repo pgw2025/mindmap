@@ -17,11 +17,16 @@ const emit = defineEmits<{
 
 const localNode = ref<Partial<NodeDto>>({})
 
+/** 移动端：工具栏折叠到只显示操作按钮，点击「更多」展开样式 */
+const mobileExpanded = ref(false)
+
 watch(
   () => props.node,
   (val) => {
     if (val) {
       localNode.value = { ...val }
+      // 切换节点时自动折叠移动端扩展面板
+      mobileExpanded.value = false
     }
   },
   { immediate: true, deep: true }
@@ -165,8 +170,15 @@ function selectEdgeStyle(style: EdgeStyle) {
       </button>
     </div>
 
-    <div class="divider"></div>
+    <div class="divider mobile-only"></div>
 
+    <!-- 移动端折叠切换 -->
+    <button class="mobile-toggle mobile-only" @click="mobileExpanded = !mobileExpanded">
+      {{ mobileExpanded ? '▲ 收起样式' : '▼ 更多样式（颜色/字号/形状/图标/连线）' }}
+    </button>
+
+    <!-- 以下样式区域在移动端可折叠 -->
+    <div class="style-panel" :class="{ 'mobile-collapsed': !mobileExpanded }">
     <!-- 文字颜色 -->
     <div class="toolbar-section">
       <div class="section-title">文字颜色</div>
@@ -282,6 +294,7 @@ function selectEdgeStyle(style: EdgeStyle) {
         </button>
       </div>
     </div>
+    </div><!-- /.style-panel -->
   </div>
 </template>
 
@@ -522,13 +535,67 @@ function selectEdgeStyle(style: EdgeStyle) {
     left: 0;
     right: 0;
     width: 100%;
-    max-height: 50vh;
+    max-height: 60vh;
     border-radius: 12px 12px 0 0;
     box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.12);
+    padding: 12px 12px calc(12px + env(safe-area-inset-bottom, 0px));
   }
 
   .actions {
     justify-content: center;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+
+    .tool-btn {
+      flex: 0 0 auto;
+      min-width: 56px;
+      padding: 6px 8px;
+    }
+  }
+
+  /* 移动端折叠样式面板 */
+  .style-panel.mobile-collapsed {
+    display: none;
+  }
+
+  .mobile-toggle {
+    width: 100%;
+    text-align: center;
+    padding: 8px;
+    background: var(--app-bg, #f5f7fa);
+    border: 1px solid var(--app-border, #e0e0e6);
+    border-radius: 8px;
+    font-size: 12px;
+    color: var(--app-text-secondary, #666);
+    cursor: pointer;
+    margin-bottom: 4px;
+  }
+
+  /* 桌面端隐藏移动端专用元素 */
+  .mobile-only {
+    display: block;
+  }
+
+  .color-grid {
+    grid-template-columns: repeat(6, 1fr);
+  }
+
+  .color-swatch {
+    width: 28px;
+    height: 28px;
+  }
+
+  .icon-grid {
+    grid-template-columns: repeat(6, 1fr);
+  }
+}
+
+/* 桌面端：隐藏 mobile-only 元素 */
+@media (min-width: 768px) {
+  .mobile-only {
+    display: none !important;
   }
 }
 </style>

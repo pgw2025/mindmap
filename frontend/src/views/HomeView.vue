@@ -467,7 +467,8 @@ onMounted(async () => {
 @media (max-width: 767px) {
   .home {
     flex-direction: column;
-    padding: 12px;
+    padding: 10px;
+    gap: 10px;
   }
   .home-sidebar {
     width: 100%;
@@ -475,6 +476,34 @@ onMounted(async () => {
   }
   .grid {
     grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .title {
+    font-size: 18px;
+  }
+  .search-bar {
+    flex-wrap: nowrap;
+    gap: 6px;
+    .n-button {
+      flex: 0 0 auto;
+    }
+  }
+  .map-card {
+    :deep(.n-card__action) {
+      padding: 8px 10px;
+    }
+  }
+  .card-body .meta-row {
+    gap: 8px;
+    font-size: 11px;
+  }
+  .pager {
+    :deep(.n-pagination) {
+      .n-pagination-item {
+        min-width: 32px;
+        height: 32px;
+      }
+    }
   }
 }
 </style>

@@ -295,6 +295,7 @@ onMounted(async () => {
 .app-header {
   height: var(--layout-header-h);
   padding: 0 12px;
+  padding-top: var(--safe-top);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -360,6 +361,23 @@ onMounted(async () => {
 @media (max-width: 767px) {
   .app-sider-desktop {
     display: none;
+  }
+
+  .app-header {
+    padding: 0 8px;
+  }
+
+  .brand {
+    font-size: 16px;
+  }
+
+  .username {
+    display: none;
+  }
+
+  .left,
+  .right {
+    gap: 4px;
   }
 }
 </style>
