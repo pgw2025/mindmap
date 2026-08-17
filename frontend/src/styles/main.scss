@@ -1,0 +1,8 @@
+// 应用主样式入口
+@use 'reset';
+@use 'theme';
+
+#app {
+  height: 100%;
+  width: 100%;
+}

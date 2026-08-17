@@ -1,0 +1,534 @@
+<script setup lang="ts">
+import { ref, computed, watch } from 'vue'
+import type { NodeDto, NodeUpdatePayload, NodeShape, EdgeStyle } from '@/api/nodes'
+
+const props = defineProps<{
+  node: NodeDto | undefined
+}>()
+
+const emit = defineEmits<{
+  (e: 'add-child'): void
+  (e: 'add-sibling'): void
+  (e: 'delete'): void
+  (e: 'update', payload: NodeUpdatePayload): void
+  (e: 'copy'): void
+  (e: 'paste'): void
+}>()
+
+const localNode = ref<Partial<NodeDto>>({})
+
+watch(
+  () => props.node,
+  (val) => {
+    if (val) {
+      localNode.value = { ...val }
+    }
+  },
+  { immediate: true, deep: true }
+)
+
+const isRoot = computed(() => props.node?.parentId == null)
+
+/** 预设颜色 */
+const presetColors = [
+  '#18a058',
+  '#2080f0',
+  '#f0a020',
+  '#d03050',
+  '#7048e8',
+  '#00b894',
+  '#6c5ce7',
+  '#fd79a8',
+  '#2d3436',
+  '#ffffff'
+]
+
+const presetBgColors = [
+  '#18a058',
+  '#2080f0',
+  '#f0a020',
+  '#d03050',
+  '#7048e8',
+  '#00b894',
+  '#6c5ce7',
+  '#fd79a8',
+  '#2d3436',
+  '#ffffff'
+]
+
+const presetFontSizes = [12, 14, 16, 18, 20, 24, 28, 32]
+
+const shapeOptions: { label: string; value: NodeShape }[] = [
+  { label: '矩形', value: 0 },
+  { label: '圆角矩形', value: 1 },
+  { label: '圆形', value: 2 },
+  { label: '椭圆', value: 3 },
+  { label: '菱形', value: 4 },
+  { label: '平行四边形', value: 5 },
+  { label: '下划线', value: 6 }
+]
+
+const edgeStyleOptions: { label: string; value: EdgeStyle }[] = [
+  { label: '实线', value: 0 },
+  { label: '虚线', value: 1 },
+  { label: '点线', value: 2 },
+  { label: '贝塞尔曲线', value: 3 }
+]
+
+const iconOptions = ['📝', '💡', '🎯', '⭐', '🚀', '📌', '📋', '✅', '⚠️', '❌', '🔥', '💎', '🏆', '🎨', '📊', '🔑', '💻', '📱', '🌐', '❤️']
+
+function applyUpdate(field: keyof NodeUpdatePayload, value: unknown) {
+  const payload: NodeUpdatePayload = { [field]: value }
+  emit('update', payload)
+}
+
+function toggleCollapse() {
+  const current = localNode.value.isCollapsed ?? false
+  applyUpdate('isCollapsed', !current)
+}
+
+function selectColor(color: string) {
+  applyUpdate('color', color)
+}
+
+function selectBgColor(color: string) {
+  applyUpdate('backgroundColor', color)
+}
+
+function selectFontSize(size: number) {
+  applyUpdate('fontSize', size)
+}
+
+function selectShape(shape: NodeShape) {
+  applyUpdate('shape', shape)
+}
+
+function selectIcon(icon: string) {
+  const current = localNode.value.icon === icon ? null : icon
+  applyUpdate('icon', current)
+}
+
+function selectEdgeStyle(style: EdgeStyle) {
+  applyUpdate('edgeStyle', style)
+}
+</script>
+
+<template>
+  <div class="node-toolbar">
+    <!-- 操作区 -->
+    <div class="toolbar-section actions">
+      <button class="tool-btn" @click="emit('add-child')" title="添加子节点">
+        <span class="icon">＋</span>
+        <span class="label">子节点</span>
+      </button>
+      <button
+        v-if="!isRoot"
+        class="tool-btn"
+        @click="emit('add-sibling')"
+        title="添加同级节点"
+      >
+        <span class="icon">∥</span>
+        <span class="label">同级</span>
+      </button>
+      <button
+        v-if="!isRoot"
+        class="tool-btn danger"
+        @click="emit('delete')"
+        title="删除节点"
+      >
+        <span class="icon">🗑</span>
+        <span class="label">删除</span>
+      </button>
+      <button
+        class="tool-btn"
+        @click="emit('copy')"
+        title="复制 (Ctrl+C)"
+      >
+        <span class="icon">⧉</span>
+        <span class="label">复制</span>
+      </button>
+      <button
+        class="tool-btn"
+        @click="emit('paste')"
+        title="粘贴 (Ctrl+V)"
+      >
+        <span class="icon">📋</span>
+        <span class="label">粘贴</span>
+      </button>
+      <button
+        class="tool-btn"
+        @click="toggleCollapse"
+        title="折叠/展开"
+      >
+        <span class="icon">{{ localNode.isCollapsed ? '▶' : '▼' }}</span>
+        <span class="label">{{ localNode.isCollapsed ? '展开' : '折叠' }}</span>
+      </button>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- 文字颜色 -->
+    <div class="toolbar-section">
+      <div class="section-title">文字颜色</div>
+      <div class="color-grid">
+        <button
+          v-for="color in presetColors"
+          :key="color"
+          class="color-swatch"
+          :style="{ background: color }"
+          :class="{ active: localNode.color === color }"
+          @click="selectColor(color)"
+        ></button>
+        <button
+          class="color-swatch transparent"
+          :class="{ active: !localNode.color }"
+          @click="selectColor('')"
+          title="清除颜色"
+        >
+          <span>✕</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 背景颜色 -->
+    <div class="toolbar-section">
+      <div class="section-title">背景颜色</div>
+      <div class="color-grid">
+        <button
+          v-for="color in presetBgColors"
+          :key="color"
+          class="color-swatch"
+          :style="{ background: color }"
+          :class="{ active: localNode.backgroundColor === color }"
+          @click="selectBgColor(color)"
+        ></button>
+        <button
+          class="color-swatch transparent"
+          :class="{ active: !localNode.backgroundColor }"
+          @click="selectBgColor('')"
+          title="清除背景"
+        >
+          <span>✕</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- 字号 -->
+    <div class="toolbar-section">
+      <div class="section-title">字号</div>
+      <div class="size-grid">
+        <button
+          v-for="size in presetFontSizes"
+          :key="size"
+          class="size-btn"
+          :class="{ active: localNode.fontSize === size }"
+          @click="selectFontSize(size)"
+        >
+          {{ size }}
+        </button>
+      </div>
+    </div>
+
+    <!-- 形状 -->
+    <div class="toolbar-section">
+      <div class="section-title">形状</div>
+      <div class="shape-grid">
+        <button
+          v-for="shape in shapeOptions"
+          :key="shape.value"
+          class="shape-btn"
+          :class="{ active: localNode.shape === shape.value }"
+          @click="selectShape(shape.value)"
+        >
+          {{ shape.label }}
+        </button>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- 图标 -->
+    <div class="toolbar-section">
+      <div class="section-title">图标</div>
+      <div class="icon-grid">
+        <button
+          v-for="icon in iconOptions"
+          :key="icon"
+          class="icon-btn"
+          :class="{ active: localNode.icon === icon }"
+          @click="selectIcon(icon)"
+        >
+          {{ icon }}
+        </button>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- 连线样式 -->
+    <div class="toolbar-section">
+      <div class="section-title">连线样式</div>
+      <div class="edge-grid">
+        <button
+          v-for="style in edgeStyleOptions"
+          :key="style.value"
+          class="edge-btn"
+          :class="{ active: localNode.edgeStyle === style.value }"
+          @click="selectEdgeStyle(style.value)"
+        >
+          {{ style.label }}
+        </button>
+      </div>
+    </div>
+  </div>
+</template>
+
+<style scoped lang="scss">
+.node-toolbar {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 260px;
+  max-height: calc(100vh - 100px);
+  overflow-y: auto;
+  background: var(--app-card-bg, #fff);
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
+  padding: 16px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.toolbar-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--app-text-secondary, #666);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.actions {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tool-btn {
+  flex: 1;
+  min-width: 60px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 6px;
+  background: var(--app-bg, #f5f7fa);
+  border: 1px solid var(--app-border, #e0e0e6);
+  border-radius: 8px;
+  color: var(--app-text-primary, #333);
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 12px;
+
+  &:hover {
+    background: var(--app-hover-bg, #e8eaed);
+    border-color: var(--app-primary, #18a058);
+  }
+
+  &.danger {
+    &:hover {
+      background: #fff0f0;
+      border-color: #d03050;
+      color: #d03050;
+    }
+  }
+
+  .icon {
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .label {
+    font-size: 10px;
+  }
+}
+
+.divider {
+  height: 1px;
+  background: var(--app-border, #e0e0e6);
+  margin: 4px 0;
+}
+
+.color-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+}
+
+.color-swatch {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 10px;
+
+  &:hover {
+    transform: scale(1.1);
+  }
+
+  &.active {
+    border-color: var(--app-primary, #18a058);
+    box-shadow: 0 0 0 2px rgba(24, 160, 88, 0.3);
+  }
+
+  &.transparent {
+    background: var(--app-bg, #f5f7fa) !important;
+    border: 1px dashed var(--app-border, #ccc);
+    color: var(--app-text-tertiary, #999);
+
+    span {
+      opacity: 0.6;
+    }
+  }
+}
+
+.size-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+
+.size-btn {
+  padding: 6px 4px;
+  background: var(--app-bg, #f5f7fa);
+  border: 1px solid var(--app-border, #e0e0e6);
+  border-radius: 6px;
+  color: var(--app-text-primary, #333);
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s;
+
+  &:hover {
+    background: var(--app-hover-bg, #e8eaed);
+  }
+
+  &.active {
+    background: var(--app-primary, #18a058);
+    color: #fff;
+    border-color: var(--app-primary, #18a058);
+  }
+}
+
+.shape-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+}
+
+.shape-btn {
+  padding: 6px 4px;
+  background: var(--app-bg, #f5f7fa);
+  border: 1px solid var(--app-border, #e0e0e6);
+  border-radius: 6px;
+  color: var(--app-text-primary, #333);
+  cursor: pointer;
+  font-size: 11px;
+  transition: all 0.2s;
+
+  &:hover {
+    background: var(--app-hover-bg, #e8eaed);
+  }
+
+  &.active {
+    background: var(--app-primary, #18a058);
+    color: #fff;
+    border-color: var(--app-primary, #18a058);
+  }
+}
+
+.icon-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 2px;
+}
+
+.icon-btn {
+  padding: 4px;
+  background: var(--app-bg, #f5f7fa);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+
+  &:hover {
+    background: var(--app-hover-bg, #e8eaed);
+    transform: scale(1.2);
+  }
+
+  &.active {
+    background: var(--app-primary, #18a058);
+    border-color: var(--app-primary, #18a058);
+  }
+}
+
+.edge-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+}
+
+.edge-btn {
+  padding: 6px 4px;
+  background: var(--app-bg, #f5f7fa);
+  border: 1px solid var(--app-border, #e0e0e6);
+  border-radius: 6px;
+  color: var(--app-text-primary, #333);
+  cursor: pointer;
+  font-size: 11px;
+  transition: all 0.2s;
+
+  &:hover {
+    background: var(--app-hover-bg, #e8eaed);
+  }
+
+  &.active {
+    background: var(--app-primary, #18a058);
+    color: #fff;
+    border-color: var(--app-primary, #18a058);
+  }
+}
+
+@media (max-width: 767px) {
+  .node-toolbar {
+    position: fixed;
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    max-height: 50vh;
+    border-radius: 12px 12px 0 0;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.12);
+  }
+
+  .actions {
+    justify-content: center;
+  }
+}
+</style>
