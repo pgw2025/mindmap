@@ -279,6 +279,14 @@ export const useNodesStore = defineStore('nodes', () => {
     redoStack.value = []
   }
 
+  function clearAll() {
+    nodes.value = []
+    tree.value = []
+    selectedNodeId.value = null
+    undoStack.value = []
+    redoStack.value = []
+  }
+
   return {
     mindMapId,
     nodes,
@@ -300,6 +308,7 @@ export const useNodesStore = defineStore('nodes', () => {
     undo,
     redo,
     selectNode,
-    reset
+    reset,
+    clearAll
   }
 })
