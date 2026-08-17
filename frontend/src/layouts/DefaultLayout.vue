@@ -262,13 +262,10 @@ onMounted(async () => {
     <!-- 文件夹创建 Modal -->
     <NModal
       v-model:show="folderModalVisible"
-      preset="dialog"
+      preset="card"
       title="新建文件夹"
-      positive-text="创建"
-      negative-text="取消"
       display-directive="if"
-      :positive-button-props="{ loading: folderCreating, disabled: !folderNameInput.trim() }"
-      :on-positive-click="submitCreateFolder"
+      style="max-width: 380px"
     >
       <NInput
         v-model:value="folderNameInput"
@@ -277,6 +274,19 @@ onMounted(async () => {
         :autofocus="true"
         @keyup.enter="submitCreateFolder"
       />
+      <template #footer>
+        <NSpace justify="end">
+          <NButton @click="folderModalVisible = false">取消</NButton>
+          <NButton
+            type="primary"
+            :loading="folderCreating"
+            :disabled="!folderNameInput.trim()"
+            @click="submitCreateFolder"
+          >
+            创建
+          </NButton>
+        </NSpace>
+      </template>
     </NModal>
   </NLayout>
 </template>

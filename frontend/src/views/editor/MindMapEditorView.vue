@@ -3,6 +3,10 @@ import { ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMessage, useDialog, NInput } from 'naive-ui'
 import MindMap from 'simple-mind-map'
+import Search from 'simple-mind-map/src/plugins/Search.js'
+
+// 注册搜索插件
+MindMap.usePlugin(Search)
 import type { NodeDto, NodeCreatePayload, NodeUpdatePayload } from '@/api/nodes'
 import type { MindMapDetail } from '@/api/mindmaps'
 import { fetchMindMap } from '@/api/mindmaps'
@@ -32,6 +36,11 @@ const showToolbar = ref(false)
 
 /** 复制/粘贴剪贴板 */
 const clipboardNode = ref<NodeDto | null>(null)
+
+/** 导图内搜索 */
+const searchKeyword = ref('')
+const searchMatchCount = ref(0)
+const searchCurrentIndex = ref(0)
 
 /** 转换后端节点树为 simple-mind-map 格式 */
 function convertToMindMapData(nodes: NodeDto[]): unknown {
@@ -126,6 +135,13 @@ function initMindMap() {
     dataChangeTimer = setTimeout(() => {
       syncToBackend()
     }, 500)
+  })
+
+  // 监听搜索匹配结果
+  mindMapInstance.on('search_match_node_list_change', (...args: unknown[]) => {
+    const list = args[0]
+    searchMatchCount.value = Array.isArray(list) ? list.length : 0
+    searchCurrentIndex.value = searchMatchCount.value > 0 ? 1 : 0
   })
 }
 
@@ -324,6 +340,42 @@ function handleReset() {
 
 function handleBack() {
   router.push({ name: 'home' })
+}
+
+/** 导图内搜索 */
+function handleSearch() {
+  if (!mindMapInstance?.search) return
+  const text = searchKeyword.value.trim()
+  if (!text) {
+    mindMapInstance.search.endSearch()
+    searchMatchCount.value = 0
+    searchCurrentIndex.value = 0
+    return
+  }
+  mindMapInstance.search.search(text)
+}
+
+function handleSearchNext() {
+  if (!mindMapInstance?.search) return
+  mindMapInstance.search.searchNext()
+  if (searchMatchCount.value > 0) {
+    searchCurrentIndex.value = Math.min(searchCurrentIndex.value + 1, searchMatchCount.value)
+  }
+}
+
+function handleSearchPrev() {
+  if (!mindMapInstance?.search) return
+  mindMapInstance.search.searchPrev()
+  if (searchCurrentIndex.value > 1) {
+    searchCurrentIndex.value--
+  }
+}
+
+function handleSearchClear() {
+  searchKeyword.value = ''
+  mindMapInstance?.search?.endSearch()
+  searchMatchCount.value = 0
+  searchCurrentIndex.value = 0
 }
 
 /** 撤销/重做后刷新画布 */
@@ -543,6 +595,22 @@ watch(() => route.params.id, () => {
 
     <!-- 画布区域 -->
     <main class="editor-main">
+      <!-- 导图内搜索栏 -->
+      <div class="search-bar">
+        <input
+          v-model="searchKeyword"
+          class="search-input"
+          type="text"
+          placeholder="搜索节点..."
+          @keyup.enter="handleSearch"
+        />
+        <button v-if="searchMatchCount > 0" class="search-nav-btn" @click="handleSearchPrev" title="上一个">▲</button>
+        <button v-if="searchMatchCount > 0" class="search-nav-btn" @click="handleSearchNext" title="下一个">▼</button>
+        <button v-if="searchKeyword" class="search-nav-btn" @click="handleSearchClear" title="清除">✕</button>
+        <span v-if="searchMatchCount > 0" class="search-count">
+          {{ searchCurrentIndex }}/{{ searchMatchCount }}
+        </span>
+      </div>
       <div ref="mindMapRef" class="mindmap-canvas"></div>
       <div v-if="loading" class="loading-wrap">
         <div class="spinner"></div>
@@ -677,6 +745,63 @@ watch(() => route.params.id, () => {
   flex: 1;
   position: relative;
   overflow: hidden;
+}
+
+.search-bar {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--app-card-bg, #fff);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  padding: 4px 8px;
+}
+
+.search-input {
+  width: 180px;
+  padding: 6px 10px;
+  border: 1px solid var(--app-border, #e0e0e6);
+  border-radius: 6px;
+  font-size: 13px;
+  background: transparent;
+  color: var(--app-text-primary, #333);
+  outline: none;
+  transition: border-color 0.2s;
+
+  &:focus {
+    border-color: var(--app-primary, #18a058);
+  }
+}
+
+.search-nav-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--app-border, #e0e0e6);
+  border-radius: 6px;
+  color: var(--app-text-primary, #333);
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s;
+
+  &:hover {
+    background: var(--app-hover-bg, #f0f0f0);
+    border-color: var(--app-primary, #18a058);
+  }
+}
+
+.search-count {
+  font-size: 12px;
+  color: var(--app-text-secondary, #666);
+  white-space: nowrap;
+  padding: 0 4px;
 }
 
 .loading-wrap {

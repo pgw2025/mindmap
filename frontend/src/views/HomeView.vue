@@ -28,6 +28,7 @@ import {
 import { useMindMapsStore } from '@/stores/mindmaps'
 import { useTagsStore } from '@/stores/tags'
 import { useFoldersStore } from '@/stores/folders'
+import SidebarView from './home/SidebarView.vue'
 
 const router = useRouter()
 const message = useMessage()
@@ -141,8 +142,11 @@ function formatTime(s: string): string {
 }
 
 onMounted(async () => {
-  if (mapsStore.scope === 'mine' && !tagsStore.loaded) {
-    await tagsStore.load().catch(() => {})
+  if (mapsStore.scope === 'mine') {
+    await Promise.all([
+      tagsStore.load().catch(() => {}),
+      foldersStore.load().catch(() => {})
+    ])
   }
   if (!mapsStore.items.length && !mapsStore.loading) {
     await mapsStore.load().catch(() => {})
@@ -152,6 +156,11 @@ onMounted(async () => {
 
 <template>
   <div class="home">
+    <!-- 侧边栏（仅「我的导图」时显示） -->
+    <SidebarView v-if="mapsStore.scope === 'mine'" class="home-sidebar" />
+
+    <!-- 主内容区 -->
+    <div class="home-content">
     <div class="home-header">
       <div class="title-row">
         <h1 class="title">{{ titleText }}</h1>
@@ -329,14 +338,31 @@ onMounted(async () => {
         </NSpace>
       </template>
     </NModal>
+    </div>
   </div>
 </template>
 
 <style scoped lang="scss">
 .home {
+  display: flex;
   padding: 16px;
-  max-width: 1100px;
+  gap: 16px;
+  max-width: 1400px;
   margin: 0 auto;
+}
+
+.home-sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  background: var(--app-card-bg, #fff);
+  border-radius: 8px;
+  border: 1px solid var(--app-border, #e0e0e6);
+  overflow: hidden;
+}
+
+.home-content {
+  flex: 1;
+  min-width: 0;
 }
 
 .home-header {
@@ -440,7 +466,12 @@ onMounted(async () => {
 
 @media (max-width: 767px) {
   .home {
+    flex-direction: column;
     padding: 12px;
+  }
+  .home-sidebar {
+    width: 100%;
+    max-height: 200px;
   }
   .grid {
     grid-template-columns: 1fr;

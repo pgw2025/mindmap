@@ -1,15 +1,28 @@
+declare module 'simple-mind-map/src/plugins/Search.js' {
+  const Search: { instanceName: string }
+  export default Search
+}
+
 declare module 'simple-mind-map' {
   export default class MindMap {
     static readonly TREE: string
     static readonly MIND: string
     static readonly FISHBONE: string
     static readonly TIMELINE: string
+    static usePlugin(plugin: unknown, opt?: unknown): void
 
     view?: {
       enlarge(): void
       narrow(): void
       reset(): void
       fit(): void
+    }
+
+    search?: {
+      search(text: string, callback?: () => void): void
+      searchNext(callback?: () => void): void
+      searchPrev(callback?: () => void): void
+      endSearch(): void
     }
 
     constructor(opt?: {
