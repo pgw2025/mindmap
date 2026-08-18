@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useMessage, NButton, NInput, NSpin, NResult, NCard, NTag, useDialog } from 'naive-ui'
+import { useMessage, NButton, NInput, NSpin, NResult, NCard, NTag, NModal } from 'naive-ui'
 import MindMap from 'simple-mind-map'
 import Search from 'simple-mind-map/src/plugins/Search.js'
 import { verifyShare, fetchSharedMindMap } from '@/api/shares'
@@ -29,8 +29,10 @@ const edgeStyleMap: Record<number, string> = {
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
-const dialog = useDialog()
 const authStore = useAuthStore()
+
+// 登录提示弹窗
+const loginPromptVisible = ref(false)
 
 const shareToken = computed(() => String(route.params.token || ''))
 
@@ -181,15 +183,7 @@ async function loadMindMapData() {
 async function handleCopyToMine() {
   if (!shareMeta.value?.mindMapId) return
   if (!authStore.isAuthenticated) {
-    dialog.warning({
-      title: '请先登录',
-      content: '需要登录才能另存为副本到你的账户。',
-      positiveText: '去登录',
-      negativeText: '取消',
-      onPositiveClick: () => {
-        router.push({ name: 'login', query: { redirect: route.fullPath } })
-      }
-    })
+    loginPromptVisible.value = true
     return
   }
   copyLoading.value = true
@@ -202,6 +196,10 @@ async function handleCopyToMine() {
   } finally {
     copyLoading.value = false
   }
+}
+
+function goLogin(): void {
+  router.push({ name: 'login', query: { redirect: route.fullPath } })
 }
 
 function zoomIn() { mindMapInstance?.view?.enlarge() }
@@ -279,6 +277,21 @@ onMounted(() => {
       </div>
       <div class="share-canvas" ref="canvasEl"></div>
     </section>
+
+    <!-- 登录提示弹窗 -->
+    <NModal
+      v-model:show="loginPromptVisible"
+      preset="dialog"
+      type="warning"
+      title="请先登录"
+      positive-text="去登录"
+      negative-text="取消"
+      display-directive="if"
+      style="max-width: 420px"
+      @positive-click="goLogin"
+    >
+      需要登录才能另存为副本到你的账户。
+    </NModal>
   </div>
 </template>
 

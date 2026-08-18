@@ -196,6 +196,25 @@ public class MindMapService : IMindMapService
     {
         var map = await _db.MindMaps.FirstOrDefaultAsync(m => m.Id == id && m.OwnerId == userId, ct)
             ?? throw ApiException.NotFound("MindMap", id);
+
+        // 1. 先清空 RootNodeId 引用，否则后续删除根节点时会被
+        //    MindMap.RootNodeId -> Node 的 Restrict FK 阻止。
+        map.RootNodeId = null;
+        await _db.SaveChangesAsync(ct);
+
+        // 2. 解除节点间的父子自引用。
+        //    Node.ParentId -> Node 的自引用 FK 为 Restrict，
+        //    直接批量删除 MySQL 无法按拓扑顺序执行，必须先把 ParentId 置空。
+        await _db.Nodes
+            .Where(n => n.MindMapId == id)
+            .ExecuteUpdateAsync(s => s.SetProperty(n => n.ParentId, (Guid?)null), ct);
+
+        // 3. 批量删除该思维导图下的所有节点。
+        await _db.Nodes
+            .Where(n => n.MindMapId == id)
+            .ExecuteDeleteAsync(ct);
+
+        // 4. 删除思维导图本身（节点外键已清理，MindMap -> Nodes 级联不再触发）。
         _db.MindMaps.Remove(map);
         await _db.SaveChangesAsync(ct);
     }

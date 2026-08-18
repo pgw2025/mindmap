@@ -10,7 +10,6 @@ import {
   NModal,
   NPagination,
   useMessage,
-  useDialog,
   type DataTableColumns
 } from 'naive-ui'
 import { useAdminStore } from '@/stores/admin'
@@ -18,13 +17,17 @@ import * as adminApi from '@/api/admin'
 
 const adminStore = useAdminStore()
 const message = useMessage()
-const dialog = useDialog()
 
 const keyword = ref('')
 const scope = ref<'all' | 'public' | 'takenDown'>('all')
 const page = ref(1)
 const pageSize = ref(20)
 const loading = ref(false)
+
+// 删除导图确认弹窗
+const mapDeleteModalVisible = ref(false)
+const mapDeleteTarget = ref<adminApi.AdminMindMapListItem | null>(null)
+const mapDeleteSubmitting = ref(false)
 
 const scopeOptions = [
   { label: '全部导图', value: 'all' },
@@ -96,21 +99,23 @@ async function restore(row: adminApi.AdminMindMapListItem): Promise<void> {
 }
 
 function confirmDelete(row: adminApi.AdminMindMapListItem): void {
-  dialog.warning({
-    title: '删除导图',
-    content: `确认删除导图「${row.title}」？该操作将级联删除其所有节点、版本、分享与举报记录，且不可恢复。`,
-    positiveText: '确认删除',
-    negativeText: '取消',
-    onPositiveClick: async () => {
-      try {
-        await adminApi.deleteAdminMindMap(row.id)
-        message.success('导图已删除')
-        await load()
-      } catch (e) {
-        message.error((e as Error).message)
-      }
-    }
-  })
+  mapDeleteTarget.value = row
+  mapDeleteModalVisible.value = true
+}
+
+async function submitMapDelete(): Promise<void> {
+  if (!mapDeleteTarget.value) return
+  mapDeleteSubmitting.value = true
+  try {
+    await adminApi.deleteAdminMindMap(mapDeleteTarget.value.id)
+    message.success('导图已删除')
+    mapDeleteModalVisible.value = false
+    await load()
+  } catch (e) {
+    message.error((e as Error).message)
+  } finally {
+    mapDeleteSubmitting.value = false
+  }
 }
 
 const columns = computed<DataTableColumns<adminApi.AdminMindMapListItem>>(() => [
@@ -281,6 +286,25 @@ onMounted(load)
           </NButton>
         </NSpace>
       </template>
+    </NModal>
+
+    <!-- 删除导图确认弹窗 -->
+    <NModal
+      v-model:show="mapDeleteModalVisible"
+      preset="dialog"
+      type="warning"
+      title="删除导图"
+      positive-text="确认删除"
+      negative-text="取消"
+      :positive-button-props="{ type: 'error', loading: mapDeleteSubmitting }"
+      display-directive="if"
+      style="max-width: 460px"
+      @positive-click="submitMapDelete"
+    >
+      <p style="margin:0">
+        确认删除导图「<b>{{ mapDeleteTarget?.title }}</b>」？
+        该操作将级联删除其所有节点、版本、分享与举报记录，且不可恢复。
+      </p>
     </NModal>
   </div>
 </template>

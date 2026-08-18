@@ -1,15 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch, h } from 'vue'
 import {
   NButton,
   NDataTable,
   NInput,
+  NModal,
   NSelect,
   NSpace,
   NTag,
   NPagination,
   useMessage,
-  useDialog,
   type DataTableColumns
 } from 'naive-ui'
 import { useAdminStore } from '@/stores/admin'
@@ -19,13 +19,17 @@ import * as adminApi from '@/api/admin'
 const adminStore = useAdminStore()
 const authStore = useAuthStore()
 const message = useMessage()
-const dialog = useDialog()
 
 const keyword = ref('')
 const scope = ref<'all' | 'active' | 'disabled' | 'admin'>('all')
 const page = ref(1)
 const pageSize = ref(20)
 const loading = ref(false)
+
+// 删除用户确认弹窗
+const userDeleteModalVisible = ref(false)
+const userDeleteTarget = ref<adminApi.AdminUserListItem | null>(null)
+const userDeleteSubmitting = ref(false)
 
 const currentUserId = computed(() => authStore.user?.id ?? '')
 
@@ -85,21 +89,23 @@ async function toggleAdmin(row: adminApi.AdminUserListItem): Promise<void> {
 }
 
 function confirmDelete(row: adminApi.AdminUserListItem): void {
-  dialog.warning({
-    title: '删除用户',
-    content: `确认删除用户「${row.username}」？该操作将级联删除其所有导图、节点、版本、分享与举报记录，且不可恢复。`,
-    positiveText: '确认删除',
-    negativeText: '取消',
-    onPositiveClick: async () => {
-      try {
-        await adminApi.deleteAdminUser(row.id)
-        message.success('用户已删除')
-        await load()
-      } catch (e) {
-        message.error((e as Error).message)
-      }
-    }
-  })
+  userDeleteTarget.value = row
+  userDeleteModalVisible.value = true
+}
+
+async function submitUserDelete(): Promise<void> {
+  if (!userDeleteTarget.value) return
+  userDeleteSubmitting.value = true
+  try {
+    await adminApi.deleteAdminUser(userDeleteTarget.value.id)
+    message.success('用户已删除')
+    userDeleteModalVisible.value = false
+    await load()
+  } catch (e) {
+    message.error((e as Error).message)
+  } finally {
+    userDeleteSubmitting.value = false
+  }
 }
 
 const columns = computed<DataTableColumns<adminApi.AdminUserListItem>>(() => [
@@ -204,8 +210,6 @@ function formatDate(iso: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-import { h } from 'vue'
-
 onMounted(load)
 </script>
 
@@ -256,6 +260,25 @@ onMounted(load)
         @update:page-size="(s) => { pageSize = s; page = 1; load() }"
       />
     </div>
+
+    <!-- 删除用户确认弹窗 -->
+    <NModal
+      v-model:show="userDeleteModalVisible"
+      preset="dialog"
+      type="warning"
+      title="删除用户"
+      positive-text="确认删除"
+      negative-text="取消"
+      :positive-button-props="{ type: 'error', loading: userDeleteSubmitting }"
+      display-directive="if"
+      style="max-width: 460px"
+      @positive-click="submitUserDelete"
+    >
+      <p style="margin:0">
+        确认删除用户「<b>{{ userDeleteTarget?.username }}</b>」？
+        该操作将级联删除其所有导图、节点、版本、分享与举报记录，且不可恢复。
+      </p>
+    </NModal>
   </div>
 </template>
 

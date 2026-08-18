@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, nextTick, watch, reactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useMessage, useDialog, NInput, NDrawer, NDrawerContent, NButton, NPopconfirm, NSpace, NModal, NCard, NEmpty, NSpin, NTag, NDropdown, NCheckbox, NDatePicker, NInputNumber } from 'naive-ui'
+import { useMessage, NInput, NDrawer, NDrawerContent, NButton, NPopconfirm, NSpace, NModal, NCard, NEmpty, NSpin, NTag, NDropdown, NCheckbox, NDatePicker, NInputNumber } from 'naive-ui'
 import MindMap from 'simple-mind-map'
 import Search from 'simple-mind-map/src/plugins/Search.js'
 import Export from 'simple-mind-map/src/plugins/Export.js'
@@ -28,10 +28,16 @@ import RichTextEditor from './RichTextEditor.vue'
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
-const dialog = useDialog()
 const nodesStore = useNodesStore()
 const mapsStore = useMindMapsStore()
 const versionsStore = useVersionsStore()
+
+// 根节点不能删除提示弹窗
+const rootDeleteTipVisible = ref(false)
+// 删除节点确认弹窗
+const nodeDeleteConfirmVisible = ref(false)
+const nodeDeleteTargetTitle = ref('')
+const nodeDeleteSubmitting = ref(false)
 
 const mindMapId = computed(() => route.params.id as string)
 const mapDetail = ref<MindMapDetail | null>(null)
@@ -492,30 +498,29 @@ async function handleDelete() {
   if (!node) return
 
   if (node.parentId == null) {
-    dialog.warning({
-      title: '无法删除',
-      content: '根节点不能删除。你可以清空内容但不能删除中心主题。'
-    })
+    rootDeleteTipVisible.value = true
     return
   }
 
-  dialog.warning({
-    title: '确认删除',
-    content: `删除「${node.title}」及其所有子节点？`,
-    positiveText: '删除',
-    negativeText: '取消',
-    onPositiveClick: async () => {
-      try {
-        await nodesStore.remove(selectedNodeId.value!)
-        selectedNodeId.value = null
-        showToolbar.value = false
-        reloadMindMap()
-        message.success('已删除')
-      } catch (e) {
-        message.error((e as Error).message)
-      }
-    }
-  })
+  nodeDeleteTargetTitle.value = node.title
+  nodeDeleteConfirmVisible.value = true
+}
+
+async function submitNodeDelete(): Promise<void> {
+  if (!selectedNodeId.value) return
+  nodeDeleteSubmitting.value = true
+  try {
+    await nodesStore.remove(selectedNodeId.value)
+    selectedNodeId.value = null
+    showToolbar.value = false
+    reloadMindMap()
+    message.success('已删除')
+    nodeDeleteConfirmVisible.value = false
+  } catch (e) {
+    message.error((e as Error).message)
+  } finally {
+    nodeDeleteSubmitting.value = false
+  }
 }
 
 async function handleUpdateStyle(payload: NodeUpdatePayload) {
@@ -888,12 +893,46 @@ function buildShareUrl(share: ShareDto): string {
 
 async function copyShareUrl(share: ShareDto) {
   const url = buildShareUrl(share)
+  
+  // 1. 优先尝试现代 Clipboard API（仅支持 HTTPS 或 localhost/127.0.0.1）
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(url)
+      shareUrlCopied.value = share.id
+      message.success('分享链接已复制到剪贴板')
+      setTimeout(() => { shareUrlCopied.value = null }, 2000)
+      return // 复制成功，提前退出
+    } catch (err) {
+      console.warn('Clipboard API 复制失败，正在尝试使用降级方案...', err)
+    }
+  }
+
+  // 2. 降级方案：适用于 HTTP 协议、异步接口回调后手势失效等场景
+  const textArea = document.createElement('textarea')
+  textArea.value = url
+  
+  // 隐藏文本域，防止页面滚动或抖动
+  textArea.style.position = 'fixed'
+  textArea.style.top = '-9999px'
+  textArea.style.left = '-9999px'
+  
+  document.body.appendChild(textArea)
+  textArea.focus()
+  textArea.select()
+  
   try {
-    await navigator.clipboard.writeText(url)
-    shareUrlCopied.value = share.id
-    message.success('分享链接已复制到剪贴板')
-    setTimeout(() => { shareUrlCopied.value = null }, 2000)
-  } catch {
+    const successful = document.execCommand('copy')
+    textArea.remove()
+    if (successful) {
+      shareUrlCopied.value = share.id
+      message.success('分享链接已复制到剪贴板')
+      setTimeout(() => { shareUrlCopied.value = null }, 2000)
+    } else {
+      message.error('复制失败，请手动复制')
+    }
+  } catch (err) {
+    console.error('降级复制方案失败:', err)
+    textArea.remove()
     message.error('复制失败，请手动复制')
   }
 }
@@ -1453,6 +1492,36 @@ watch(() => route.params.id, () => {
           </NButton>
         </NSpace>
       </template>
+    </NModal>
+
+    <!-- 根节点不能删除提示 -->
+    <NModal
+      v-model:show="rootDeleteTipVisible"
+      preset="dialog"
+      type="warning"
+      title="无法删除"
+      positive-text="我知道了"
+      :negative-button-props="{ style: { display: 'none' } }"
+      display-directive="if"
+      style="max-width: 420px"
+    >
+      根节点不能删除。你可以清空内容但不能删除中心主题。
+    </NModal>
+
+    <!-- 删除节点确认 -->
+    <NModal
+      v-model:show="nodeDeleteConfirmVisible"
+      preset="dialog"
+      type="warning"
+      title="确认删除"
+      positive-text="删除"
+      negative-text="取消"
+      :positive-button-props="{ type: 'error', loading: nodeDeleteSubmitting }"
+      display-directive="if"
+      style="max-width: 420px"
+      @positive-click="submitNodeDelete"
+    >
+      删除「{{ nodeDeleteTargetTitle }}」及其所有子节点？
     </NModal>
   </div>
 </template>

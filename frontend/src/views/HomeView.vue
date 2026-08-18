@@ -12,8 +12,7 @@ import {
   NSpace,
   NSpin,
   NTag,
-  useMessage,
-  useDialog
+  useMessage
 } from 'naive-ui'
 import {
   AddOutline,
@@ -35,13 +34,18 @@ import SidebarView from './home/SidebarView.vue'
 
 const router = useRouter()
 const message = useMessage()
-const dialog = useDialog()
 const mapsStore = useMindMapsStore()
 const tagsStore = useTagsStore()
 const foldersStore = useFoldersStore()
 const authStore = useAuthStore()
 
 const keywordInput = ref('')
+
+// 删除导图确认弹窗
+const removeModalVisible = ref(false)
+const removeTargetId = ref('')
+const removeTargetTitle = ref('')
+const removeSubmitting = ref(false)
 
 // 新建导图 Modal
 const createModalVisible = ref(false)
@@ -162,20 +166,23 @@ async function onTogglePublic(id: string, isPublic: boolean) {
 }
 
 function onRemove(id: string, title: string) {
-  dialog.warning({
-    title: '确认删除',
-    content: `删除「${title}」？该操作不可恢复。`,
-    positiveText: '删除',
-    negativeText: '取消',
-    onPositiveClick: async () => {
-      try {
-        await mapsStore.remove(id)
-        message.success('已删除')
-      } catch (e) {
-        message.error((e as Error).message)
-      }
-    }
-  })
+  removeTargetId.value = id
+  removeTargetTitle.value = title
+  removeModalVisible.value = true
+}
+
+async function submitRemove(): Promise<void> {
+  if (!removeTargetId.value) return
+  removeSubmitting.value = true
+  try {
+    await mapsStore.remove(removeTargetId.value)
+    message.success('已删除')
+    removeModalVisible.value = false
+  } catch (e) {
+    message.error((e as Error).message)
+  } finally {
+    removeSubmitting.value = false
+  }
 }
 
 function formatTime(s: string): string {
@@ -419,6 +426,22 @@ onMounted(async () => {
           </NButton>
         </NSpace>
       </template>
+    </NModal>
+
+    <!-- 删除导图确认弹窗 -->
+    <NModal
+      v-model:show="removeModalVisible"
+      preset="dialog"
+      type="warning"
+      title="确认删除"
+      positive-text="删除"
+      negative-text="取消"
+      :positive-button-props="{ type: 'error', loading: removeSubmitting }"
+      display-directive="if"
+      style="max-width: 420px"
+      @positive-click="submitRemove"
+    >
+      删除「{{ removeTargetTitle }}」？该操作不可恢复。
     </NModal>
     </div>
   </div>
