@@ -9,6 +9,7 @@ import {
   NInput,
   NModal,
   NPagination,
+  NSelect,
   NSpace,
   NSpin,
   NTag,
@@ -58,6 +59,13 @@ const reportTargetId = ref<string | null>(null)
 const reportTargetTitle = ref('')
 const reportReason = ref('')
 const reportSubmitting = ref(false)
+
+// 移动到文件夹
+const moveModalVisible = ref(false)
+const moveTargetId = ref('')
+const moveTargetTitle = ref('')
+const moveTargetFolderId = ref<string | null>(null)
+const moveSubmitting = ref(false)
 
 function openReportModal(id: string, title: string): void {
   if (!authStore.isAuthenticated) {
@@ -187,6 +195,42 @@ async function submitRemove(): Promise<void> {
 
 function formatTime(s: string): string {
   return new Date(s).toLocaleString('zh-CN', { hour12: false })
+}
+
+const folderOptions = computed<{ label: string; value: string | null }[]>(() => {
+  const options: { label: string; value: string | null }[] = [
+    { label: '根目录（不放入文件夹）', value: null }
+  ]
+  function walk(nodes: typeof foldersStore.tree, depth: number) {
+    for (const n of nodes) {
+      const prefix = ' '.repeat(depth)
+      options.push({ label: `${prefix}📁 ${n.name}`, value: n.id })
+      walk(n.children, depth + 1)
+    }
+  }
+  walk(foldersStore.tree, 0)
+  return options
+})
+
+function openMoveModal(id: string, title: string, currentFolderId: string | null): void {
+  moveTargetId.value = id
+  moveTargetTitle.value = title
+  moveTargetFolderId.value = currentFolderId
+  moveModalVisible.value = true
+}
+
+async function submitMove(): Promise<void> {
+  if (!moveTargetId.value) return
+  moveSubmitting.value = true
+  try {
+    await mapsStore.update(moveTargetId.value, { folderId: moveTargetFolderId.value })
+    message.success('已移动')
+    moveModalVisible.value = false
+  } catch (e) {
+    message.error((e as Error).message)
+  } finally {
+    moveSubmitting.value = false
+  }
 }
 
 onMounted(async () => {
@@ -325,6 +369,14 @@ onMounted(async () => {
                 v-if="mapsStore.scope === 'mine'"
                 text
                 size="small"
+                @click="openMoveModal(map.id, map.title, map.folderId ?? null)"
+              >
+                移动
+              </NButton>
+              <NButton
+                v-if="mapsStore.scope === 'mine'"
+                text
+                size="small"
                 @click="onCopy(map.id)"
               >
                 <template #icon><NIcon><CopyOutline /></NIcon></template>
@@ -423,6 +475,36 @@ onMounted(async () => {
             @click="submitReport"
           >
             提交举报
+          </NButton>
+        </NSpace>
+      </template>
+    </NModal>
+
+    <!-- 移动到文件夹 Modal -->
+    <NModal
+      v-model:show="moveModalVisible"
+      preset="card"
+      title="移动到文件夹"
+      display-directive="if"
+      style="max-width: 420px"
+    >
+      <p class="move-tip">将「{{ moveTargetTitle }}」移动到：</p>
+      <NSelect
+        v-model:value="moveTargetFolderId"
+        :options="folderOptions"
+        placeholder="请选择目标文件夹"
+        style="width: 100%"
+        :loading="foldersStore.loading"
+      />
+      <template #footer>
+        <NSpace justify="end">
+          <NButton @click="moveModalVisible = false">取消</NButton>
+          <NButton
+            type="primary"
+            :loading="moveSubmitting"
+            @click="submitMove"
+          >
+            确认移动
           </NButton>
         </NSpace>
       </template>

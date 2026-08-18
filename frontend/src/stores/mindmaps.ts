@@ -2,6 +2,15 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import * as mapsApi from '@/api/mindmaps'
 import type { MindMapListItem, MindMapListQuery } from '@/api/mindmaps'
+import { useFoldersStore } from './folders'
+
+async function refreshFolders(): Promise<void> {
+  try {
+    await useFoldersStore().load(true)
+  } catch {
+    // 文件夹树刷新失败不影响主流程
+  }
+}
 
 export const useMindMapsStore = defineStore('mindmaps', () => {
   const items = ref<MindMapListItem[]>([])
@@ -78,24 +87,28 @@ export const useMindMapsStore = defineStore('mindmaps', () => {
   async function create(payload: mapsApi.MindMapCreatePayload) {
     const map = await mapsApi.createMindMap(payload)
     await load()
+    await refreshFolders()
     return map
   }
 
   async function update(id: string, payload: mapsApi.MindMapUpdatePayload) {
     const map = await mapsApi.updateMindMap(id, payload)
     await load()
+    if ('folderId' in payload) await refreshFolders()
     return map
   }
 
   async function copy(id: string, newTitle?: string) {
     const map = await mapsApi.copyMindMap(id, newTitle)
     await load()
+    await refreshFolders()
     return map
   }
 
   async function remove(id: string) {
     await mapsApi.deleteMindMap(id)
     await load()
+    await refreshFolders()
   }
 
   async function setTags(id: string, tagIds: string[]) {

@@ -1106,13 +1106,13 @@ watch(() => route.params.id, () => {
         </button>
         <span class="action-divider"></span>
         <button class="btn-action-save" @click="openCreateVersion" title="保存为版本快照">
-          💾 保存版本
+          <span class="btn-icon">💾</span><span class="btn-label">保存版本</span>
         </button>
         <button class="btn-action-history" @click="openVersions" title="查看版本历史">
-          🕘 历史
+          <span class="btn-icon">🕘</span><span class="btn-label">历史</span>
         </button>
         <button class="btn-action-share" @click="openShareDrawer" title="分享此导图">
-          🔗 分享
+          <span class="btn-icon">🔗</span><span class="btn-label">分享</span>
         </button>
         <NDropdown
           trigger="click"
@@ -1120,7 +1120,7 @@ watch(() => route.params.id, () => {
           @select="handleExport"
         >
           <button class="btn-action-export" :class="{ 'is-loading': exporting }" title="导出导图" :disabled="exporting">
-            {{ exporting ? '⏳ 导出中...' : '📤 导出' }}
+            <span class="btn-icon">{{ exporting ? '⏳' : '📤' }}</span><span class="btn-label">{{ exporting ? '导出中...' : '导出' }}</span>
           </button>
         </NDropdown>
         <span class="action-divider"></span>
@@ -1743,8 +1743,10 @@ watch(() => route.params.id, () => {
 }
 
 .btn-action-save,
-.btn-action-history {
-  display: flex;
+.btn-action-history,
+.btn-action-share,
+.btn-action-export {
+  display: inline-flex;
   align-items: center;
   gap: 4px;
   padding: 6px 12px;
@@ -1754,6 +1756,16 @@ watch(() => route.params.id, () => {
   font-size: 13px;
   font-weight: 500;
   transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.btn-icon {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.btn-label {
+  line-height: 1;
 }
 
 .btn-action-save {
@@ -1767,7 +1779,8 @@ watch(() => route.params.id, () => {
 }
 
 .btn-action-history,
-.btn-action-share {
+.btn-action-share,
+.btn-action-export {
   background: #fff;
   color: var(--app-text-primary, #333);
 
@@ -1779,25 +1792,6 @@ watch(() => route.params.id, () => {
 }
 
 .btn-action-export {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 12px;
-  border: 1px solid var(--app-border, #e0e0e6);
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 500;
-  transition: all 0.2s;
-  background: #fff;
-  color: var(--app-text-primary, #333);
-
-  &:hover:not(:disabled):not(.is-loading) {
-    background: var(--app-hover-bg, #f0f0f0);
-    border-color: var(--app-primary, #18a058);
-    color: var(--app-primary, #18a058);
-  }
-
   &:disabled {
     opacity: 0.6;
     cursor: not-allowed;
@@ -2010,57 +2004,51 @@ watch(() => route.params.id, () => {
 
 @media (max-width: 767px) {
   .editor-header {
-    padding: 8px 10px;
-    gap: 6px;
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-    &::-webkit-scrollbar {
-      display: none;
-    }
+    padding: 10px 10px;
+    gap: 8px;
+    flex-wrap: wrap;
+    overflow: visible;
   }
 
   .btn-back {
     flex: 0 0 auto;
+    padding: 8px 10px;
+    font-size: 15px;
     .text {
       display: none;
     }
   }
 
   .editor-title {
-    flex: 0 1 120px;
-    max-width: 120px;
-    min-width: 60px;
+    flex: 1 1 auto;
+    max-width: none;
+    min-width: 0;
   }
 
   .title-input {
-    font-size: 13px;
-    padding: 6px 8px;
+    font-size: 14px;
+    padding: 8px 8px;
+    text-align: left;
   }
 
   .editor-actions {
-    flex: 0 0 auto;
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-    &::-webkit-scrollbar {
-      display: none;
-    }
+    flex: 1 0 100%;
+    flex-wrap: wrap;
+    gap: 6px;
+    overflow: visible;
   }
 
   .btn-tool {
-    width: 32px;
-    height: 32px;
-    font-size: 14px;
+    width: 38px;
+    height: 38px;
+    font-size: 16px;
     flex: 0 0 auto;
   }
 
-  .btn-action-save span:not(.icon),
-  .btn-action-history span:not(.icon),
-  .btn-action-share span:not(.icon),
-  .btn-action-export span:not(.icon) {
+  .btn-action-save .btn-label,
+  .btn-action-history .btn-label,
+  .btn-action-share .btn-label,
+  .btn-action-export .btn-label {
     display: none;
   }
 
@@ -2068,14 +2056,15 @@ watch(() => route.params.id, () => {
   .btn-action-history,
   .btn-action-share,
   .btn-action-export {
-    padding: 6px 8px;
-    font-size: 16px;
+    padding: 8px 12px;
+    font-size: 18px;
+    min-width: 38px;
+    min-height: 38px;
     flex: 0 0 auto;
   }
 
   .action-divider {
-    margin: 0 2px;
-    height: 20px;
+    display: none;
   }
 
   /* 移动端搜索栏更紧凑 */
