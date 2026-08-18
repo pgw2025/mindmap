@@ -3,12 +3,19 @@ import { computed, ref } from 'vue'
 import * as mapsApi from '@/api/mindmaps'
 import type { MindMapListItem, MindMapListQuery } from '@/api/mindmaps'
 import { useFoldersStore } from './folders'
+import { useTagsStore } from './tags'
 
 async function refreshFolders(): Promise<void> {
   try {
     await useFoldersStore().load(true)
   } catch {
-    // 文件夹树刷新失败不影响主流程
+  }
+}
+
+async function refreshTags(): Promise<void> {
+  try {
+    await useTagsStore().load(true)
+  } catch {
   }
 }
 
@@ -114,6 +121,7 @@ export const useMindMapsStore = defineStore('mindmaps', () => {
   async function setTags(id: string, tagIds: string[]) {
     await mapsApi.setMindMapTags(id, tagIds)
     await load()
+    await refreshTags()
   }
 
   function reset() {

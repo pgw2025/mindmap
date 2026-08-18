@@ -67,6 +67,16 @@ const moveTargetTitle = ref('')
 const moveTargetFolderId = ref<string | null>(null)
 const moveSubmitting = ref(false)
 
+// 编辑标签
+const tagsModalVisible = ref(false)
+const tagsTargetId = ref('')
+const tagsTargetTitle = ref('')
+const tagsSelectedIds = ref<string[]>([])
+const tagsSubmitting = ref(false)
+const newTagName = ref('')
+const newTagColor = ref('#18a058')
+const creatingTag = ref(false)
+
 function openReportModal(id: string, title: string): void {
   if (!authStore.isAuthenticated) {
     message.warning('请先登录后再举报')
@@ -233,6 +243,52 @@ async function submitMove(): Promise<void> {
   }
 }
 
+const tagSelectOptions = computed(() =>
+  tagsStore.items.map(t => ({ label: t.name, value: t.id }))
+)
+
+function openTagsModal(id: string, title: string, currentTags: { id: string }[]): void {
+  tagsTargetId.value = id
+  tagsTargetTitle.value = title
+  tagsSelectedIds.value = currentTags.map(t => t.id)
+  newTagName.value = ''
+  newTagColor.value = '#18a058'
+  tagsModalVisible.value = true
+}
+
+async function handleCreateNewTag(): Promise<void> {
+  const name = newTagName.value.trim()
+  if (!name) {
+    message.warning('请输入标签名称')
+    return
+  }
+  creatingTag.value = true
+  try {
+    const tag = await tagsStore.create({ name, color: newTagColor.value })
+    message.success(`标签「${tag.name}」已创建`)
+    newTagName.value = ''
+    tagsSelectedIds.value.push(tag.id)
+  } catch (e) {
+    message.error((e as Error).message)
+  } finally {
+    creatingTag.value = false
+  }
+}
+
+async function submitTags(): Promise<void> {
+  if (!tagsTargetId.value) return
+  tagsSubmitting.value = true
+  try {
+    await mapsStore.setTags(tagsTargetId.value, tagsSelectedIds.value)
+    message.success('标签已更新')
+    tagsModalVisible.value = false
+  } catch (e) {
+    message.error((e as Error).message)
+  } finally {
+    tagsSubmitting.value = false
+  }
+}
+
 onMounted(async () => {
   if (mapsStore.scope === 'mine') {
     await Promise.all([
@@ -377,6 +433,14 @@ onMounted(async () => {
                 v-if="mapsStore.scope === 'mine'"
                 text
                 size="small"
+                @click="openTagsModal(map.id, map.title, map.tags)"
+              >
+                标签
+              </NButton>
+              <NButton
+                v-if="mapsStore.scope === 'mine'"
+                text
+                size="small"
                 @click="onCopy(map.id)"
               >
                 <template #icon><NIcon><CopyOutline /></NIcon></template>
@@ -475,6 +539,53 @@ onMounted(async () => {
             @click="submitReport"
           >
             提交举报
+          </NButton>
+        </NSpace>
+      </template>
+    </NModal>
+
+    <!-- 编辑标签 Modal -->
+    <NModal
+      v-model:show="tagsModalVisible"
+      preset="card"
+      title="编辑标签"
+      display-directive="if"
+      style="max-width: 460px"
+    >
+      <p class="tags-tip">为「{{ tagsTargetTitle }}」选择标签（可多选）：</p>
+      <NSelect
+        v-model:value="tagsSelectedIds"
+        :options="tagSelectOptions"
+        multiple
+        placeholder="选择已有标签"
+        style="width: 100%"
+        :loading="tagsStore.loading"
+      />
+      <div class="tags-create-row">
+        <NInput
+          v-model:value="newTagName"
+          placeholder="新建标签名称"
+          maxlength="20"
+        />
+        <NButton
+          type="primary"
+          size="small"
+          :loading="creatingTag"
+          :disabled="!newTagName.trim()"
+          @click="handleCreateNewTag"
+        >
+          + 新建
+        </NButton>
+      </div>
+      <template #footer>
+        <NSpace justify="end">
+          <NButton @click="tagsModalVisible = false">取消</NButton>
+          <NButton
+            type="primary"
+            :loading="tagsSubmitting"
+            @click="submitTags"
+          >
+            确认
           </NButton>
         </NSpace>
       </template>
@@ -643,6 +754,8 @@ onMounted(async () => {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+  max-height: 48px;
+  overflow-y: auto;
 }
 
 .pager {
@@ -655,6 +768,18 @@ onMounted(async () => {
   margin: 0 0 8px;
   font-size: 13px;
   color: var(--app-text-secondary);
+}
+
+.tags-tip {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--app-text-secondary);
+}
+
+.tags-create-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
 }
 
 @media (max-width: 767px) {
