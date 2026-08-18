@@ -26,6 +26,8 @@ import { useVersionsStore } from '@/stores/versions'
 import { useAuthStore } from '@/stores/auth'
 import NodeToolbar from './NodeToolbar.vue'
 import RichTextEditor from './RichTextEditor.vue'
+import { THEMES, getThemeConfig, getThemeIdOrDefault } from '@/themes/presets'
+import { updateMindMap } from '@/api/mindmaps'
 
 const route = useRoute()
 const router = useRouter()
@@ -294,7 +296,7 @@ function initMindMap() {
     return
   }
 
-  console.log('[MindMap] 初始化，容器 =', mindMapRef.value)
+  const themeId = getThemeIdOrDefault(mapDetail.value?.theme)
 
   mindMapInstance = new MindMap({
     el: mindMapRef.value,
@@ -302,7 +304,8 @@ function initMindMap() {
       data: { text: '中心主题' },
       children: []
     },
-    theme: 'classic',
+    theme: 'default',
+    themeConfig: getThemeConfig(themeId),
     layout: 'mindMap',
     draggable: !readonly.value,
     contextMenu: !readonly.value,
@@ -698,6 +701,30 @@ function handleZoomOut() {
 
 function handleReset() {
   mindMapInstance?.view?.reset()
+}
+
+const currentThemeId = computed(() => getThemeIdOrDefault(mapDetail.value?.theme))
+
+const themeDropdownOptions = computed(() =>
+  THEMES.map((t) => ({
+    key: t.id,
+    label: t.name,
+    meta: t.description
+  }))
+)
+
+async function handleThemeSelect(key: string) {
+  if (!mindMapInstance || !mapDetail.value) return
+  if (key === currentThemeId.value) return
+  mindMapInstance.setThemeConfig(getThemeConfig(key))
+  if (!readonly.value) {
+    try {
+      await updateMindMap(mindMapId.value, { theme: key })
+      mapDetail.value.theme = key
+    } catch (e) {
+      message.error('主题保存失败：' + (e as Error).message)
+    }
+  }
 }
 
 function handleBack() {
@@ -1281,6 +1308,18 @@ watch(() => route.params.id, () => {
         >
           <button class="btn-action-export" :class="{ 'is-loading': exporting }" title="导出导图" :disabled="exporting">
             <span class="btn-icon">{{ exporting ? '⏳' : '📤' }}</span><span class="btn-label">{{ exporting ? '导出中...' : '导出' }}</span>
+          </button>
+        </NDropdown>
+        <NDropdown
+          trigger="click"
+          :options="themeDropdownOptions"
+          :value="currentThemeId"
+          @select="handleThemeSelect"
+        >
+          <button class="btn-action-theme" title="切换主题">
+            <span class="theme-swatch" :style="{ background: THEMES.find(t => t.id === currentThemeId)?.swatch.rootFill }"></span>
+            <span class="btn-icon">🎨</span>
+            <span class="btn-label">{{ THEMES.find(t => t.id === currentThemeId)?.name ?? '主题' }}</span>
           </button>
         </NDropdown>
         <span class="action-divider"></span>
@@ -1914,7 +1953,8 @@ watch(() => route.params.id, () => {
 .btn-action-save,
 .btn-action-history,
 .btn-action-share,
-.btn-action-export {
+.btn-action-export,
+.btn-action-theme {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -1949,7 +1989,8 @@ watch(() => route.params.id, () => {
 
 .btn-action-history,
 .btn-action-share,
-.btn-action-export {
+.btn-action-export,
+.btn-action-theme {
   background: #fff;
   color: var(--app-text-primary, #333);
 
@@ -1958,6 +1999,15 @@ watch(() => route.params.id, () => {
     border-color: var(--app-primary, #18a058);
     color: var(--app-primary, #18a058);
   }
+}
+
+.theme-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid rgba(0, 0, 0, 0.15);
+  flex-shrink: 0;
 }
 
 .btn-action-export {
@@ -2217,14 +2267,16 @@ watch(() => route.params.id, () => {
   .btn-action-save .btn-label,
   .btn-action-history .btn-label,
   .btn-action-share .btn-label,
-  .btn-action-export .btn-label {
+  .btn-action-export .btn-label,
+  .btn-action-theme .btn-label {
     display: none;
   }
 
   .btn-action-save,
   .btn-action-history,
   .btn-action-share,
-  .btn-action-export {
+  .btn-action-export,
+  .btn-action-theme {
     padding: 8px 12px;
     font-size: 18px;
     min-width: 38px;

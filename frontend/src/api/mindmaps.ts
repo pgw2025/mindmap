@@ -43,6 +43,7 @@ export interface MindMapCreatePayload {
   folderId?: string | null
   isPublic?: boolean
   defaultLayout?: MindMapLayout
+  theme?: string
   tagIds?: string[]
 }
 
@@ -52,6 +53,7 @@ export interface MindMapUpdatePayload {
   folderId?: string | null
   isPublic?: boolean
   defaultLayout?: MindMapLayout
+  theme?: string
 }
 
 export async function fetchMindMaps(

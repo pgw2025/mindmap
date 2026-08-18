@@ -17,6 +17,9 @@ public class MindMapCreateRequest
 
     public MindMapLayout DefaultLayout { get; set; } = MindMapLayout.Left;
 
+    [StringLength(64)]
+    public string? Theme { get; set; }
+
     public List<Guid> TagIds { get; set; } = new();
 }
 
@@ -33,6 +36,9 @@ public class MindMapUpdateRequest
     public bool? IsPublic { get; set; }
 
     public MindMapLayout? DefaultLayout { get; set; }
+
+    [StringLength(64)]
+    public string? Theme { get; set; }
 }
 
 public class MindMapListQuery

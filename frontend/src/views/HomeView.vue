@@ -31,6 +31,7 @@ import { useTagsStore } from '@/stores/tags'
 import { useFoldersStore } from '@/stores/folders'
 import { useAuthStore } from '@/stores/auth'
 import { reportMindMap } from '@/api/admin'
+import { THEMES } from '@/themes/presets'
 import SidebarView from './home/SidebarView.vue'
 
 const router = useRouter()
@@ -51,6 +52,7 @@ const removeSubmitting = ref(false)
 // 新建导图 Modal
 const createModalVisible = ref(false)
 const createTitleInput = ref('')
+const createThemeId = ref('classic')
 const createSubmitting = ref(false)
 
 // 举报 Modal
@@ -134,6 +136,7 @@ async function onSearch() {
 
 function openCreateModal() {
   createTitleInput.value = ''
+  createThemeId.value = 'classic'
   createModalVisible.value = true
 }
 
@@ -148,7 +151,8 @@ async function submitCreate(): Promise<boolean> {
     await mapsStore.create({
       title,
       folderId: mapsStore.folderId,
-      isPublic: false
+      isPublic: false,
+      theme: createThemeId.value
     })
     message.success('已创建')
     createModalVisible.value = false
@@ -494,15 +498,39 @@ onMounted(async () => {
       preset="card"
       title="新建思维导图"
       display-directive="if"
-      style="max-width: 420px"
+      style="max-width: 520px"
     >
-      <NInput
-        v-model:value="createTitleInput"
-        placeholder="请输入导图标题"
-        maxlength="128"
-        :autofocus="true"
-        @keyup.enter="submitCreate"
-      />
+      <div class="create-form">
+        <div class="create-field">
+          <label class="create-label">标题</label>
+          <NInput
+            v-model:value="createTitleInput"
+            placeholder="请输入导图标题"
+            maxlength="128"
+            :autofocus="true"
+            @keyup.enter="submitCreate"
+          />
+        </div>
+        <div class="create-field">
+          <label class="create-label">选择主题</label>
+          <div class="theme-grid">
+            <div
+              v-for="t in THEMES"
+              :key="t.id"
+              class="theme-card"
+              :class="{ 'is-active': createThemeId === t.id }"
+              @click="createThemeId = t.id"
+            >
+              <div class="theme-preview" :style="{ background: t.swatch.bg }">
+                <div class="preview-root" :style="{ background: t.swatch.rootFill, borderColor: t.swatch.rootFill }"></div>
+                <div class="preview-line" :style="{ background: t.swatch.lineColor }"></div>
+                <div class="preview-second" :style="{ background: t.swatch.secondFill, borderColor: t.swatch.lineColor }"></div>
+              </div>
+              <div class="theme-name">{{ t.name }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
       <template #footer>
         <NSpace justify="end">
           <NButton @click="createModalVisible = false">取消</NButton>
@@ -836,5 +864,86 @@ onMounted(async () => {
       }
     }
   }
+}
+
+.create-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.create-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.create-label {
+  font-size: 13px;
+  color: var(--app-text-secondary, #666);
+  font-weight: 500;
+}
+
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.theme-card {
+  cursor: pointer;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  padding: 6px;
+  transition: all 0.2s;
+
+  &:hover {
+    border-color: var(--app-primary, #18a058);
+  }
+
+  &.is-active {
+    border-color: var(--app-primary, #18a058);
+    background: rgba(24, 160, 88, 0.06);
+  }
+}
+
+.theme-preview {
+  height: 60px;
+  border-radius: 6px;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  gap: 6px;
+}
+
+.preview-root {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: 1px solid;
+  flex-shrink: 0;
+}
+
+.preview-line {
+  flex: 1;
+  height: 2px;
+  border-radius: 1px;
+}
+
+.preview-second {
+  width: 24px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid;
+  flex-shrink: 0;
+}
+
+.theme-name {
+  text-align: center;
+  font-size: 12px;
+  color: var(--app-text-primary, #333);
+  margin-top: 6px;
 }
 </style>

@@ -142,6 +142,7 @@ public class MindMapService : IMindMapService
             Description = req.Description,
             IsPublic = req.IsPublic,
             DefaultLayout = req.DefaultLayout,
+            Theme = req.Theme,
             NodeCount = 0,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
@@ -169,6 +170,7 @@ public class MindMapService : IMindMapService
         if (req.Description is not null) map.Description = req.Description;
         if (req.IsPublic.HasValue) map.IsPublic = req.IsPublic.Value;
         if (req.DefaultLayout.HasValue) map.DefaultLayout = req.DefaultLayout.Value;
+        if (req.Theme is not null) map.Theme = req.Theme;
 
         if (req.FolderId.HasValue)
         {
