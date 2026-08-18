@@ -40,6 +40,7 @@ const nodeDeleteTargetTitle = ref('')
 const nodeDeleteSubmitting = ref(false)
 
 const mindMapId = computed(() => route.params.id as string)
+const readonly = computed(() => route.name === 'mindmap-preview')
 const mapDetail = ref<MindMapDetail | null>(null)
 const loading = ref(true)
 const mindMapRef = ref<HTMLDivElement | null>(null)
@@ -291,9 +292,9 @@ function initMindMap() {
     },
     theme: 'classic',
     layout: MindMap.TREE,
-    draggable: true,
-    contextMenu: true,
-    toolBar: true,
+    draggable: !readonly.value,
+    contextMenu: !readonly.value,
+    toolBar: !readonly.value,
     nodeLineDash: false,
     enableFreeDrag: true,
     scrollbarStyle: 'thin',
@@ -1011,6 +1012,7 @@ function handleKeydown(e: KeyboardEvent) {
     selectedNodeId.value = null
     showToolbar.value = false
   }
+  if (readonly.value) return
   // Ctrl+Z 撤销
   if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
     e.preventDefault()
@@ -1057,57 +1059,61 @@ watch(() => route.params.id, () => {
 
       <div class="editor-title" v-if="mapDetail">
         <NInput
+          v-if="!readonly"
           v-model:value="mapDetail.title"
           class="title-input"
           @blur="handleTitleBlur"
         />
+        <span v-else class="title-text">{{ mapDetail.title }}</span>
       </div>
 
       <div class="editor-actions">
-        <button
-          class="btn-tool"
-          :disabled="!nodesStore.canUndo"
-          @click="handleUndo"
-          title="撤销 (Ctrl+Z)"
-        >
-          ↶
-        </button>
-        <button
-          class="btn-tool"
-          :disabled="!nodesStore.canRedo"
-          @click="handleRedo"
-          title="重做 (Ctrl+Y)"
-        >
-          ↷
-        </button>
-        <button
-          class="btn-tool"
-          :disabled="!selectedNodeId"
-          @click="handleCopy"
-          title="复制 (Ctrl+C)"
-        >
-          ⧉
-        </button>
-        <button
-          class="btn-tool"
-          :disabled="!clipboardNode"
-          @click="handlePaste"
-          title="粘贴 (Ctrl+V)"
-        >
-          📋
-        </button>
-        <button
-          class="btn-tool"
-          :disabled="!selectedNodeId"
-          @click="openContentEditor"
-          title="编辑节点内容"
-        >
-          📝
-        </button>
-        <span class="action-divider"></span>
-        <button class="btn-action-save" @click="openCreateVersion" title="保存为版本快照">
-          <span class="btn-icon">💾</span><span class="btn-label">保存版本</span>
-        </button>
+        <template v-if="!readonly">
+          <button
+            class="btn-tool"
+            :disabled="!nodesStore.canUndo"
+            @click="handleUndo"
+            title="撤销 (Ctrl+Z)"
+          >
+            ↶
+          </button>
+          <button
+            class="btn-tool"
+            :disabled="!nodesStore.canRedo"
+            @click="handleRedo"
+            title="重做 (Ctrl+Y)"
+          >
+            ↷
+          </button>
+          <button
+            class="btn-tool"
+            :disabled="!selectedNodeId"
+            @click="handleCopy"
+            title="复制 (Ctrl+C)"
+          >
+            ⧉
+          </button>
+          <button
+            class="btn-tool"
+            :disabled="!clipboardNode"
+            @click="handlePaste"
+            title="粘贴 (Ctrl+V)"
+          >
+            📋
+          </button>
+          <button
+            class="btn-tool"
+            :disabled="!selectedNodeId"
+            @click="openContentEditor"
+            title="编辑节点内容"
+          >
+            📝
+          </button>
+          <span class="action-divider"></span>
+          <button class="btn-action-save" @click="openCreateVersion" title="保存为版本快照">
+            <span class="btn-icon">💾</span><span class="btn-label">保存版本</span>
+          </button>
+        </template>
         <button class="btn-action-history" @click="openVersions" title="查看版本历史">
           <span class="btn-icon">🕘</span><span class="btn-label">历史</span>
         </button>
@@ -1575,6 +1581,15 @@ watch(() => route.params.id, () => {
 .editor-title {
   flex: 1;
   max-width: 400px;
+}
+
+.title-text {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--app-text-primary, #333);
+  text-align: center;
+  display: block;
+  padding: 6px 12px;
 }
 
 .title-input {

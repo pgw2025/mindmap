@@ -174,6 +174,10 @@ function onEdit(id: string) {
   router.push({ name: 'mindmap-edit', params: { id } })
 }
 
+function onCardClick(id: string) {
+  router.push({ name: 'mindmap-preview', params: { id } })
+}
+
 async function onTogglePublic(id: string, isPublic: boolean) {
   try {
     await mapsStore.update(id, { isPublic: !isPublic })
@@ -360,10 +364,11 @@ onMounted(async () => {
         <NCard
           v-for="map in mapsStore.items"
           :key="map.id"
-          class="map-card"
+          class="map-card map-card-clickable"
           :title="map.title"
           size="small"
           hoverable
+          @click="onCardClick(map.id)"
         >
           <template #header-extra>
             <NIcon v-if="map.isPublic" size="14" color="#18a058">
@@ -408,7 +413,7 @@ onMounted(async () => {
                 text
                 size="small"
                 type="primary"
-                @click="onEdit(map.id)"
+                @click.stop="onEdit(map.id)"
               >
                 <template #icon><NIcon><CreateOutline /></NIcon></template>
                 编辑
@@ -417,7 +422,7 @@ onMounted(async () => {
                 v-if="mapsStore.scope === 'mine'"
                 text
                 size="small"
-                @click="onTogglePublic(map.id, map.isPublic)"
+                @click.stop="onTogglePublic(map.id, map.isPublic)"
               >
                 {{ map.isPublic ? '设私有' : '设公开' }}
               </NButton>
@@ -425,7 +430,7 @@ onMounted(async () => {
                 v-if="mapsStore.scope === 'mine'"
                 text
                 size="small"
-                @click="openMoveModal(map.id, map.title, map.folderId ?? null)"
+                @click.stop="openMoveModal(map.id, map.title, map.folderId ?? null)"
               >
                 移动
               </NButton>
@@ -433,7 +438,7 @@ onMounted(async () => {
                 v-if="mapsStore.scope === 'mine'"
                 text
                 size="small"
-                @click="openTagsModal(map.id, map.title, map.tags)"
+                @click.stop="openTagsModal(map.id, map.title, map.tags)"
               >
                 标签
               </NButton>
@@ -441,7 +446,7 @@ onMounted(async () => {
                 v-if="mapsStore.scope === 'mine'"
                 text
                 size="small"
-                @click="onCopy(map.id)"
+                @click.stop="onCopy(map.id)"
               >
                 <template #icon><NIcon><CopyOutline /></NIcon></template>
                 复制
@@ -451,7 +456,7 @@ onMounted(async () => {
                 text
                 size="small"
                 type="error"
-                @click="onRemove(map.id, map.title)"
+                @click.stop="onRemove(map.id, map.title)"
               >
                 <template #icon><NIcon><TrashOutline /></NIcon></template>
                 删除
@@ -461,7 +466,7 @@ onMounted(async () => {
                 text
                 size="small"
                 type="warning"
-                @click="openReportModal(map.id, map.title)"
+                @click.stop="openReportModal(map.id, map.title)"
               >
                 <template #icon><NIcon><FlagOutline /></NIcon></template>
                 举报
@@ -708,6 +713,14 @@ onMounted(async () => {
 .map-card {
   background: var(--app-card-bg);
   border-radius: 8px;
+}
+
+.map-card-clickable {
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.map-card-clickable:hover {
+  transform: translateY(-2px);
 }
 
 .card-body {

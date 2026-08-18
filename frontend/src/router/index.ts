@@ -64,6 +64,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '编辑导图' }
   },
   {
+    path: '/mindmaps/:id/preview',
+    name: 'mindmap-preview',
+    component: () => import('@/views/editor/MindMapEditorView.vue'),
+    meta: { title: '预览导图' }
+  },
+  {
     path: '/share/:token',
     name: 'share-view',
     component: () => import('@/views/ShareView.vue'),
