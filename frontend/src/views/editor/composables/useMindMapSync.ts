@@ -1,6 +1,6 @@
 import { ref, type ComputedRef } from 'vue'
 import type MindMap from 'simple-mind-map'
-import type { NodeDto, NodeUpdatePayload } from '@/api/nodes'
+import type { NodeDto, NodeUpdatePayload, NodeBatchItem } from '@/api/nodes'
 import { useNodesStore } from '@/stores/nodes'
 
 type NodesStore = ReturnType<typeof useNodesStore>
@@ -13,7 +13,6 @@ const shapeMap: Record<number, string> = {
   3: 'ellipse',
   4: 'diamond',
   5: 'parallelogram'
-  // 6=Underline: simple-mind-map 无对应形状，默认 rectangle
 }
 
 /** 后端 EdgeStyle 数字 → simple-mind-map lineDasharray */
@@ -21,26 +20,34 @@ const edgeStyleMap: Record<number, string> = {
   0: 'none',
   1: '6,4',
   2: '2,2',
-  3: 'none' // Curve 通过布局控制，虚线同实线
+  3: 'none'
 }
 
-interface TreeDataNode {
-  id?: string
-  data?: { text?: string; expand?: boolean }
-  children?: TreeDataNode[]
+/** ============================================================
+ *  data_change_detail 事件结构（来自 simple-mind-map Command.js）
+ *  ============================================================ */
+interface DetailNode {
+  isRoot?: boolean
+  data: Record<string, unknown> & {
+    uid: string
+    text?: string
+    expand?: boolean
+    id?: string
+    backendId?: string
+    dir?: string
+  }
+  children: DetailNode[]
 }
 
-interface FlatNode {
-  id?: string
-  parentId: string | null
-  text: string
-  isCollapsed: boolean
-  sortOrder: number
+interface DiffItem {
+  action: 'create' | 'update' | 'delete'
+  data: DetailNode
+  oldData?: DetailNode
 }
 
-/**
- * 思维导图数据同步：负责 simple-mind-map 数据树与后端节点树的相互转换与同步
- */
+/** ============================================================
+ *  增量同步 composable
+ *  ============================================================ */
 export function useMindMapSync(opts: {
   getMindMapInstance: () => MindMap | null
   nodesStore: NodesStore
@@ -55,10 +62,155 @@ export function useMindMapSync(opts: {
   let lastMouseClientX = 0
   let lastMouseClientY = 0
 
-  /** 标记刚发生过拖拽，需要在 render_end 后兜底同步 */
-  let pendingDragSync = false
+  /** ============================================================
+   *  ID 映射：simple-mind-map 内部 uid → 后端数据库 ID
+   *  这是增量同步最核心的状态
+   *  ============================================================ */
+  const uidToBackendId = new Map<string, string>()
 
-  /** 全局鼠标位置监听（供 handleDragEnd 判定方向用） */
+  /**
+   * 注册一个已存在的 ID 映射（初始加载后端数据时调用）
+   */
+  function registerIdMapping(uid: string, backendId: string) {
+    if (uid && backendId) {
+      uidToBackendId.set(uid, backendId)
+    }
+  }
+
+  /**
+   * 根据 uid 获取后端 ID（找不到返回 null）
+   */
+  function getBackendId(uid: string): string | null {
+    return uidToBackendId.get(uid) ?? null
+  }
+
+  /**
+   * 写入后端 ID 到 simple-mind-map 实际渲染节点
+   * 同时写入：
+   *   1. nodeData.id = backendId           ← 供 flatten 兼容使用
+   *   2. nodeData.data.backendId = backendId ← 存在 data 内部，随数据序列化/拷贝保留
+   *   3. uidToBackendId.set(uid, backendId)
+   */
+  function writeBackendIdToNode(uid: string, backendId: string) {
+    const inst = getMindMapInstance()
+    const root = inst?.renderer.root
+    if (!root) return
+    const walk = (node: any) => {
+      if (node.getData?.('uid') === uid) {
+        // simple-mind-map 渲染节点：通过 setData 修改 nodeData.data
+        node.setData({ backendId, id: backendId })
+        // 同时修改渲染节点本身的 id 属性（某些情况下 nodeData.id 直接映射 node.id）
+        if (node.nodeData) {
+          node.nodeData.id = backendId
+        }
+        return true
+      }
+      if (node.children) {
+        for (const c of node.children) {
+          if (walk(c)) return true
+        }
+      }
+      return false
+    }
+    walk(root)
+    // 注册映射
+    uidToBackendId.set(uid, backendId)
+  }
+
+  /**
+   * 写入后端 ID 到一个纯数据节点（data_change_detail 里的 DetailNode 树）
+   * 保证后续 diff 时数据中已经带上 backendId
+   */
+  function writeBackendIdToDetailNode(node: DetailNode, backendId: string) {
+    node.data.id = backendId
+    node.data.backendId = backendId
+  }
+
+  /** ============================================================
+   *  并发控制：
+   *    - 结构性操作（create/move/remove/reorder）：串行 Promise 队列
+   *    - 文本修改：每个节点独立的 debounce
+   *    - 展开/折叠：每个节点独立的 debounce
+   *    - 新建中的节点：pendingCreates 保存 create Promise，供 update 等待
+   *  ============================================================ */
+  let opQueue: Promise<void> = Promise.resolve()
+
+  function enqueueStructuralOp(fn: () => Promise<void>): Promise<void> {
+    opQueue = opQueue
+      .catch(() => {})
+      .then(async () => {
+        await fn()
+      })
+    return opQueue
+  }
+
+  /** 正在 create 中的节点：uid → Promise<backendId>
+   *  用于：创建节点后用户立即修改文字时，update 先 await 这个 Promise 再执行。 */
+  const pendingCreates = new Map<string, Promise<string>>()
+
+  /**
+   * 获取节点 backendId：
+   *   1. 先从 uidToBackendId 取（立即命中的直接返回）
+   *   2. 如果没有，看 pendingCreates 中是否有 create 在飞 → await 它，返回 backendId
+   *   3. 都没有返回 null（非关键路径调用方自行处理）
+   */
+  async function getBackendIdOrWait(uid: string): Promise<string | null> {
+    const direct = getBackendId(uid)
+    if (direct) return direct
+    const pending = pendingCreates.get(uid)
+    if (pending) {
+      try {
+        return await pending
+      } catch {
+        return null
+      }
+    }
+    return null
+  }
+
+  /** 节点级文本 debounce 定时器（key = backendId，保证 data_change_detail 和 node_text_edit_change 共用同一把锁） */
+  const textDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  /** 节点级折叠 debounce 定时器（key = backendId） */
+  const collapseDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+  function clearPerNodeTimers(uid: string, backendId?: string | null) {
+    // 清除 uid → backendId 对应的 timer（可能只知道其中一个）
+    const bid = backendId ?? getBackendId(uid)
+    if (bid) {
+      const t = textDebounceTimers.get(bid)
+      if (t) clearTimeout(t)
+      textDebounceTimers.delete(bid)
+      const c = collapseDebounceTimers.get(bid)
+      if (c) clearTimeout(c)
+      collapseDebounceTimers.delete(bid)
+    }
+  }
+
+  /** ============================================================
+   *  工具：在 DetailNode 树中构建 uid → parentUid + sortOrder 的映射
+   *  ============================================================ */
+  function buildRelationalMaps(root: DetailNode): {
+    parentOf: Map<string, string | null>
+    sortOrderOf: Map<string, number>
+    nodesByUid: Map<string, DetailNode>
+  } {
+    const parentOf = new Map<string, string | null>()
+    const sortOrderOf = new Map<string, number>()
+    const nodesByUid = new Map<string, DetailNode>()
+    const walk = (node: DetailNode, parentUid: string | null, idx: number) => {
+      const uid = node.data.uid
+      parentOf.set(uid, parentUid)
+      sortOrderOf.set(uid, idx)
+      nodesByUid.set(uid, node)
+      node.children.forEach((child, i) => walk(child, uid, i))
+    }
+    walk(root, null, 0)
+    return { parentOf, sortOrderOf, nodesByUid }
+  }
+
+  /** ============================================================
+   *  全局鼠标位置追踪
+   *  ============================================================ */
   function bindGlobalMouseTracker() {
     document.addEventListener('mousemove', (e) => {
       lastMouseClientX = e.clientX
@@ -66,18 +218,37 @@ export function useMindMapSync(opts: {
     })
   }
 
-  /** 转换后端节点树为 simple-mind-map 格式 */
+  /** ============================================================
+   *  后端节点 → simple-mind-map 数据
+   *
+   *  【关键修复】：给每个节点的 data.uid 直接设置为后端 ID。
+   *
+   *  原因：simple-mind-map 的 handleData() → createUidForAppointNodes()
+   *  会对没有 data.uid 的节点自动生成随机 uid。
+   *  如果我们不设置 uid，每次 reloadMindMap() 后所有节点都会获得新的随机 uid，
+   *  导致 uidToBackendId 映射全部失效（uid 变了，但映射还没重建）。
+   *  在 scanAndRegisterIdMappingsAfterSetData() 跑完之前（150ms 窗口），
+   *  任何 getBackendId() 都返回 null → parentId = null。
+   *
+   *  修复后：uid === backendId === 后端 GUID，三者恒等，映射永不需要重建。
+   *  ============================================================ */
   function convertToMindMapData(nodes: NodeDto[]): unknown {
     if (nodes.length === 0) return null
 
-    const nodeMap = new Map<string, unknown>()
+    // 清空旧映射（下面会立即重新注册，不存在空窗口）
+    uidToBackendId.clear()
+
+    const nodeMap = new Map<string, Record<string, unknown>>()
     const roots: unknown[] = []
 
-    // 1. 第一遍循环：创建节点，统一将 id 转为 String 类型存入 Map
+    // 1. 创建节点，uid / id / backendId 三者统一为后端 ID
     for (const n of nodes) {
       const data: Record<string, unknown> = {
         text: n.icon ? `${n.icon} ${n.title}` : n.title,
-        expand: !n.isCollapsed
+        expand: !n.isCollapsed,
+        uid: n.id,         // ★ 关键：用后端 ID 作为 uid，阻止 simple-mind-map 重新生成
+        id: n.id,          // simple-mind-map 节点 id
+        backendId: n.id    // 稳定的后端 ID 标记（会随拷贝/序列化保留）
       }
       if (n.color) data.color = n.color
       if (n.fontSize) data.fontSize = n.fontSize
@@ -96,18 +267,16 @@ export function useMindMapSync(opts: {
         data,
         children: [] as unknown[]
       }
-
-      // 强制转换为 String 作为 Key
       nodeMap.set(String(n.id), nodeData)
+
+      // ★ 立即注册映射，不需要等 scanAndRegister
+      uidToBackendId.set(n.id, n.id)
     }
 
-    // 2. 第二遍循环：构建父子关系
+    // 2. 构建父子关系
     for (const n of nodes) {
       const nodeData = nodeMap.get(String(n.id)) as { children: unknown[] }
-
-      // 安全地处理 parentId，排除 null/undefined，并强制转为 String
       const parentIdStr = n.parentId != null ? String(n.parentId) : null
-
       if (parentIdStr && nodeMap.has(parentIdStr)) {
         const parentData = nodeMap.get(parentIdStr) as { children: unknown[] }
         parentData.children.push(nodeData)
@@ -118,16 +287,41 @@ export function useMindMapSync(opts: {
 
     if (roots.length === 0) return null
 
-    // 根节点直接子节点默认全部朝右
     const root = roots[0] as { children: { data: Record<string, unknown> }[] }
     for (const child of root.children) {
       if (!child.data.dir) child.data.dir = 'right'
     }
 
+    // 3. 【关键】：首次 setData 后 simple-mind-map 会给每个节点生成 data.uid
+    //    我们在 reloadMindMap 中扫描一次渲染树，建立 uid → backendId 的映射。
+    //    这里把 backendId 都写到了 data.backendId，扫描时通过 data.backendId 反查即可。
+
     return roots[0]
   }
 
-  /** 重新加载画布数据（不重新拉取后端） */
+  /**
+   * 在 setData 之后遍历渲染树，按 data.backendId 建立 uid → backendId 映射
+   */
+  function scanAndRegisterIdMappingsAfterSetData() {
+    const inst = getMindMapInstance()
+    const root = inst?.renderer.root
+    if (!root) return
+    const walk = (node: any) => {
+      const uid = node.getData?.('uid') as string | undefined
+      const backendId = node.getData?.('backendId') as string | undefined
+        ?? node.nodeData?.id
+        ?? node.getData?.('id') as string | undefined
+      if (uid && backendId) {
+        uidToBackendId.set(uid, backendId)
+      }
+      if (node.children) {
+        node.children.forEach(walk)
+      }
+    }
+    walk(root)
+  }
+
+  /** 重新加载画布数据 */
   function reloadMindMap() {
     const inst = getMindMapInstance()
     if (!inst) return
@@ -136,101 +330,417 @@ export function useMindMapSync(opts: {
     if (mindMapData) {
       inst.setData(mindMapData)
     }
-    setTimeout(() => { isSettingData.value = false }, 100)
+    setTimeout(() => {
+      isSettingData.value = false
+      // 数据渲染完成后扫描一次，建立 uid↔backendId 映射
+      scanAndRegisterIdMappingsAfterSetData()
+    }, 150)
   }
 
-  /** 从 simple-mind-map 数据树提取所有节点信息 */
-  function flattenTree(node: TreeDataNode, parentId: string | null, sortOrder: number, result: FlatNode[]) {
-    const text = node.data?.text || ''
-    const isCollapsed = node.data?.expand === false
-    result.push({ id: node.id, parentId, text, isCollapsed, sortOrder })
-    if (node.children) {
-      for (let i = 0; i < node.children.length; i++) {
-        flattenTree(node.children[i], node.id || null, i, result)
-      }
+  /** ============================================================
+   *  新增节点增量处理
+   *
+   *  输入：data_change_detail 中 action=create 的 DetailNode（一棵新增子树）
+   *  过程：深度优先前序（父先建，再建子）
+   *        建完每个节点，把后端 ID 写回渲染节点和 data 对象
+   *        ★ create Promise 存到 pendingCreates，供后续 update 等待
+   *  ============================================================ */
+  async function handleCreateTree(root: DetailNode) {
+    const parentUid = getParentUidFromFullTree(root.data.uid)
+    const parentBackendId = parentUid ? getBackendId(parentUid) ?? null : null
+
+    const tasks: Array<{ node: DetailNode; parentBackendId: string | null; sortOrder: number }> = []
+    const collect = (
+      node: DetailNode,
+      pBackendId: string | null,
+      sortIdx: number
+    ) => {
+      tasks.push({ node, parentBackendId: pBackendId, sortOrder: sortIdx })
+      node.children.forEach((c, i) => {
+        // 子节点的 parentBackendId 要等父节点创建完才能知道；先占位，后续动态替换
+        collect(c, `__PENDING_PARENT_${node.data.uid}__` as any, i)
+      })
     }
-  }
+    collect(root, parentBackendId, computeSortOrderForNewNode(parentUid, root.data.uid))
 
-  /** 同步 simple-mind-map 的数据变更到后端 */
-  async function syncToBackend() {
-    const inst = getMindMapInstance()
-    if (!inst) return
-    const rawData = inst.getData() as TreeDataNode
-    if (!rawData) return
+    // 依次创建，每创建一个就写回后端 ID
+    for (const task of tasks) {
+      let pId: string | null = task.parentBackendId as any
+      if (typeof pId === 'string' && pId.startsWith('__PENDING_PARENT_')) {
+        const pendingUid = pId.slice('__PENDING_PARENT_'.length, -2)
+        // await 父节点的 create（如还在 pending），保证 parentId 必取到
+        pId = await getBackendIdOrWait(pendingUid)
+      }
 
-    const treeNodes: FlatNode[] = []
-    flattenTree(rawData, null, 0, treeNodes)
+      const uid = task.node.data.uid
+      // 已存在映射，说明是 undo 恢复？直接跳过
+      if (uidToBackendId.has(uid)) continue
+      if (pendingCreates.has(uid)) {
+        // 同一个 uid 已经在 create 中（data_change_detail 多次触发？）等待完成即可
+        try { await pendingCreates.get(uid)! } catch {}
+        continue
+      }
 
-    // 获取后端现有节点列表
-    const backendNodes = nodesStore.nodes
-    const backendIds = new Set(backendNodes.map(n => n.id))
-    const treeIds = new Set(treeNodes.filter(n => n.id).map(n => n.id!))
+      const title = extractTitleFromText(task.node.data.text ?? '')
 
-    try {
-      // 1. 创建新节点（tree 中有但 backend 中没有的）
-      for (const tn of treeNodes) {
-        if (!tn.id || !backendIds.has(tn.id)) {
-          const parentId = tn.parentId && backendIds.has(tn.parentId) ? tn.parentId : null
+      // 检测是否根节点直接子节点 → 设置 direction
+      let direction: 0 | 1 | undefined = undefined
+      if (pId && pId === nodesStore.rootNode?.id) {
+        direction = task.node.data.dir === 'left' ? 0 : 1
+      }
+
+      // ★ 先把 create Promise 注册到 pendingCreates，让后续 handleUpdate 能 await
+      const createPromise = (async (): Promise<string> => {
+        try {
           const created = await nodesStore.create({
-            parentId,
-            title: tn.text || '新节点',
-            sortOrder: tn.sortOrder,
-            isCollapsed: tn.isCollapsed
+            parentId: pId,
+            title,
+            sortOrder: task.sortOrder,
+            isCollapsed: task.node.data.expand === false,
+            direction
           })
-          backendIds.add(created.id)
+          // 写回渲染节点 + DetailNode + 映射表
+          writeBackendIdToNode(uid, created.id)
+          writeBackendIdToDetailNode(task.node, created.id)
+          return created.id
+        } finally {
+          pendingCreates.delete(uid)
         }
-      }
-
-      // 2. 更新已有节点（文字、折叠状态、父节点变更）
-      for (const tn of treeNodes) {
-        if (!tn.id || !backendIds.has(tn.id)) continue
-        const backendNode = backendNodes.find(n => n.id === tn.id)
-        if (!backendNode) continue
-
-        const updates: NodeUpdatePayload = {}
-        // 比较时考虑 icon 前缀：text = icon + ' ' + title
-        const expectedText = (backendNode.icon ? backendNode.icon + ' ' : '') + backendNode.title
-        if (expectedText !== tn.text) {
-          // 从 text 中去掉 icon 前缀提取 title
-          let newTitle = tn.text
-          if (backendNode.icon && tn.text.startsWith(backendNode.icon + ' ')) {
-            newTitle = tn.text.substring(backendNode.icon.length + 1)
-          }
-          if (backendNode.title !== newTitle) updates.title = newTitle
-        }
-        if (backendNode.isCollapsed !== tn.isCollapsed) updates.isCollapsed = tn.isCollapsed
-        if (backendNode.sortOrder !== tn.sortOrder) updates.sortOrder = tn.sortOrder
-
-        // 父节点变更 → 调用 move API
-        if (tn.parentId !== backendNode.parentId) {
-          const newParentId = tn.parentId && backendIds.has(tn.parentId) ? tn.parentId : null
-          await nodesStore.move(tn.id, { parentId: newParentId, sortOrder: tn.sortOrder })
-        } else if (Object.keys(updates).length > 0) {
-          await nodesStore.update(tn.id, updates)
-        }
-      }
-
-      // 3. 删除不在 tree 中的节点
-      for (const bn of backendNodes) {
-        if (!treeIds.has(bn.id) && bn.parentId !== null) {
-          await nodesStore.remove(bn.id)
-        }
-      }
-    } catch (e) {
-      console.error('[syncToBackend] error:', e)
+      })()
+      pendingCreates.set(uid, createPromise)
+      // 等这个节点 create 完成再建下一个（保证子节点创建时父 backendId 已可用）
+      await createPromise
     }
   }
 
-  /** 递归查找某个 uid 对应节点的父节点 uid */
+  /** ============================================================
+   *  删除节点增量处理
+   *
+   *  输入：action=delete 的 DetailNode 树根
+   *  过程：用根节点的 backendId 调一次 remove()
+   *        后端支持级联删除，不需要遍历子节点
+   *  ============================================================ */
+  async function handleDeleteTree(root: DetailNode) {
+    const uid = root.data.uid
+    const backendId = getBackendId(uid)
+    // 清理该子树所有 uid 映射
+    const walk = (n: DetailNode) => {
+      uidToBackendId.delete(n.data.uid)
+      clearPerNodeTimers(n.data.uid)
+      n.children.forEach(walk)
+    }
+    walk(root)
+
+    if (backendId) {
+      await nodesStore.remove(backendId)
+    }
+  }
+
+  /** ============================================================
+   *  更新节点增量处理
+   *
+   *  可能包含：
+   *    1. 文本变化 → debounced nodesStore.update(title)
+   *    2. 展开/折叠变化 → debounced nodesStore.update(isCollapsed)
+   *    3. direction 变化 → nodesStore.update(direction)
+   *    4. 父节点变化 → nodesStore.move(parentId, sortOrder)
+   *    5. 同级排序变化 → nodesStore.batchUpdate([{id, sortOrder}])
+   *  ============================================================ */
+  async function handleUpdate(diff: DiffItem) {
+    const { data, oldData } = diff
+    if (!oldData) return
+    const uid = data.data.uid
+
+    // ★ 关键：如果 backendId 暂时没有，先等 create Promise（可能正在飞）
+    // 避免「新增节点后立即改文字 → backendId=null → 直接 return 丢弃修改」
+    const backendId = await getBackendIdOrWait(uid)
+    if (!backendId) {
+      console.warn('[sync] handleUpdate skipped: no backendId for uid', uid)
+      return
+    }
+
+    // ---------- 1. 文本变化（debounced，key=backendId，与 node_text_edit_change 共用一把锁）----------
+    const oldText = (oldData.data.text as string | undefined) ?? ''
+    const newText = (data.data.text as string | undefined) ?? ''
+    if (oldText !== newText) {
+      scheduleTextUpdate(backendId, newText)
+    }
+
+    // ---------- 2. 展开/折叠变化（debounced，key=backendId） ----------
+    const oldExpand = oldData.data.expand !== false
+    const newExpand = data.data.expand !== false
+    if (oldExpand !== newExpand) {
+      scheduleCollapseUpdate(backendId, !newExpand)
+    }
+
+    // ---------- 3. direction 变化（如果是根节点直接子节点则同步到后端） ----------
+    const oldDir = (oldData.data.dir as string | undefined) ?? ''
+    const newDir = (data.data.dir as string | undefined) ?? ''
+    if (oldDir !== newDir && (newDir === 'left' || newDir === 'right')) {
+      const parentUid = getParentUidFromFullTree(uid)
+      const isRootChild = parentUid != null && getBackendId(parentUid) === nodesStore.rootNode?.id
+      if (isRootChild) {
+        const backendDir: 0 | 1 = newDir === 'left' ? 0 : 1
+        const currentBackend = nodesStore.findNode(backendId)?.direction
+        if (currentBackend !== backendDir) {
+          enqueueStructuralOp(async () => {
+            try {
+              await nodesStore.update(backendId, { direction: backendDir })
+            } catch (e) {
+              console.error('[sync] direction update failed:', e)
+            }
+          })
+        }
+      }
+    }
+
+    // ---------- 4. 结构性变化（父节点、排序）：并入串行队列 ----------
+    enqueueStructuralOp(async () => {
+      await handleStructuralChanges(diff)
+    })
+  }
+
+  /** 文本更新调度（debounce 400ms，key = backendId）
+   *  key 统一使用 backendId，保证 data_change_detail 和 node_text_edit_change
+   *  对同一节点的连续文本触发最终只产生一次 API 请求。 */
+  function scheduleTextUpdate(backendId: string, rawText: string) {
+    const t = textDebounceTimers.get(backendId)
+    if (t) clearTimeout(t)
+    textDebounceTimers.set(
+      backendId,
+      setTimeout(async () => {
+        textDebounceTimers.delete(backendId)
+        const title = extractTitleFromText(rawText, backendId)
+        try {
+          await nodesStore.update(backendId, { title })
+        } catch (e) {
+          console.error('[sync] text update failed:', e)
+        }
+      }, 400)
+    )
+  }
+
+  /** 折叠更新调度（debounce 250ms，key = backendId） */
+  function scheduleCollapseUpdate(backendId: string, isCollapsed: boolean) {
+    const t = collapseDebounceTimers.get(backendId)
+    if (t) clearTimeout(t)
+    collapseDebounceTimers.set(
+      backendId,
+      setTimeout(async () => {
+        collapseDebounceTimers.delete(backendId)
+        try {
+          await nodesStore.update(backendId, { isCollapsed })
+        } catch (e) {
+          console.error('[sync] collapse update failed:', e)
+        }
+      }, 250)
+    )
+  }
+
+  /**
+   * 结构性变化：父节点/同级排序
+   * 需要对比「完整的新树」和「完整的旧树」才能得到父节点和排序信息，
+   * 所以通过当前渲染树快照重建关系图进行比较。
+   */
+  async function handleStructuralChanges(diff: DiffItem) {
+    const inst = getMindMapInstance()
+    const renderRoot = inst?.renderer?.root
+    if (!renderRoot) return
+
+    const uid = diff.data.data.uid
+    // 理论上 handleUpdate 已经 await 过，但保险起见再次等待（父节点可能刚创建）
+    const backendId = await getBackendIdOrWait(uid)
+    if (!backendId) return
+
+    // 取当前整棵渲染树的 data 快照，构造关系图
+    const currentSnapshot = inst.getData() as any
+    if (!currentSnapshot) return
+    const { parentOf, sortOrderOf } = buildRelationalMapsFromRaw(currentSnapshot)
+
+    const newParentUid = parentOf.get(uid) ?? null
+    const newSortOrder = sortOrderOf.get(uid) ?? 0
+    const newParentBackendId = newParentUid ? await getBackendIdOrWait(newParentUid) ?? null : null
+
+    const backendNode = nodesStore.findNode(backendId)
+    if (!backendNode) return
+
+    const parentChanged = newParentBackendId !== (backendNode.parentId ?? null)
+    const orderChanged = newSortOrder !== backendNode.sortOrder
+
+    if (parentChanged) {
+      // 移动
+      await nodesStore.move(backendId, {
+        parentId: newParentBackendId,
+        sortOrder: newSortOrder
+      })
+    } else if (orderChanged) {
+      // 仅排序变化：检查兄弟节点是否也都变了 → 如果是，批量 reorder
+      const siblingUids = collectSiblingUidsFromSnapshot(parentOf, sortOrderOf, newParentUid, uid)
+      if (siblingUids.length >= 2) {
+        const items: NodeBatchItem[] = []
+        for (const sibUid of siblingUids) {
+          const sibBackendId = await getBackendIdOrWait(sibUid)
+          if (!sibBackendId) continue
+          const sibBackend = nodesStore.findNode(sibBackendId)
+          const so = sortOrderOf.get(sibUid) ?? 0
+          if (!sibBackend || sibBackend.sortOrder !== so) {
+            items.push({ id: sibBackendId, sortOrder: so })
+          }
+        }
+        if (items.length > 0) {
+          await nodesStore.batchUpdate(items)
+        }
+      } else {
+        await nodesStore.update(backendId, { sortOrder: newSortOrder })
+      }
+    }
+  }
+
+  /** 从 raw getData() 输出构建 uid → parentUid / sortOrder 映射 */
+  function buildRelationalMapsFromRaw(root: any) {
+    const parentOf = new Map<string, string | null>()
+    const sortOrderOf = new Map<string, number>()
+    const walk = (node: any, parentUid: string | null, idx: number) => {
+      const uid = node.data?.uid ?? node.id
+      if (!uid) return
+      parentOf.set(uid, parentUid)
+      sortOrderOf.set(uid, idx)
+      if (node.children) {
+        node.children.forEach((c: any, i: number) => walk(c, uid, i))
+      }
+    }
+    walk(root, null, 0)
+    return { parentOf, sortOrderOf }
+  }
+
+  /** 收集兄弟节点 uid（按排序） */
+  function collectSiblingUidsFromSnapshot(
+    parentOf: Map<string, string | null>,
+    sortOrderOf: Map<string, number>,
+    parentUid: string | null,
+    selfUid: string
+  ): string[] {
+    const siblings: string[] = []
+    parentOf.forEach((p, uid) => {
+      if (p === parentUid) siblings.push(uid)
+    })
+    if (!siblings.includes(selfUid)) siblings.push(selfUid)
+    siblings.sort((a, b) => (sortOrderOf.get(a) ?? 0) - (sortOrderOf.get(b) ?? 0))
+    return siblings
+  }
+
+  /** 计算新增节点在 full tree 下的 sortOrder */
+  function computeSortOrderForNewNode(parentUid: string | null, childUid: string): number {
+    const inst = getMindMapInstance()
+    const raw = inst?.getData() as any
+    if (!raw) return 0
+    const { sortOrderOf } = buildRelationalMapsFromRaw(raw)
+    // 找到该父节点下的最大 sortOrder
+    const { parentOf } = buildRelationalMapsFromRaw(raw)
+    const siblingOrders: number[] = []
+    parentOf.forEach((p, uid) => {
+      if (p === parentUid && uid !== childUid) {
+        siblingOrders.push(sortOrderOf.get(uid) ?? 0)
+      }
+    })
+    return siblingOrders.length === 0 ? 0 : Math.max(...siblingOrders) + 1
+  }
+
+  /** 从 full tree 找到某个 uid 的父 uid */
+  function getParentUidFromFullTree(uid: string): string | null {
+    const inst = getMindMapInstance()
+    const raw = inst?.getData() as any
+    if (!raw) return null
+    const { parentOf } = buildRelationalMapsFromRaw(raw)
+    return parentOf.get(uid) ?? null
+  }
+
+  /** 从文本中提取 title（去除 icon 前缀） */
+  function extractTitleFromText(text: string, backendId?: string): string {
+    if (!text) return ''
+    if (backendId) {
+      const backendNode = nodesStore.findNode(backendId)
+      if (backendNode?.icon && text.startsWith(backendNode.icon + ' ')) {
+        return text.substring(backendNode.icon.length + 1)
+      }
+    }
+    return text
+  }
+
+  /** ============================================================
+   *  data_change_detail 总入口：simple-mind-map 已经帮我们 diff 好了
+   *  ============================================================ */
+  async function processDataChangeDetail(items: DiffItem[]) {
+    if (readonly.value) return
+    if (isSettingData.value) return
+    if (!Array.isArray(items) || items.length === 0) return
+
+    // 先处理所有 create（需要写回 ID，后续 update/delete 依赖它）
+    const creates = items.filter((i) => i.action === 'create')
+    // 再处理 delete
+    const deletes = items.filter((i) => i.action === 'delete')
+    // 最后处理 update（可能引用 create 产生的 backendId）
+    const updates = items.filter((i) => i.action === 'update')
+
+    enqueueStructuralOp(async () => {
+      for (const c of creates) {
+        try {
+          await handleCreateTree(c.data)
+        } catch (e) {
+          console.error('[sync] create failed:', e)
+        }
+      }
+      for (const d of deletes) {
+        try {
+          await handleDeleteTree(d.data)
+        } catch (e) {
+          console.error('[sync] delete failed:', e)
+        }
+      }
+    })
+
+    // update 中纯文本/折叠变化是 debounced 的，不需要排队；结构性变化会自己 enqueue
+    // 注意：handleUpdate 是 async（内部 await getBackendIdOrWait），不 await 在这里
+    //       因为它的结果不影响后续批次；所有结构性副作用最终都流进 opQueue
+    for (const u of updates) {
+      handleUpdate(u).catch((e) => console.error('[sync] handleUpdate failed:', e))
+    }
+  }
+
+  /** ============================================================
+   *  node_text_edit_change：正在编辑中实时文本变化（也是 debounced）
+   *  这个事件比 data_change_detail 响应更快，体验更好
+   *
+   *  关键：scheduleTextUpdate 与 data_change_detail 中的文本分支共用
+   *       同一个 key = backendId 的定时器，所以最终只合并成一次请求。
+   *  ============================================================ */
+  async function handleTextEditChange(payload: {
+    node: { getData: (k?: string) => unknown }
+    text: string
+  }) {
+    if (readonly.value) return
+    const uid = payload.node.getData?.('uid') as string | undefined
+    if (!uid) return
+    // ★ 如果 backendId 暂时没有（新创建节点后立即输入），等 create 完成
+    const backendId = await getBackendIdOrWait(uid)
+    if (!backendId) return
+    // 仅用 backendId 作为 key → 与 data_change_detail 中的 scheduleTextUpdate 互相覆盖，
+    // 保证连续触发下同一节点最终只产生一次 API 请求
+    scheduleTextUpdate(backendId, payload.text)
+  }
+
+  /** ============================================================
+   *  拖拽方向处理（保持原有逻辑）
+   *  ============================================================ */
   function findNodeParentUid(uid: string): unknown {
     const inst = getMindMapInstance()
     const root = inst?.renderer.root
     if (!root) return null
     let result: unknown = null
-    const walk = (node: typeof root) => {
+    const walk = (node: any) => {
       if (result) return
-      if (node.getData('uid') === uid) {
-        result = node.parent?.getData('uid') ?? null
+      if (node.getData?.('uid') === uid) {
+        result = node.parent?.getData?.('uid') ?? null
         return
       }
       node.children?.forEach(walk)
@@ -239,11 +749,6 @@ export function useMindMapSync(opts: {
     return result
   }
 
-  /**
-   * simple-mind-map 拖拽即将结束回调（execCommand 之前调用）
-   * 根据鼠标最终屏幕位置相对根节点中心的方位，直接修改被拖拽节点的 dir 属性
-   * 这样后续的 layout 就会按正确方向渲染，而不是按旧方向画好后再检测
-   */
   function handleDragEnd(info: {
     overlapNodeUid?: string
     prevNodeUid?: string
@@ -256,7 +761,6 @@ export function useMindMapSync(opts: {
   }) {
     const inst = getMindMapInstance()
     if (!inst || readonly.value) return
-    pendingDragSync = true
 
     const root = inst.renderer.root
     if (!root) return
@@ -268,15 +772,12 @@ export function useMindMapSync(opts: {
     const rootCenterClientX = svgRect.left + root.left + (root.width || 0) / 2
     const targetDir = lastMouseClientX < rootCenterClientX ? 'left' : 'right'
 
-    // 找出根节点 uid，用来判断 overlapNodeUid / prevNodeUid / nextNodeUid 是否属于根节点层
-    const rootUid = root.getData('uid')
+    const rootUid = root.getData?.('uid')
 
-    // 判断被拖拽节点是否即将成为根节点的直接子节点
-    // 情况：overlap 是 root（拖到根节点上），或 prev/next 的 parent 是 root（拖到根节点子节点之间）
     const willBeRootChild =
       info.overlapNodeUid === rootUid ||
-      info.prevNodeUid && findNodeParentUid(info.prevNodeUid) === rootUid ||
-      info.nextNodeUid && findNodeParentUid(info.nextNodeUid) === rootUid
+      (info.prevNodeUid && findNodeParentUid(info.prevNodeUid) === rootUid) ||
+      (info.nextNodeUid && findNodeParentUid(info.nextNodeUid) === rootUid)
 
     if (willBeRootChild) {
       for (const node of info.beingDragNodeList) {
@@ -285,12 +786,9 @@ export function useMindMapSync(opts: {
     }
   }
 
-  /**
-   * 每次 layout 完成后扫描根节点直接子节点，统一修正方向：
-   * - 节点自身 data.dir 没设置（undefined）→ 用实际位置判断，同时写回 data.dir 和后端
-   * - data.dir 有值但与实际位置不符（拖拽后 freeDrag 到了另一边）→ 更新 data.dir 和后端
-   * 目的：彻底消除 simple-mind-map 默认的 index % 2 奇偶交替方向分配
-   */
+  /** ============================================================
+   *  每次 layout 完成后扫描根节点直接子节点方向（保持原有逻辑）
+   *  ============================================================ */
   async function normalizeRootChildDirections() {
     const inst = getMindMapInstance()
     if (!inst || readonly.value) return
@@ -300,46 +798,63 @@ export function useMindMapSync(opts: {
     const rootCenterX = root.left + (root.width || 0) / 2
     const updates: Array<{
       node: { setData: (d: Record<string, unknown>) => void; getData: (k?: string) => unknown }
-      id: string
+      uid: string
       targetDir: 'left' | 'right'
       backendDir: 0 | 1
     }> = []
 
-    const scan = (node: typeof root) => {
+    const scan = (node: any) => {
       if (node.isRoot) {
         node.children?.forEach(scan)
         return
       }
       if (!node.parent || !node.parent.isRoot) return
-      const id = node.getData('id') as string | undefined
+      const uid = node.getData?.('uid') as string | undefined
+      if (!uid) return
+      const id = getBackendId(uid)
       if (!id) return
       const centerX = node.left + (node.width || 0) / 2
       const targetDir: 'left' | 'right' = centerX < rootCenterX ? 'left' : 'right'
       const backendDir: 0 | 1 = targetDir === 'left' ? 0 : 1
       const currentBackend = nodesStore.findNode(id)?.direction
-      const currentDataDir = node.getData('dir')
-      // data.dir 不对（undefined 或 方向错）或后端 direction 不对 → 修正
+      const currentDataDir = node.getData?.('dir')
       if (currentDataDir !== targetDir || currentBackend !== backendDir) {
-        updates.push({ node, id, targetDir, backendDir })
+        updates.push({ node, uid, targetDir, backendDir })
       }
     }
     scan(root)
 
     if (updates.length === 0) return
 
-    // 1. 先修正前端节点 data.dir（可能需要再 render 一次）
     for (const u of updates) {
       u.node.setData({ dir: u.targetDir })
     }
 
-    // 2. 写回后端
-    for (const u of updates) {
-      try {
-        await nodesStore.update(u.id, { direction: u.backendDir })
-      } catch {
-        // 单个失败忽略
+    enqueueStructuralOp(async () => {
+      for (const u of updates) {
+        const backendId = getBackendId(u.uid)
+        if (!backendId) continue
+        try {
+          await nodesStore.update(backendId, { direction: u.backendDir })
+        } catch {
+          // 单个失败忽略
+        }
       }
-    }
+    })
+  }
+
+  /** ============================================================
+   *  所有事件绑定入口（由 MindMapEditorView.vue 调用）
+   *  ============================================================ */
+  function bindIncrementalSyncHandlers() {
+    const inst = getMindMapInstance()
+    if (!inst) return
+
+    // 核心事件：simple-mind-map 内置 diff
+    ;(inst as any).on('data_change_detail', processDataChangeDetail)
+
+    // 文本编辑实时 debounce（优先于 data_change_detail 触发的文本更新）
+    ;(inst as any).on('node_text_edit_change', handleTextEditChange)
   }
 
   return {
@@ -347,8 +862,10 @@ export function useMindMapSync(opts: {
     bindGlobalMouseTracker,
     convertToMindMapData,
     reloadMindMap,
-    syncToBackend,
     handleDragEnd,
-    normalizeRootChildDirections
+    normalizeRootChildDirections,
+    bindIncrementalSyncHandlers,
+    // 暴露给外部调试
+    _debugIdMap: uidToBackendId
   }
 }

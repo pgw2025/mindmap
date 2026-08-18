@@ -74,9 +74,9 @@ const {
   bindGlobalMouseTracker,
   convertToMindMapData,
   reloadMindMap,
-  syncToBackend,
   handleDragEnd,
-  normalizeRootChildDirections
+  normalizeRootChildDirections,
+  bindIncrementalSyncHandlers
 } = useMindMapSync({
   getMindMapInstance: () => mindMapInstance,
   nodesStore,
@@ -167,16 +167,10 @@ function initMindMap() {
     }
   })
 
-  // 监听数据变化（键盘快捷键 Tab/Enter/Delete 等触发）
-  let dataChangeTimer: ReturnType<typeof setTimeout> | null = null
-  mindMapInstance.on('data_change', () => {
-    if (isSettingData.value) return // setData 触发的，跳过同步
-    // 防抖：避免频繁操作时多次调用
-    if (dataChangeTimer) clearTimeout(dataChangeTimer)
-    dataChangeTimer = setTimeout(() => {
-      syncToBackend()
-    }, 500)
-  })
+  // —— 增量同步事件绑定：替代旧的 data_change → syncToBackend 整树 diff 方案
+  //    1. data_change_detail：simple-mind-map 内置 diff，传出 create/update/delete 明细
+  //    2. node_text_edit_change：编辑中实时 debounce 文本更新
+  bindIncrementalSyncHandlers()
 
   // 监听搜索匹配结果
   mindMapInstance.on('search_match_node_list_change', (...args: unknown[]) => {
