@@ -136,11 +136,25 @@ function initMindMap() {
   const mindMapData = convertToMindMapData(nodesStore.nodes)
   if (mindMapData) {
     mindMapInstance.setData(mindMapData)
-    mindMapInstance.view?.fit()
+    // setData 触发的 render 是 setTimeout 异步的，view.fit() 同步调用拿不到
+    // 正确的节点位置，导致根节点不在画布中心。等首次渲染完成后再居中。
+    // simple-mind-map 没有 once API，用 on + off 手动实现
+    const onFirstRender = () => {
+      mindMapInstance?.off('node_tree_render_end', onFirstRender)
+      // 主题在 setData 之后应用，否则会被 setData 的异步渲染覆盖
+      // setThemeConfig 第二个参数 notRender=false 表示立即触发重绘
+      mindMapInstance?.setThemeConfig(getThemeConfig(themeId), false)
+      const root = mindMapInstance?.renderer?.root
+      if (root) {
+        // moveNodeToCenter 在 Render 实例上，不在 MindMap 实例上
+        ;(mindMapInstance?.renderer as any)?.moveNodeToCenter(root)
+      }
+    }
+    mindMapInstance.on('node_tree_render_end', onFirstRender)
+  } else {
+    // 没有数据时直接应用主题
+    mindMapInstance.setThemeConfig(getThemeConfig(themeId), false)
   }
-
-  // 2. 确保在数据加载（setData）后，再应用/覆盖自定义主题配置
-  mindMapInstance.setThemeConfig(getThemeConfig(themeId), true)
 
   // 3. 延迟关闭保护开关，确保初始渲染引发的 data_change 被安全跳过
   nextTick(() => {

@@ -412,7 +412,7 @@ onMounted(async () => {
           </div>
 
           <template #action>
-            <NSpace size="small" justify="end" align="center" :wrap="false">
+            <NSpace size="small" justify="end" align="center" :wrap="true">
               <NButton
                 text
                 size="small"
