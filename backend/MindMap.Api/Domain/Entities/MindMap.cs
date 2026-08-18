@@ -30,10 +30,16 @@ public class MindMap
     public string? Theme { get; set; }
     public int NodeCount { get; set; }
 
+    /// <summary>是否已被管理员下架。下架后公开列表和分享不可访问。</summary>
+    public bool IsTakenDown { get; set; }
+    public DateTime? TakenDownAt { get; set; }
+    public string? TakenDownReason { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public DateTime LastEditedAt { get; set; }
 
     public ICollection<Tag> Tags { get; set; } = new List<Tag>();
     public ICollection<Node> Nodes { get; set; } = new List<Node>();
+    public ICollection<MindMapReport> Reports { get; set; } = new List<MindMapReport>();
 }

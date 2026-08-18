@@ -138,6 +138,15 @@ public class ShareService : IShareService
             };
         }
 
+        if (share.MindMap.IsTakenDown)
+        {
+            return new ShareVerifyResponse
+            {
+                Success = false,
+                Message = "该导图已被管理员下架"
+            };
+        }
+
         if (share.ExpiresAt.HasValue && share.ExpiresAt.Value < DateTime.UtcNow)
         {
             return new ShareVerifyResponse
@@ -196,6 +205,8 @@ public class ShareService : IShareService
             throw ApiException.NotFound("分享链接", token);
         if (share.IsDisabled)
             throw ApiException.Forbidden("分享已被禁用");
+        if (share.MindMap.IsTakenDown)
+            throw ApiException.Forbidden("该导图已被管理员下架");
         if (share.ExpiresAt.HasValue && share.ExpiresAt.Value < DateTime.UtcNow)
             throw ApiException.Forbidden("分享链接已过期");
         if (share.MaxAccessCount.HasValue && share.AccessCount >= share.MaxAccessCount.Value)

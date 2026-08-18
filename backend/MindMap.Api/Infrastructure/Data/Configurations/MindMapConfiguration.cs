@@ -25,6 +25,8 @@ public class MindMapConfiguration : IEntityTypeConfiguration<MindMapEntity>
         builder.Property(m => m.CreatedAt).HasColumnType("datetime(3)");
         builder.Property(m => m.UpdatedAt).HasColumnType("datetime(3)");
         builder.Property(m => m.LastEditedAt).HasColumnType("datetime(3)");
+        builder.Property(m => m.TakenDownAt).HasColumnType("datetime(3)");
+        builder.Property(m => m.TakenDownReason).HasMaxLength(256);
 
         // "我的导图" 列表：按用户倒序
         builder.HasIndex(m => new { m.OwnerId, m.UpdatedAt });

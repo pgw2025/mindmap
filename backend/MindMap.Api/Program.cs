@@ -6,7 +6,10 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using MindMap.Api.Application.Services;
 using MindMap.Api.Common.Filters;
+using MindMap.Api.Common.Helpers;
 using MindMap.Api.Common.Options;
+using MindMap.Api.Domain.Entities;
+using MindMap.Api.Domain.Entities.Enums;
 using MindMap.Api.Infrastructure.Data;
 using MindMap.Api.Security;
 using Serilog;
@@ -54,7 +57,11 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ClockSkew = TimeSpan.FromSeconds(30)
         };
     });
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options =>
+{
+    // 基于 JWT role claim "admin" 的策略：所有管理后台接口必须通过此策略
+    options.AddPolicy("AdminOnly", policy => policy.RequireRole("admin"));
+});
 
 // ---- CORS ----
 var appOpt = builder.Configuration.GetSection("App").Get<AppOptions>()
@@ -78,6 +85,7 @@ builder.Services.AddScoped<INodeService, NodeService>();
 builder.Services.AddScoped<IMindMapVersionService, MindMapVersionService>();
 builder.Services.AddScoped<IExportService, ExportService>();
 builder.Services.AddScoped<IShareService, ShareService>();
+builder.Services.AddScoped<IAdminService, AdminService>();
 
 // ---- Controllers + 全局异常 ----
 builder.Services.AddControllers(options => options.Filters.Add<GlobalExceptionFilter>())
@@ -122,6 +130,46 @@ app.UseSerilogRequestLogging();
 app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
+
+// ---- 数据库迁移 + 默认管理员种子 ----
+// 启动时自动应用迁移并确保至少存在一个管理员账号。
+// 默认管理员：用户名 admin / 密码 Admin@2026（首次登录后请立即修改密码）。
+using (var scope = app.Services.CreateScope())
+{
+    var sp = scope.ServiceProvider;
+    try
+    {
+        var db = sp.GetRequiredService<AppDbContext>();
+        await db.Database.MigrateAsync();
+
+        var hasAdmin = await db.Users.AnyAsync(u => u.IsAdmin);
+        if (!hasAdmin)
+        {
+            const string defaultAdminUsername = "admin";
+            const string defaultAdminPassword = "Admin@2026";
+            var (hash, salt) = PasswordHasher.Create(defaultAdminPassword);
+            db.Users.Add(new User
+            {
+                Id = Guid.NewGuid(),
+                Username = defaultAdminUsername,
+                Email = "admin@localhost",
+                PasswordHash = hash,
+                PasswordSalt = salt,
+                IsAdmin = true,
+                Status = UserStatus.Active,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+            Log.Information("已创建默认管理员账号：{Username} / {Password}（请尽快修改）", defaultAdminUsername, defaultAdminPassword);
+        }
+    }
+    catch (Exception ex)
+    {
+        Log.Warning(ex, "数据库迁移/管理员种子执行失败，应用仍将启动");
+    }
+}
+
 app.MapControllers();
 
 app.Run();

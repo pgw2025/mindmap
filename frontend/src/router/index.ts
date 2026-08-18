@@ -27,6 +27,37 @@ const routes: RouteRecordRaw[] = [
     ]
   },
   {
+    path: '/admin',
+    component: () => import('@/layouts/AdminLayout.vue'),
+    meta: { title: '管理后台', requireAdmin: true },
+    children: [
+      {
+        path: '',
+        name: 'admin-dashboard',
+        component: () => import('@/views/admin/AdminDashboardView.vue'),
+        meta: { title: '管理看板' }
+      },
+      {
+        path: 'users',
+        name: 'admin-users',
+        component: () => import('@/views/admin/AdminUsersView.vue'),
+        meta: { title: '用户管理' }
+      },
+      {
+        path: 'mindmaps',
+        name: 'admin-mindmaps',
+        component: () => import('@/views/admin/AdminMindMapsView.vue'),
+        meta: { title: '导图管理' }
+      },
+      {
+        path: 'reports',
+        name: 'admin-reports',
+        component: () => import('@/views/admin/AdminReportsView.vue'),
+        meta: { title: '举报审核' }
+      }
+    ]
+  },
+  {
     path: '/mindmaps/:id/edit',
     name: 'mindmap-edit',
     component: () => import('@/views/editor/MindMapEditorView.vue'),
@@ -63,6 +94,10 @@ router.beforeEach(async (to) => {
     return { name: 'login', query: { redirect: to.fullPath } }
   }
   if (to.meta.guestOnly && auth.isAuthenticated) {
+    return { name: 'home' }
+  }
+  // 管理后台仅管理员可访问
+  if (to.meta.requireAdmin && !auth.isAdmin) {
     return { name: 'home' }
   }
 })

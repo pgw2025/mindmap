@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   NButton,
   NDrawer,
@@ -23,7 +24,8 @@ import {
   MenuOutline,
   MoonOutline,
   SunnyOutline,
-  CloudOutline
+  CloudOutline,
+  ShieldCheckmarkOutline
 } from '@vicons/ionicons5'
 import { useThemeStore } from '@/stores/theme'
 import { useAuthStore } from '@/stores/auth'
@@ -35,6 +37,13 @@ const authStore = useAuthStore()
 const foldersStore = useFoldersStore()
 const mapsStore = useMindMapsStore()
 const message = useMessage()
+const router = useRouter()
+
+const isAdmin = computed(() => authStore.isAdmin)
+
+function goAdmin(): void {
+  router.push({ name: 'admin-dashboard' })
+}
 
 const collapsed = ref(false)
 const drawerVisible = ref(false)
@@ -170,6 +179,16 @@ onMounted(async () => {
               <template #icon><NIcon><CloudOutline /></NIcon></template>
               公开广场
             </NButton>
+            <NButton
+              v-if="isAdmin"
+              quaternary
+              block
+              type="error"
+              @click="goAdmin"
+            >
+              <template #icon><NIcon><ShieldCheckmarkOutline /></NIcon></template>
+              管理后台
+            </NButton>
           </div>
 
           <div v-if="mapsStore.scope === 'mine'" class="sider-section">
@@ -228,6 +247,15 @@ onMounted(async () => {
                 @click="mapsStore.setScope('public'); drawerVisible = false"
               >
                 公开广场
+              </NButton>
+              <NButton
+                v-if="isAdmin"
+                quaternary
+                block
+                type="error"
+                @click="drawerVisible = false; goAdmin()"
+              >
+                管理后台
               </NButton>
             </div>
             <div v-if="mapsStore.scope === 'mine'" class="sider-section">

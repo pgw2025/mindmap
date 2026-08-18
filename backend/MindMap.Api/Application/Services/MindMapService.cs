@@ -43,7 +43,8 @@ public class MindMapService : IMindMapService
         }
         else // public
         {
-            q = q.Where(m => m.IsPublic);
+            // 下架的导图不出现在公开广场（导图所有者仍可在"我的导图"看到）
+            q = q.Where(m => m.IsPublic && !m.IsTakenDown);
         }
 
         if (query.FolderId.HasValue && scope == "mine")
@@ -92,8 +93,11 @@ public class MindMapService : IMindMapService
 
     public async Task<MindMapDetailDto?> GetAsync(Guid? userId, Guid id, CancellationToken ct = default)
     {
+        // 所有者可访问自己的导图（即使被下架）；公开导图需未被下架
         var dto = await _db.MindMaps
-            .Where(m => m.Id == id && (m.IsPublic || (userId.HasValue && m.OwnerId == userId.Value)))
+            .Where(m => m.Id == id && (
+                (userId.HasValue && m.OwnerId == userId.Value) ||
+                (m.IsPublic && !m.IsTakenDown)))
             .Select(m => new MindMapDetailDto
             {
                 Id = m.Id,

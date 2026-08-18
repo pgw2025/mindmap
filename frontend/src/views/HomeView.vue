@@ -23,11 +23,14 @@ import {
   SearchOutline,
   TrashOutline,
   GlobeOutline,
-  CreateOutline
+  CreateOutline,
+  FlagOutline
 } from '@vicons/ionicons5'
 import { useMindMapsStore } from '@/stores/mindmaps'
 import { useTagsStore } from '@/stores/tags'
 import { useFoldersStore } from '@/stores/folders'
+import { useAuthStore } from '@/stores/auth'
+import { reportMindMap } from '@/api/admin'
 import SidebarView from './home/SidebarView.vue'
 
 const router = useRouter()
@@ -36,6 +39,7 @@ const dialog = useDialog()
 const mapsStore = useMindMapsStore()
 const tagsStore = useTagsStore()
 const foldersStore = useFoldersStore()
+const authStore = useAuthStore()
 
 const keywordInput = ref('')
 
@@ -43,6 +47,43 @@ const keywordInput = ref('')
 const createModalVisible = ref(false)
 const createTitleInput = ref('')
 const createSubmitting = ref(false)
+
+// 举报 Modal
+const reportModalVisible = ref(false)
+const reportTargetId = ref<string | null>(null)
+const reportTargetTitle = ref('')
+const reportReason = ref('')
+const reportSubmitting = ref(false)
+
+function openReportModal(id: string, title: string): void {
+  if (!authStore.isAuthenticated) {
+    message.warning('请先登录后再举报')
+    return
+  }
+  reportTargetId.value = id
+  reportTargetTitle.value = title
+  reportReason.value = ''
+  reportModalVisible.value = true
+}
+
+async function submitReport(): Promise<void> {
+  if (!reportTargetId.value) return
+  const reason = reportReason.value.trim()
+  if (!reason) {
+    message.warning('请填写举报理由')
+    return
+  }
+  reportSubmitting.value = true
+  try {
+    await reportMindMap(reportTargetId.value, reason)
+    message.success('举报已提交，管理员将在后台审核')
+    reportModalVisible.value = false
+  } catch (e) {
+    message.error((e as Error).message)
+  } finally {
+    reportSubmitting.value = false
+  }
+}
 
 const titleText = computed(() =>
   mapsStore.scope === 'mine' ? '我的思维导图' : '公开广场'
@@ -292,6 +333,16 @@ onMounted(async () => {
                 <template #icon><NIcon><TrashOutline /></NIcon></template>
                 删除
               </NButton>
+              <NButton
+                v-if="mapsStore.scope === 'public' && !authStore.isAdmin"
+                text
+                size="small"
+                type="warning"
+                @click="openReportModal(map.id, map.title)"
+              >
+                <template #icon><NIcon><FlagOutline /></NIcon></template>
+                举报
+              </NButton>
             </NSpace>
           </template>
         </NCard>
@@ -334,6 +385,37 @@ onMounted(async () => {
             @click="submitCreate"
           >
             创建
+          </NButton>
+        </NSpace>
+      </template>
+    </NModal>
+
+    <!-- 举报 Modal -->
+    <NModal
+      v-model:show="reportModalVisible"
+      preset="card"
+      title="举报导图"
+      display-directive="if"
+      style="max-width: 460px"
+    >
+      <p class="report-tip">举报导图「{{ reportTargetTitle }}」？请填写理由，管理员将审核处理。</p>
+      <NInput
+        v-model:value="reportReason"
+        type="textarea"
+        placeholder="请填写举报理由（如违规内容、侵权、广告等）"
+        :rows="4"
+        maxlength="512"
+      />
+      <template #footer>
+        <NSpace justify="end">
+          <NButton @click="reportModalVisible = false">取消</NButton>
+          <NButton
+            type="warning"
+            :loading="reportSubmitting"
+            :disabled="!reportReason.trim()"
+            @click="submitReport"
+          >
+            提交举报
           </NButton>
         </NSpace>
       </template>
@@ -462,6 +544,12 @@ onMounted(async () => {
   margin-top: 16px;
   display: flex;
   justify-content: center;
+}
+
+.report-tip {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--app-text-secondary);
 }
 
 @media (max-width: 767px) {
