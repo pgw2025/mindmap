@@ -61,6 +61,9 @@ public class Node
     /// <summary>边框颜色。</summary>
     public string? BorderColor { get; set; }
 
+    /// <summary>根节点直接子节点的生长方向；null 表示未指定（前端默认朝右）。</summary>
+    public Direction? Direction { get; set; }
+
     /// <summary>背景填充颜色。</summary>
     public string? BackgroundColor { get; set; }
 

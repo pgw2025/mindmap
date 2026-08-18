@@ -72,7 +72,8 @@ public class NodeService : INodeService
                 BorderColor = n.BorderColor,
                 BackgroundColor = n.BackgroundColor,
                 EdgeColor = n.EdgeColor,
-                EdgeStyle = (int?)n.EdgeStyle,
+                EdgeStyle = n.EdgeStyle,
+                Direction = n.Direction,
                 ExtraData = n.ExtraData,
                 CreatedAt = n.CreatedAt,
                 UpdatedAt = n.UpdatedAt
@@ -137,6 +138,7 @@ public class NodeService : INodeService
             BackgroundColor = req.BackgroundColor,
             EdgeColor = req.EdgeColor,
             EdgeStyle = req.EdgeStyle,
+            Direction = req.Direction,
             ExtraData = req.ExtraData,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
@@ -182,6 +184,7 @@ public class NodeService : INodeService
         if (req.BackgroundColor is not null) node.BackgroundColor = req.BackgroundColor;
         if (req.EdgeColor is not null) node.EdgeColor = req.EdgeColor;
         if (req.EdgeStyle.HasValue) node.EdgeStyle = req.EdgeStyle;
+        if (req.Direction.HasValue) node.Direction = req.Direction;
         if (req.ExtraData is not null) node.ExtraData = req.ExtraData;
 
         node.UpdatedAt = DateTime.UtcNow;
@@ -383,7 +386,8 @@ public class NodeService : INodeService
         BorderColor = n.BorderColor,
         BackgroundColor = n.BackgroundColor,
         EdgeColor = n.EdgeColor,
-        EdgeStyle = (int?)n.EdgeStyle,
+        EdgeStyle = n.EdgeStyle,
+        Direction = n.Direction,
         ExtraData = n.ExtraData,
         CreatedAt = n.CreatedAt,
         UpdatedAt = n.UpdatedAt

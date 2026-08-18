@@ -45,6 +45,9 @@ public class NodeCreateRequest
     public string? EdgeColor { get; set; }
     public EdgeStyle? EdgeStyle { get; set; }
 
+    /// <summary>根节点直接子节点的生长方向；null 表示前端默认朝右。</summary>
+    public Direction? Direction { get; set; }
+
     /// <summary>JSON 扩展数据（附件、链接等）。</summary>
     [StringLength(32768)]
     public string? ExtraData { get; set; }
@@ -87,6 +90,8 @@ public class NodeUpdateRequest
     [StringLength(32)]
     public string? EdgeColor { get; set; }
     public EdgeStyle? EdgeStyle { get; set; }
+
+    public Direction? Direction { get; set; }
 
     [StringLength(32768)]
     public string? ExtraData { get; set; }
@@ -150,7 +155,8 @@ public class NodeDto
     public string? BorderColor { get; set; }
     public string? BackgroundColor { get; set; }
     public string? EdgeColor { get; set; }
-    public int? EdgeStyle { get; set; }
+    public EdgeStyle? EdgeStyle { get; set; }
+    public Direction? Direction { get; set; }
     public string? ExtraData { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }

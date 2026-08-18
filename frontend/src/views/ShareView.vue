@@ -113,6 +113,8 @@ function convertNodeTreeToMindMap(nodes: any[]): any {
     if (n.edgeColor) data.lineColor = n.edgeColor
     if (n.edgeStyle != null && n.edgeStyle in edgeStyleMap) data.lineDasharray = edgeStyleMap[n.edgeStyle]
     if (n.note) data.note = n.note
+    if (n.direction === 0) data.dir = 'left'
+    else if (n.direction === 1) data.dir = 'right'
     const item = { id: n.id, data, children: [] as any[] }
     idMap.set(n.id, item)
     if (!n.parentId) root = item

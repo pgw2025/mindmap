@@ -7,12 +7,14 @@ import Search from 'simple-mind-map/src/plugins/Search.js'
 import Export from 'simple-mind-map/src/plugins/Export.js'
 import ExportPDF from 'simple-mind-map/src/plugins/ExportPDF.js'
 import ExportXMind from 'simple-mind-map/src/plugins/ExportXMind.js'
+import Drag from 'simple-mind-map/src/plugins/Drag.js'
 
 // 注册插件
 MindMap.usePlugin(Search)
 MindMap.usePlugin(Export)
 MindMap.usePlugin(ExportPDF)
 MindMap.usePlugin(ExportXMind)
+MindMap.usePlugin(Drag)
 import type { NodeDto, NodeCreatePayload, NodeUpdatePayload } from '@/api/nodes'
 import type { MindMapDetail } from '@/api/mindmaps'
 import * as sharesApi from '@/api/shares'
@@ -48,6 +50,10 @@ let mindMapInstance: MindMap | null = null
 
 /** 防止 setData 触发 data_change 循环 */
 let isSettingData = false
+
+/** 记录最新鼠标屏幕坐标，供 beforeDragEnd 判定方向用 */
+let lastMouseClientX = 0
+let lastMouseClientY = 0
 
 /** 选中的节点样式 */
 const selectedNodeId = ref<string | null>(null)
@@ -89,21 +95,20 @@ function convertToMindMapData(nodes: NodeDto[]): unknown {
 
   for (const n of nodes) {
     const data: Record<string, unknown> = {
-      // 图标 emoji 拼接到标题前显示（simple-mind-map 的 icon 数组系统需预定义 iconList，不适用 emoji）
       text: n.icon ? `${n.icon} ${n.title}` : n.title,
       expand: !n.isCollapsed
     }
-    // 样式属性（simple-mind-map 直接从 data 对象读取）
     if (n.color) data.color = n.color
     if (n.fontSize) data.fontSize = n.fontSize
     if (n.fontFamily) data.fontFamily = n.fontFamily
-    // 背景色：simple-mind-map 用 fillColor（节点形状填充色），非 backgroundColor（容器CSS背景色）
     if (n.backgroundColor) data.fillColor = n.backgroundColor
     if (n.borderColor) data.borderColor = n.borderColor
     if (n.shape != null && n.shape in shapeMap) data.shape = shapeMap[n.shape]
     if (n.edgeColor) data.lineColor = n.edgeColor
     if (n.edgeStyle != null && n.edgeStyle in edgeStyleMap) data.lineDasharray = edgeStyleMap[n.edgeStyle]
     if (n.note) data.note = n.note
+    if (n.direction === 0) data.dir = 'left'
+    else if (n.direction === 1) data.dir = 'right'
 
     const nodeData = {
       id: n.id,
@@ -124,6 +129,13 @@ function convertToMindMapData(nodes: NodeDto[]): unknown {
   }
 
   if (roots.length === 0) return null
+
+  // 根节点直接子节点默认全部朝右（覆盖 simple-mind-map 的奇偶交替行为）
+  const root = roots[0] as { children: { data: Record<string, unknown> }[] }
+  for (const child of root.children) {
+    if (!child.data.dir) child.data.dir = 'right'
+  }
+
   return roots[0]
 }
 
@@ -291,7 +303,7 @@ function initMindMap() {
       children: []
     },
     theme: 'classic',
-    layout: MindMap.TREE,
+    layout: 'mindMap',
     draggable: !readonly.value,
     contextMenu: !readonly.value,
     toolBar: !readonly.value,
@@ -299,7 +311,14 @@ function initMindMap() {
     enableFreeDrag: true,
     scrollbarStyle: 'thin',
     minScale: 0.2,
-    maxScale: 2
+    maxScale: 2,
+    beforeDragEnd: handleDragEnd
+  })
+
+  // 全局鼠标位置记录（供 beforeDragEnd 判定方向用）
+  document.addEventListener('mousemove', (e) => {
+    lastMouseClientX = e.clientX
+    lastMouseClientY = e.clientY
   })
 
   // 加载数据
@@ -343,6 +362,135 @@ function initMindMap() {
     searchMatchCount.value = Array.isArray(list) ? list.length : 0
     searchCurrentIndex.value = searchMatchCount.value > 0 ? 1 : 0
   })
+
+  // 兜底：每次 layout 完成后，扫描根节点直接子节点
+  // 1. 没有 direction 的统一按 'right' 修正（避免 simple-mind-map 的奇偶交替）
+  // 2. 有 direction 的按实际位置校正（处理拖拽后方向变化）
+  mindMapInstance.on('node_tree_render_end', () => {
+    if (readonly.value) return
+    setTimeout(() => normalizeRootChildDirections(), 0)
+  })
+}
+
+/** 标记刚发生过拖拽，需要在 render_end 后兜底同步 */
+let pendingDragSync = false
+
+/**
+ * simple-mind-map 拖拽即将结束回调（execCommand 之前调用）
+ * 根据鼠标最终屏幕位置相对根节点中心的方位，直接修改被拖拽节点的 dir 属性
+ * 这样后续的 layout 就会按正确方向渲染，而不是按旧方向画好后再检测
+ */
+function handleDragEnd(info: {
+  overlapNodeUid?: string
+  prevNodeUid?: string
+  nextNodeUid?: string
+  beingDragNodeList: Array<{
+    parent?: { getData: (k?: string) => unknown; isRoot?: boolean }
+    setData: (data: Record<string, unknown>) => void
+    getData: (k?: string) => unknown
+  }>
+}) {
+  if (!mindMapInstance || readonly.value) return
+  pendingDragSync = true
+
+  const root = mindMapInstance.renderer.root
+  if (!root) return
+
+  const svgEl = mindMapInstance.draw.node as SVGSVGElement
+  if (!svgEl) return
+
+  const svgRect = svgEl.getBoundingClientRect()
+  const rootCenterClientX = svgRect.left + root.left + (root.width || 0) / 2
+  const targetDir = lastMouseClientX < rootCenterClientX ? 'left' : 'right'
+
+  // 找出根节点 uid，用来判断 overlapNodeUid / prevNodeUid / nextNodeUid 是否属于根节点层
+  const rootUid = root.getData('uid')
+
+  // 判断被拖拽节点是否即将成为根节点的直接子节点
+  // 情况：overlap 是 root（拖到根节点上），或 prev/next 的 parent 是 root（拖到根节点子节点之间）
+  const willBeRootChild =
+    info.overlapNodeUid === rootUid ||
+    info.prevNodeUid && findNodeParentUid(info.prevNodeUid) === rootUid ||
+    info.nextNodeUid && findNodeParentUid(info.nextNodeUid) === rootUid
+
+  if (willBeRootChild) {
+    for (const node of info.beingDragNodeList) {
+      node.setData({ dir: targetDir })
+    }
+  }
+}
+
+/** 递归查找某个 uid 对应节点的父节点 uid */
+function findNodeParentUid(uid: string): unknown {
+  const root = mindMapInstance?.renderer.root
+  if (!root) return null
+  let result: unknown = null
+  const walk = (node: typeof root) => {
+    if (result) return
+    if (node.getData('uid') === uid) {
+      result = node.parent?.getData('uid') ?? null
+      return
+    }
+    node.children?.forEach(walk)
+  }
+  walk(root)
+  return result
+}
+
+/**
+ * 每次 layout 完成后扫描根节点直接子节点，统一修正方向：
+ * - 节点自身 data.dir 没设置（undefined）→ 用实际位置判断，同时写回 data.dir 和后端
+ * - data.dir 有值但与实际位置不符（拖拽后 freeDrag 到了另一边）→ 更新 data.dir 和后端
+ * 目的：彻底消除 simple-mind-map 默认的 index % 2 奇偶交替方向分配
+ */
+async function normalizeRootChildDirections() {
+  if (!mindMapInstance || readonly.value) return
+  const root = mindMapInstance.renderer.root
+  if (!root) return
+
+  const rootCenterX = root.left + (root.width || 0) / 2
+  const updates: Array<{
+    node: { setData: (d: Record<string, unknown>) => void; getData: (k?: string) => unknown }
+    id: string
+    targetDir: 'left' | 'right'
+    backendDir: 0 | 1
+  }> = []
+
+  const scan = (node: typeof root) => {
+    if (node.isRoot) {
+      node.children?.forEach(scan)
+      return
+    }
+    if (!node.parent || !node.parent.isRoot) return
+    const id = node.getData('id') as string | undefined
+    if (!id) return
+    const centerX = node.left + (node.width || 0) / 2
+    const targetDir: 'left' | 'right' = centerX < rootCenterX ? 'left' : 'right'
+    const backendDir: 0 | 1 = targetDir === 'left' ? 0 : 1
+    const currentBackend = nodesStore.findNode(id)?.direction
+    const currentDataDir = node.getData('dir')
+    // data.dir 不对（undefined 或 方向错）或后端 direction 不对 → 修正
+    if (currentDataDir !== targetDir || currentBackend !== backendDir) {
+      updates.push({ node, id, targetDir, backendDir })
+    }
+  }
+  scan(root)
+
+  if (updates.length === 0) return
+
+  // 1. 先修正前端节点 data.dir（可能需要再 render 一次）
+  for (const u of updates) {
+    u.node.setData({ dir: u.targetDir })
+  }
+
+  // 2. 写回后端
+  for (const u of updates) {
+    try {
+      await nodesStore.update(u.id, { direction: u.backendDir })
+    } catch {
+      // 单个失败忽略
+    }
+  }
 }
 
 function getNextSortOrder(parentId: string | null): number {
@@ -460,10 +608,12 @@ async function syncToBackend() {
 async function handleAddChild() {
   if (!selectedNodeId.value) return
   const node = nodesStore.findNode(selectedNodeId.value)
+  const isRootChild = node?.id === nodesStore.rootNode?.id
   const payload: NodeCreatePayload = {
     parentId: node?.id ?? null,
     title: '新子节点',
-    sortOrder: getNextSortOrder(node?.id ?? null)
+    sortOrder: getNextSortOrder(node?.id ?? null),
+    direction: isRootChild ? 1 : undefined
   }
   try {
     await nodesStore.create(payload)
@@ -480,10 +630,12 @@ async function handleAddSibling() {
     message.warning('根节点没有同级')
     return
   }
+  const isRootChild = node.parentId === nodesStore.rootNode?.id
   const payload: NodeCreatePayload = {
     parentId: node.parentId,
     title: '新节点',
-    sortOrder: getNextSortOrder(node.parentId)
+    sortOrder: getNextSortOrder(node.parentId),
+    direction: isRootChild ? 1 : undefined
   }
   try {
     await nodesStore.create(payload)
@@ -492,6 +644,8 @@ async function handleAddSibling() {
     message.error((e as Error).message)
   }
 }
+
+
 
 async function handleDelete() {
   if (!selectedNodeId.value) return

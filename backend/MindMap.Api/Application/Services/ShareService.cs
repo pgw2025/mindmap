@@ -269,7 +269,8 @@ public class ShareService : IShareService
                 BorderColor = n.BorderColor,
                 BackgroundColor = n.BackgroundColor,
                 EdgeColor = n.EdgeColor,
-                EdgeStyle = (int?)n.EdgeStyle,
+                EdgeStyle = n.EdgeStyle,
+                Direction = n.Direction,
                 ExtraData = n.ExtraData,
                 CreatedAt = n.CreatedAt,
                 UpdatedAt = n.UpdatedAt

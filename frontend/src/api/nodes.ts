@@ -6,6 +6,9 @@ export type NodeShape = 0 | 1 | 2 | 3 | 4 | 5 | 6
 /** 后端枚举 EdgeStyle：0=Solid 1=Dashed 2=Dotted 3=Curve */
 export type EdgeStyle = 0 | 1 | 2 | 3
 
+/** 后端枚举 Direction：0=Left 1=Right */
+export type Direction = 0 | 1 | null
+
 export interface NodeDto {
   id: string
   mindMapId: string
@@ -28,6 +31,7 @@ export interface NodeDto {
   backgroundColor?: string | null
   edgeColor?: string | null
   edgeStyle?: EdgeStyle | null
+  direction?: Direction
   extraData?: string | null
   createdAt: string
   updatedAt: string
@@ -57,6 +61,7 @@ export interface NodeCreatePayload {
   backgroundColor?: string
   edgeColor?: string
   edgeStyle?: EdgeStyle
+  direction?: Direction
   extraData?: string
 }
 
@@ -79,6 +84,7 @@ export interface NodeUpdatePayload {
   backgroundColor?: string
   edgeColor?: string
   edgeStyle?: EdgeStyle
+  direction?: Direction
   extraData?: string
 }
 
