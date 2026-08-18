@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, nextTick, watch, reactive } from 'vue'
+import { ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useMessage, NInput, NDrawer, NDrawerContent, NButton, NPopconfirm, NSpace, NModal, NCard, NEmpty, NSpin, NTag, NDropdown, NCheckbox, NDatePicker, NInputNumber } from 'naive-ui'
+import { useMessage, NInput, NButton, NModal, NDropdown } from 'naive-ui'
 import MindMap from 'simple-mind-map'
 import Search from 'simple-mind-map/src/plugins/Search.js'
 import Export from 'simple-mind-map/src/plugins/Export.js'
@@ -15,26 +15,26 @@ MindMap.usePlugin(Export)
 MindMap.usePlugin(ExportPDF)
 MindMap.usePlugin(ExportXMind)
 MindMap.usePlugin(Drag)
+
 import type { NodeDto, NodeCreatePayload, NodeUpdatePayload } from '@/api/nodes'
 import type { MindMapDetail } from '@/api/mindmaps'
-import * as sharesApi from '@/api/shares'
-import type { ShareDto, ShareCreatePayload } from '@/api/shares'
-import { fetchMindMap } from '@/api/mindmaps'
+import { fetchMindMap, updateMindMap } from '@/api/mindmaps'
 import { useNodesStore } from '@/stores/nodes'
 import { useMindMapsStore } from '@/stores/mindmaps'
-import { useVersionsStore } from '@/stores/versions'
 import { useAuthStore } from '@/stores/auth'
 import NodeToolbar from './NodeToolbar.vue'
-import RichTextEditor from './RichTextEditor.vue'
+import ShareDrawer from './components/ShareDrawer.vue'
+import VersionDrawer from './components/VersionDrawer.vue'
+import NodeContentModal from './components/NodeContentModal.vue'
+import { useTouchBridge } from './composables/useTouchBridge'
+import { useMindMapSync } from './composables/useMindMapSync'
 import { THEMES, getThemeConfig, getThemeIdOrDefault } from '@/themes/presets'
-import { updateMindMap } from '@/api/mindmaps'
 
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
 const nodesStore = useNodesStore()
 const mapsStore = useMindMapsStore()
-const versionsStore = useVersionsStore()
 
 // 根节点不能删除提示弹窗
 const rootDeleteTipVisible = ref(false)
@@ -50,13 +50,6 @@ const loading = ref(true)
 const mindMapRef = ref<HTMLDivElement | null>(null)
 let mindMapInstance: MindMap | null = null
 
-/** 防止 setData 触发 data_change 循环 */
-let isSettingData = false
-
-/** 记录最新鼠标屏幕坐标，供 beforeDragEnd 判定方向用 */
-let lastMouseClientX = 0
-let lastMouseClientY = 0
-
 /** 选中的节点样式 */
 const selectedNodeId = ref<string | null>(null)
 const showToolbar = ref(false)
@@ -69,225 +62,41 @@ const searchKeyword = ref('')
 const searchMatchCount = ref(0)
 const searchCurrentIndex = ref(0)
 
-/** 转换后端节点树为 simple-mind-map 格式 */
-/** 后端 NodeShape 数字 → simple-mind-map 形状字符串 */
-const shapeMap: Record<number, string> = {
-  0: 'rectangle',
-  1: 'roundedRectangle',
-  2: 'circle',
-  3: 'ellipse',
-  4: 'diamond',
-  5: 'parallelogram'
-  // 6=Underline: simple-mind-map 无对应形状，默认 rectangle
-}
+// —— 组合式函数：触摸桥接 + 双指缩放 ——
+const { bindTouchBridge } = useTouchBridge({
+  mindMapRef,
+  getMindMapInstance: () => mindMapInstance
+})
 
-/** 后端 EdgeStyle 数字 → simple-mind-map lineDasharray */
-const edgeStyleMap: Record<number, string> = {
-  0: 'none',
-  1: '6,4',
-  2: '2,2',
-  3: 'none' // Curve 通过布局控制，虚线同实线
-}
+// —— 组合式函数：数据转换/同步/方向归一化/拖拽预判 ——
+const {
+  isSettingData,
+  bindGlobalMouseTracker,
+  convertToMindMapData,
+  reloadMindMap,
+  syncToBackend,
+  handleDragEnd,
+  normalizeRootChildDirections
+} = useMindMapSync({
+  getMindMapInstance: () => mindMapInstance,
+  nodesStore,
+  readonly
+})
 
-function convertToMindMapData(nodes: NodeDto[]): unknown {
-  if (nodes.length === 0) return null
+// —— 子组件引用 ——
+const shareDrawerRef = ref<InstanceType<typeof ShareDrawer> | null>(null)
+const versionDrawerRef = ref<InstanceType<typeof VersionDrawer> | null>(null)
 
-  const nodeMap = new Map<string, unknown>()
-  const roots: unknown[] = []
+// —— 弹窗/抽屉可见状态 ——
+const shareDrawerVisible = ref(false)
+const versionsDrawerVisible = ref(false)
+const contentModalVisible = ref(false)
 
-  for (const n of nodes) {
-    const data: Record<string, unknown> = {
-      text: n.icon ? `${n.icon} ${n.title}` : n.title,
-      expand: !n.isCollapsed
-    }
-    if (n.color) data.color = n.color
-    if (n.fontSize) data.fontSize = n.fontSize
-    if (n.fontFamily) data.fontFamily = n.fontFamily
-    if (n.backgroundColor) data.fillColor = n.backgroundColor
-    if (n.borderColor) data.borderColor = n.borderColor
-    if (n.shape != null && n.shape in shapeMap) data.shape = shapeMap[n.shape]
-    if (n.edgeColor) data.lineColor = n.edgeColor
-    if (n.edgeStyle != null && n.edgeStyle in edgeStyleMap) data.lineDasharray = edgeStyleMap[n.edgeStyle]
-    if (n.note) data.note = n.note
-    if (n.direction === 0) data.dir = 'left'
-    else if (n.direction === 1) data.dir = 'right'
-
-    const nodeData = {
-      id: n.id,
-      data,
-      children: [] as unknown[]
-    }
-    nodeMap.set(n.id, nodeData)
-  }
-
-  for (const n of nodes) {
-    const nodeData = nodeMap.get(n.id) as { children: unknown[] }
-    if (n.parentId && nodeMap.has(n.parentId)) {
-      const parentData = nodeMap.get(n.parentId) as { children: unknown[] }
-      parentData.children.push(nodeData)
-    } else {
-      roots.push(nodeData)
-    }
-  }
-
-  if (roots.length === 0) return null
-
-  // 根节点直接子节点默认全部朝右（覆盖 simple-mind-map 的奇偶交替行为）
-  const root = roots[0] as { children: { data: Record<string, unknown> }[] }
-  for (const child of root.children) {
-    if (!child.data.dir) child.data.dir = 'right'
-  }
-
-  return roots[0]
-}
-
-/** 触摸事件 → 鼠标事件桥接 + 双指捏合缩放（simple-mind-map 默认不绑定 touch 事件） */
-let touchBridgeBound = false
-function bindTouchBridge() {
-  const el = mindMapRef.value
-  if (!el || touchBridgeBound) return
-  touchBridgeBound = true
-
-  /** 派发合成鼠标事件到指定 target */
-  function dispatchMouse(type: string, touch: Touch, target: Element) {
-    const evt = new MouseEvent(type, {
-      bubbles: true,
-      cancelable: true,
-      view: window,
-      detail: 1,
-      clientX: touch.clientX,
-      clientY: touch.clientY,
-      button: 0,
-      buttons: type === 'mouseup' ? 0 : 1
-    })
-    ;(evt as any)._fromTouch = true
-    target.dispatchEvent(evt)
-  }
-
-  /** 元素 + 指定坐标下的实际目标 */
-  function elemAtPoint(el: Element, x: number, y: number): Element {
-    const hit = document.elementFromPoint(x, y)
-    if (hit && (el === hit || el.contains(hit))) return hit
-    return el
-  }
-
-  /** 两指距离 */
-  function distance(t1: Touch, t2: Touch) {
-    const dx = t1.clientX - t2.clientX
-    const dy = t1.clientY - t2.clientY
-    return Math.hypot(dx, dy)
-  }
-
-  /** 两指中心点（相对于容器） */
-  function pinchCenter(t1: Touch, t2: Touch) {
-    const rect = el!.getBoundingClientRect()
-    return {
-      cx: (t1.clientX + t2.clientX) / 2 - rect.left,
-      cy: (t1.clientY + t2.clientY) / 2 - rect.top
-    }
-  }
-
-  // —— 单指拖拽状态 ——
-  let downTarget: Element | null = null
-  let lastTouch: Touch | null = null
-  let moved = false
-
-  // —— 双指捏合状态 ——
-  let pinching = false
-  let pinchStartDist = 0
-  let pinchStartScale = 1
-  let pinchCenterPoint = { cx: 0, cy: 0 }
-
-  el.addEventListener('touchstart', (e: TouchEvent) => {
-    if (e.touches.length >= 2) {
-      // 进入捏合模式，重置单指状态
-      pinching = true
-      downTarget = null
-      lastTouch = null
-      moved = false
-      const t1 = e.touches[0]
-      const t2 = e.touches[1]
-      pinchStartDist = distance(t1, t2)
-      pinchStartScale = (mindMapInstance?.view as any)?.scale ?? 1
-      pinchCenterPoint = pinchCenter(t1, t2)
-      e.preventDefault()
-      return
-    }
-    if (pinching) {
-      // 之前是捏合，现在只剩一指：退出捏合模式
-      pinching = false
-    }
-    const t = e.touches[0]
-    lastTouch = t
-    moved = false
-    downTarget = elemAtPoint(el, t.clientX, t.clientY)
-    dispatchMouse('mousedown', t, downTarget)
-  }, { passive: false, capture: false })
-
-  el.addEventListener('touchmove', (e: TouchEvent) => {
-    if (pinching && e.touches.length >= 2) {
-      // 双指捏合缩放
-      const t1 = e.touches[0]
-      const t2 = e.touches[1]
-      const curDist = distance(t1, t2)
-      const view: any = mindMapInstance?.view
-      if (pinchStartDist > 0 && view) {
-        const ratio = curDist / pinchStartDist
-        const targetScale = Math.max(0.2, Math.min(4, pinchStartScale * ratio))
-        view.setScale(targetScale, pinchCenterPoint.cx, pinchCenterPoint.cy)
-      }
-      e.preventDefault()
-      return
-    }
-    if (e.touches.length > 1 || !lastTouch || !downTarget) return
-    const t = e.touches[0]
-    if (moved || Math.abs(t.clientX - lastTouch.clientX) > 4 || Math.abs(t.clientY - lastTouch.clientY) > 4) {
-      moved = true
-      e.preventDefault()
-    }
-    lastTouch = t
-    dispatchMouse('mousemove', t, downTarget)
-  }, { passive: false, capture: false })
-
-  el.addEventListener('touchend', (e: TouchEvent) => {
-    if (e.touches.length >= 2) {
-      // 还在捏合，保持状态
-      return
-    }
-    if (pinching) {
-      // 捏合结束，可能还有一指残留
-      pinching = false
-      if (e.touches.length === 1) {
-        // 只剩一指：作为新的单指起点
-        const t = e.touches[0]
-        lastTouch = t
-        moved = false
-        downTarget = elemAtPoint(el, t.clientX, t.clientY)
-        dispatchMouse('mousedown', t, downTarget)
-      }
-      return
-    }
-    if (!lastTouch || !downTarget) {
-      downTarget = null
-      lastTouch = null
-      return
-    }
-    dispatchMouse('mouseup', lastTouch, downTarget)
-    downTarget = null
-    lastTouch = null
-    moved = false
-  }, { passive: true, capture: false })
-
-  el.addEventListener('touchcancel', () => {
-    if (lastTouch && downTarget && !pinching) {
-      dispatchMouse('mouseup', lastTouch, downTarget)
-    }
-    downTarget = null
-    lastTouch = null
-    moved = false
-    pinching = false
-  }, { passive: true })
-}
+/** 当前选中节点（供 NodeContentModal 使用） */
+const selectedNodeForContent = computed<NodeDto | null>(() => {
+  if (!selectedNodeId.value) return null
+  return nodesStore.findNode(selectedNodeId.value) ?? null
+})
 
 /** 初始化 simple-mind-map */
 function initMindMap() {
@@ -295,6 +104,9 @@ function initMindMap() {
     console.error('[MindMap] 容器元素不存在，mindMapRef =', mindMapRef.value)
     return
   }
+
+  // 1. 开启保护开关，防止初始化和首次 setData 触发 syncToBackend 误删数据库节点
+  isSettingData.value = true
 
   const themeId = getThemeIdOrDefault(mapDetail.value?.theme)
 
@@ -304,8 +116,7 @@ function initMindMap() {
       data: { text: '中心主题' },
       children: []
     },
-    theme: 'default',
-    themeConfig: getThemeConfig(themeId),
+    theme: 'classic',
     layout: 'mindMap',
     draggable: !readonly.value,
     contextMenu: !readonly.value,
@@ -319,16 +130,24 @@ function initMindMap() {
   })
 
   // 全局鼠标位置记录（供 beforeDragEnd 判定方向用）
-  document.addEventListener('mousemove', (e) => {
-    lastMouseClientX = e.clientX
-    lastMouseClientY = e.clientY
-  })
+  bindGlobalMouseTracker()
 
   // 加载数据
   const mindMapData = convertToMindMapData(nodesStore.nodes)
   if (mindMapData) {
     mindMapInstance.setData(mindMapData)
+    mindMapInstance.view?.fit()
   }
+
+  // 2. 确保在数据加载（setData）后，再应用/覆盖自定义主题配置
+  mindMapInstance.setThemeConfig(getThemeConfig(themeId), true)
+
+  // 3. 延迟关闭保护开关，确保初始渲染引发的 data_change 被安全跳过
+  nextTick(() => {
+    setTimeout(() => {
+      isSettingData.value = false
+    }, 500) // 延迟 500ms 避开初始化渲染期
+  })
 
   // 移动端触摸事件桥接到鼠标事件（simple-mind-map 默认只绑定 mouse 事件）
   bindTouchBridge()
@@ -351,7 +170,7 @@ function initMindMap() {
   // 监听数据变化（键盘快捷键 Tab/Enter/Delete 等触发）
   let dataChangeTimer: ReturnType<typeof setTimeout> | null = null
   mindMapInstance.on('data_change', () => {
-    if (isSettingData) return // setData 触发的，跳过同步
+    if (isSettingData.value) return // setData 触发的，跳过同步
     // 防抖：避免频繁操作时多次调用
     if (dataChangeTimer) clearTimeout(dataChangeTimer)
     dataChangeTimer = setTimeout(() => {
@@ -367,244 +186,16 @@ function initMindMap() {
   })
 
   // 兜底：每次 layout 完成后，扫描根节点直接子节点
-  // 1. 没有 direction 的统一按 'right' 修正（避免 simple-mind-map 的奇偶交替）
-  // 2. 有 direction 的按实际位置校正（处理拖拽后方向变化）
   mindMapInstance.on('node_tree_render_end', () => {
     if (readonly.value) return
     setTimeout(() => normalizeRootChildDirections(), 0)
   })
 }
 
-/** 标记刚发生过拖拽，需要在 render_end 后兜底同步 */
-let pendingDragSync = false
-
-/**
- * simple-mind-map 拖拽即将结束回调（execCommand 之前调用）
- * 根据鼠标最终屏幕位置相对根节点中心的方位，直接修改被拖拽节点的 dir 属性
- * 这样后续的 layout 就会按正确方向渲染，而不是按旧方向画好后再检测
- */
-function handleDragEnd(info: {
-  overlapNodeUid?: string
-  prevNodeUid?: string
-  nextNodeUid?: string
-  beingDragNodeList: Array<{
-    parent?: { getData: (k?: string) => unknown; isRoot?: boolean }
-    setData: (data: Record<string, unknown>) => void
-    getData: (k?: string) => unknown
-  }>
-}) {
-  if (!mindMapInstance || readonly.value) return
-  pendingDragSync = true
-
-  const root = mindMapInstance.renderer.root
-  if (!root) return
-
-  const svgEl = mindMapInstance.draw.node as SVGSVGElement
-  if (!svgEl) return
-
-  const svgRect = svgEl.getBoundingClientRect()
-  const rootCenterClientX = svgRect.left + root.left + (root.width || 0) / 2
-  const targetDir = lastMouseClientX < rootCenterClientX ? 'left' : 'right'
-
-  // 找出根节点 uid，用来判断 overlapNodeUid / prevNodeUid / nextNodeUid 是否属于根节点层
-  const rootUid = root.getData('uid')
-
-  // 判断被拖拽节点是否即将成为根节点的直接子节点
-  // 情况：overlap 是 root（拖到根节点上），或 prev/next 的 parent 是 root（拖到根节点子节点之间）
-  const willBeRootChild =
-    info.overlapNodeUid === rootUid ||
-    info.prevNodeUid && findNodeParentUid(info.prevNodeUid) === rootUid ||
-    info.nextNodeUid && findNodeParentUid(info.nextNodeUid) === rootUid
-
-  if (willBeRootChild) {
-    for (const node of info.beingDragNodeList) {
-      node.setData({ dir: targetDir })
-    }
-  }
-}
-
-/** 递归查找某个 uid 对应节点的父节点 uid */
-function findNodeParentUid(uid: string): unknown {
-  const root = mindMapInstance?.renderer.root
-  if (!root) return null
-  let result: unknown = null
-  const walk = (node: typeof root) => {
-    if (result) return
-    if (node.getData('uid') === uid) {
-      result = node.parent?.getData('uid') ?? null
-      return
-    }
-    node.children?.forEach(walk)
-  }
-  walk(root)
-  return result
-}
-
-/**
- * 每次 layout 完成后扫描根节点直接子节点，统一修正方向：
- * - 节点自身 data.dir 没设置（undefined）→ 用实际位置判断，同时写回 data.dir 和后端
- * - data.dir 有值但与实际位置不符（拖拽后 freeDrag 到了另一边）→ 更新 data.dir 和后端
- * 目的：彻底消除 simple-mind-map 默认的 index % 2 奇偶交替方向分配
- */
-async function normalizeRootChildDirections() {
-  if (!mindMapInstance || readonly.value) return
-  const root = mindMapInstance.renderer.root
-  if (!root) return
-
-  const rootCenterX = root.left + (root.width || 0) / 2
-  const updates: Array<{
-    node: { setData: (d: Record<string, unknown>) => void; getData: (k?: string) => unknown }
-    id: string
-    targetDir: 'left' | 'right'
-    backendDir: 0 | 1
-  }> = []
-
-  const scan = (node: typeof root) => {
-    if (node.isRoot) {
-      node.children?.forEach(scan)
-      return
-    }
-    if (!node.parent || !node.parent.isRoot) return
-    const id = node.getData('id') as string | undefined
-    if (!id) return
-    const centerX = node.left + (node.width || 0) / 2
-    const targetDir: 'left' | 'right' = centerX < rootCenterX ? 'left' : 'right'
-    const backendDir: 0 | 1 = targetDir === 'left' ? 0 : 1
-    const currentBackend = nodesStore.findNode(id)?.direction
-    const currentDataDir = node.getData('dir')
-    // data.dir 不对（undefined 或 方向错）或后端 direction 不对 → 修正
-    if (currentDataDir !== targetDir || currentBackend !== backendDir) {
-      updates.push({ node, id, targetDir, backendDir })
-    }
-  }
-  scan(root)
-
-  if (updates.length === 0) return
-
-  // 1. 先修正前端节点 data.dir（可能需要再 render 一次）
-  for (const u of updates) {
-    u.node.setData({ dir: u.targetDir })
-  }
-
-  // 2. 写回后端
-  for (const u of updates) {
-    try {
-      await nodesStore.update(u.id, { direction: u.backendDir })
-    } catch {
-      // 单个失败忽略
-    }
-  }
-}
-
 function getNextSortOrder(parentId: string | null): number {
   const children = nodesStore.getChildren(parentId)
   if (children.length === 0) return 0
   return Math.max(...children.map((c) => c.sortOrder)) + 1
-}
-
-function reloadMindMap() {
-  if (!mindMapInstance) return
-  isSettingData = true
-  const mindMapData = convertToMindMapData(nodesStore.nodes)
-  if (mindMapData) {
-    mindMapInstance.setData(mindMapData)
-  }
-  setTimeout(() => { isSettingData = false }, 100)
-}
-
-/** 从 simple-mind-map 数据树提取所有节点信息 */
-interface TreeDataNode {
-  id?: string
-  data?: { text?: string; expand?: boolean }
-  children?: TreeDataNode[]
-}
-
-interface FlatNode {
-  id?: string
-  parentId: string | null
-  text: string
-  isCollapsed: boolean
-  sortOrder: number
-}
-
-function flattenTree(node: TreeDataNode, parentId: string | null, sortOrder: number, result: FlatNode[]) {
-  const text = node.data?.text || ''
-  const isCollapsed = node.data?.expand === false
-  result.push({ id: node.id, parentId, text, isCollapsed, sortOrder })
-  if (node.children) {
-    for (let i = 0; i < node.children.length; i++) {
-      flattenTree(node.children[i], node.id || null, i, result)
-    }
-  }
-}
-
-/** 同步 simple-mind-map 的数据变更到后端 */
-async function syncToBackend() {
-  if (!mindMapInstance) return
-  const rawData = mindMapInstance.getData() as TreeDataNode
-  if (!rawData) return
-
-  const treeNodes: FlatNode[] = []
-  flattenTree(rawData, null, 0, treeNodes)
-
-  // 获取后端现有节点列表
-  const backendNodes = nodesStore.nodes
-  const backendIds = new Set(backendNodes.map(n => n.id))
-  const treeIds = new Set(treeNodes.filter(n => n.id).map(n => n.id!))
-
-  try {
-    // 1. 创建新节点（tree 中有但 backend 中没有的）
-    for (const tn of treeNodes) {
-      if (!tn.id || !backendIds.has(tn.id)) {
-        const parentId = tn.parentId && backendIds.has(tn.parentId) ? tn.parentId : null
-        const created = await nodesStore.create({
-          parentId,
-          title: tn.text || '新节点',
-          sortOrder: tn.sortOrder,
-          isCollapsed: tn.isCollapsed
-        })
-        backendIds.add(created.id)
-      }
-    }
-
-    // 2. 更新已有节点（文字、折叠状态、父节点变更）
-    for (const tn of treeNodes) {
-      if (!tn.id || !backendIds.has(tn.id)) continue
-      const backendNode = backendNodes.find(n => n.id === tn.id)
-      if (!backendNode) continue
-
-      const updates: NodeUpdatePayload = {}
-      // 比较时考虑 icon 前缀：text = icon + ' ' + title
-      const expectedText = (backendNode.icon ? backendNode.icon + ' ' : '') + backendNode.title
-      if (expectedText !== tn.text) {
-        // 从 text 中去掉 icon 前缀提取 title
-        let newTitle = tn.text
-        if (backendNode.icon && tn.text.startsWith(backendNode.icon + ' ')) {
-          newTitle = tn.text.substring(backendNode.icon.length + 1)
-        }
-        if (backendNode.title !== newTitle) updates.title = newTitle
-      }
-      if (backendNode.isCollapsed !== tn.isCollapsed) updates.isCollapsed = tn.isCollapsed
-      if (backendNode.sortOrder !== tn.sortOrder) updates.sortOrder = tn.sortOrder
-
-      // 父节点变更 → 调用 move API
-      if (tn.parentId !== backendNode.parentId) {
-        const newParentId = tn.parentId && backendIds.has(tn.parentId) ? tn.parentId : null
-        await nodesStore.move(tn.id, { parentId: newParentId, sortOrder: tn.sortOrder })
-      } else if (Object.keys(updates).length > 0) {
-        await nodesStore.update(tn.id, updates)
-      }
-    }
-
-    // 3. 删除不在 tree 中的节点
-    for (const bn of backendNodes) {
-      if (!treeIds.has(bn.id) && bn.parentId !== null) {
-        await nodesStore.remove(bn.id)
-      }
-    }
-  } catch (e) {
-    console.error('[syncToBackend] error:', e)
-  }
 }
 
 /** 工具栏操作 */
@@ -648,8 +239,6 @@ async function handleAddSibling() {
   }
 }
 
-
-
 async function handleDelete() {
   if (!selectedNodeId.value) return
   const node = nodesStore.findNode(selectedNodeId.value)
@@ -689,6 +278,31 @@ async function handleUpdateStyle(payload: NodeUpdatePayload) {
   } catch (e) {
     message.error((e as Error).message)
   }
+}
+
+/** 节点内容保存回调（来自 NodeContentModal） */
+async function handleContentSave(payload: NodeUpdatePayload) {
+  if (!selectedNodeId.value) return
+  try {
+    await nodesStore.update(selectedNodeId.value, payload)
+    reloadMindMap()
+  } catch (e) {
+    message.error((e as Error).message || '保存失败')
+  }
+}
+
+/** 版本回滚后刷新画布 + 节点 + 详情（来自 VersionDrawer） */
+async function handleVersionRollback() {
+  const mapId = mindMapId.value
+  nodesStore.clearAll?.()
+  await nodesStore.load(mapId)
+  mapDetail.value = await fetchMindMap(mapId)
+  reloadMindMap()
+}
+
+function openContentEditor() {
+  if (!selectedNodeId.value) return
+  contentModalVisible.value = true
 }
 
 function handleZoomIn() {
@@ -765,90 +379,6 @@ function handleSearchClear() {
   mindMapInstance?.search?.endSearch()
   searchMatchCount.value = 0
   searchCurrentIndex.value = 0
-}
-
-/** 版本历史 */
-const versionsDrawerVisible = ref(false)
-const createVersionModalVisible = ref(false)
-const createVersionRemark = ref('')
-const creatingVersion = ref(false)
-const rollingBackId = ref<string | null>(null)
-
-async function openVersions() {
-  try {
-    await versionsStore.load(mindMapId.value, true)
-  } catch (e) {
-    message.error('加载版本历史失败')
-  }
-  versionsDrawerVisible.value = true
-}
-
-async function openCreateVersion() {
-  createVersionRemark.value = ''
-  createVersionModalVisible.value = true
-}
-
-async function submitCreateVersion() {
-  creatingVersion.value = true
-  try {
-    await versionsStore.create(mindMapId.value, {
-      remark: createVersionRemark.value.trim() || undefined
-    })
-    message.success('版本已保存')
-    createVersionModalVisible.value = false
-    // 如果抽屉已打开，刷新列表
-    if (versionsDrawerVisible.value) {
-      await versionsStore.load(mindMapId.value, true)
-    }
-  } catch (e) {
-    message.error((e as Error).message || '保存失败')
-  } finally {
-    creatingVersion.value = false
-  }
-}
-
-async function handleRollback(versionId: string, versionNumber: number) {
-  rollingBackId.value = versionId
-  try {
-    await versionsStore.rollback(mindMapId.value, versionId)
-    message.success(`已回滚到 V${versionNumber}`)
-    // 重新加载节点数据和画布
-    const mapId = mindMapId.value
-    // 清空 store，强制重新加载
-    nodesStore.clearAll?.()
-    await nodesStore.load(mapId)
-    // 重新加载导图详情
-    mapDetail.value = await fetchMindMap(mapId)
-    reloadMindMap()
-    versionsDrawerVisible.value = false
-  } catch (e) {
-    message.error((e as Error).message || '回滚失败')
-  } finally {
-    rollingBackId.value = null
-  }
-}
-
-async function handleDeleteVersion(versionId: string) {
-  try {
-    await versionsStore.remove(mindMapId.value, versionId)
-    message.success('已删除')
-  } catch (e) {
-    message.error((e as Error).message || '删除失败')
-  }
-}
-
-function formatVersionTime(iso: string): string {
-  const d = new Date(iso)
-  const now = new Date()
-  const diffMs = now.getTime() - d.getTime()
-  const diffMins = Math.floor(diffMs / 60000)
-  if (diffMins < 1) return '刚刚'
-  if (diffMins < 60) return `${diffMins} 分钟前`
-  const diffHours = Math.floor(diffMins / 60)
-  if (diffHours < 24) return `${diffHours} 小时前`
-  const diffDays = Math.floor(diffHours / 24)
-  if (diffDays < 30) return `${diffDays} 天前`
-  return d.toLocaleDateString() + ' ' + d.toLocaleTimeString().slice(0, 5)
 }
 
 /** 导出功能 */
@@ -972,167 +502,11 @@ async function handleTitleBlur() {
   }
 }
 
-/** 富文本节点内容编辑面板 */
-const contentModalVisible = ref(false)
-const editingNodeTitle = ref('')
-const editingNodeContent = ref('')
-const editingNodeNote = ref('')
-const savingContent = ref(false)
-
-function openContentEditor() {
-  if (!selectedNodeId.value) return
-  const node = nodesStore.findNode(selectedNodeId.value)
-  if (!node) return
-  editingNodeTitle.value = node.title
-  editingNodeContent.value = node.content || ''
-  editingNodeNote.value = node.note || ''
-  contentModalVisible.value = true
-}
-
-async function saveNodeContent() {
-  if (!selectedNodeId.value) return
-  savingContent.value = true
-  try {
-    const payload: NodeUpdatePayload = {
-      title: editingNodeTitle.value,
-      content: editingNodeContent.value || undefined,
-      note: editingNodeNote.value || undefined
-    }
-    await nodesStore.update(selectedNodeId.value, payload)
-    reloadMindMap()
-    contentModalVisible.value = false
-    message.success('内容已保存')
-  } catch (e) {
-    message.error((e as Error).message || '保存失败')
-  } finally {
-    savingContent.value = false
+/** 分享设为公开后同步父组件状态 */
+function handleSharePublicChange(isPublic: boolean) {
+  if (mapDetail.value) {
+    mapDetail.value.isPublic = mapDetail.value.isPublic || isPublic
   }
-}
-
-/** 分享功能 */
-const shareDrawerVisible = ref(false)
-const shareList = ref<ShareDto[]>([])
-const shareLoading = ref(false)
-const creatingShare = ref(false)
-const createShareVisible = ref(false)
-const newShare = reactive<ShareCreatePayload>({
-  setPublic: false,
-  password: '',
-  expiresAt: null,
-  maxAccessCount: null,
-  allowCopy: true
-})
-const shareUrlCopied = ref<string | null>(null)
-
-async function openShareDrawer() {
-  shareDrawerVisible.value = true
-  shareLoading.value = true
-  try {
-    shareList.value = await sharesApi.fetchShares(mindMapId.value)
-  } catch (e) {
-    message.error((e as Error).message || '获取分享列表失败')
-  } finally {
-    shareLoading.value = false
-  }
-}
-
-function openCreateShare() {
-  newShare.setPublic = mapDetail.value?.isPublic ?? false
-  newShare.password = ''
-  newShare.expiresAt = null
-  newShare.maxAccessCount = null
-  newShare.allowCopy = true
-  createShareVisible.value = true
-}
-
-async function submitCreateShare() {
-  creatingShare.value = true
-  try {
-    const payload: ShareCreatePayload = {
-      setPublic: newShare.setPublic,
-      allowCopy: newShare.allowCopy
-    }
-    if (newShare.password) payload.password = newShare.password
-    if (newShare.expiresAt) payload.expiresAt = newShare.expiresAt
-    if (newShare.maxAccessCount) payload.maxAccessCount = newShare.maxAccessCount
-    const created = await sharesApi.createShare(mindMapId.value, payload)
-    shareList.value.unshift(created)
-    createShareVisible.value = false
-    message.success('分享链接已创建')
-    if (mapDetail.value) mapDetail.value.isPublic = mapDetail.value.isPublic || !!newShare.setPublic
-    // 自动复制分享链接
-    await copyShareUrl(created)
-  } catch (e) {
-    message.error((e as Error).message || '创建失败')
-  } finally {
-    creatingShare.value = false
-  }
-}
-
-function buildShareUrl(share: ShareDto): string {
-  return `${location.origin}/#/share/${share.shareToken}`
-}
-
-async function copyShareUrl(share: ShareDto) {
-  const url = buildShareUrl(share)
-  
-  // 1. 优先尝试现代 Clipboard API（仅支持 HTTPS 或 localhost/127.0.0.1）
-  if (navigator.clipboard && window.isSecureContext) {
-    try {
-      await navigator.clipboard.writeText(url)
-      shareUrlCopied.value = share.id
-      message.success('分享链接已复制到剪贴板')
-      setTimeout(() => { shareUrlCopied.value = null }, 2000)
-      return // 复制成功，提前退出
-    } catch (err) {
-      console.warn('Clipboard API 复制失败，正在尝试使用降级方案...', err)
-    }
-  }
-
-  // 2. 降级方案：适用于 HTTP 协议、异步接口回调后手势失效等场景
-  const textArea = document.createElement('textarea')
-  textArea.value = url
-  
-  // 隐藏文本域，防止页面滚动或抖动
-  textArea.style.position = 'fixed'
-  textArea.style.top = '-9999px'
-  textArea.style.left = '-9999px'
-  
-  document.body.appendChild(textArea)
-  textArea.focus()
-  textArea.select()
-  
-  try {
-    const successful = document.execCommand('copy')
-    textArea.remove()
-    if (successful) {
-      shareUrlCopied.value = share.id
-      message.success('分享链接已复制到剪贴板')
-      setTimeout(() => { shareUrlCopied.value = null }, 2000)
-    } else {
-      message.error('复制失败，请手动复制')
-    }
-  } catch (err) {
-    console.error('降级复制方案失败:', err)
-    textArea.remove()
-    message.error('复制失败，请手动复制')
-  }
-}
-
-async function handleDeleteShare(share: ShareDto) {
-  try {
-    await sharesApi.deleteShare(share.id)
-    shareList.value = shareList.value.filter(s => s.id !== share.id)
-    message.success('分享链接已删除')
-  } catch (e) {
-    message.error((e as Error).message || '删除失败')
-  }
-}
-
-function formatShareTime(s: string | null | undefined): string {
-  if (!s) return ''
-  const d = new Date(s)
-  return d.toLocaleDateString() + ' ' + d.toLocaleTimeString().slice(0, 5)
 }
 
 /** 初始化空导图 */
@@ -1239,85 +613,49 @@ watch(() => route.params.id, () => {
       </button>
 
       <div class="editor-title" v-if="mapDetail">
-        <NInput
-          v-if="!readonly"
-          v-model:value="mapDetail.title"
-          class="title-input"
-          @blur="handleTitleBlur"
-        />
+        <NInput v-if="!readonly" v-model:value="mapDetail.title" class="title-input" @blur="handleTitleBlur" />
         <span v-else class="title-text">{{ mapDetail.title }}</span>
       </div>
 
       <div class="editor-actions">
         <template v-if="!readonly">
-          <button
-            class="btn-tool"
-            :disabled="!nodesStore.canUndo"
-            @click="handleUndo"
-            title="撤销 (Ctrl+Z)"
-          >
+          <button class="btn-tool" :disabled="!nodesStore.canUndo" @click="handleUndo" title="撤销 (Ctrl+Z)">
             ↶
           </button>
-          <button
-            class="btn-tool"
-            :disabled="!nodesStore.canRedo"
-            @click="handleRedo"
-            title="重做 (Ctrl+Y)"
-          >
+          <button class="btn-tool" :disabled="!nodesStore.canRedo" @click="handleRedo" title="重做 (Ctrl+Y)">
             ↷
           </button>
-          <button
-            class="btn-tool"
-            :disabled="!selectedNodeId"
-            @click="handleCopy"
-            title="复制 (Ctrl+C)"
-          >
+          <button class="btn-tool" :disabled="!selectedNodeId" @click="handleCopy" title="复制 (Ctrl+C)">
             ⧉
           </button>
-          <button
-            class="btn-tool"
-            :disabled="!clipboardNode"
-            @click="handlePaste"
-            title="粘贴 (Ctrl+V)"
-          >
+          <button class="btn-tool" :disabled="!clipboardNode" @click="handlePaste" title="粘贴 (Ctrl+V)">
             📋
           </button>
-          <button
-            class="btn-tool"
-            :disabled="!selectedNodeId"
-            @click="openContentEditor"
-            title="编辑节点内容"
-          >
+          <button class="btn-tool" :disabled="!selectedNodeId" @click="openContentEditor" title="编辑节点内容">
             📝
           </button>
           <span class="action-divider"></span>
-          <button class="btn-action-save" @click="openCreateVersion" title="保存为版本快照">
+          <button class="btn-action-save" @click="versionDrawerRef?.openCreateVersion()" title="保存为版本快照">
             <span class="btn-icon">💾</span><span class="btn-label">保存版本</span>
           </button>
         </template>
-        <button class="btn-action-history" @click="openVersions" title="查看版本历史">
+        <button class="btn-action-history" @click="versionsDrawerVisible = true" title="查看版本历史">
           <span class="btn-icon">🕘</span><span class="btn-label">历史</span>
         </button>
-        <button class="btn-action-share" @click="openShareDrawer" title="分享此导图">
+        <button class="btn-action-share" @click="shareDrawerVisible = true" title="分享此导图">
           <span class="btn-icon">🔗</span><span class="btn-label">分享</span>
         </button>
-        <NDropdown
-          trigger="click"
-          :options="exportOptions"
-          @select="handleExport"
-        >
+        <NDropdown trigger="click" :options="exportOptions" @select="handleExport">
           <button class="btn-action-export" :class="{ 'is-loading': exporting }" title="导出导图" :disabled="exporting">
-            <span class="btn-icon">{{ exporting ? '⏳' : '📤' }}</span><span class="btn-label">{{ exporting ? '导出中...' : '导出' }}</span>
+            <span class="btn-icon">{{ exporting ? '⏳' : '📤' }}</span><span class="btn-label">{{ exporting ? '导出中...' :
+              '导出'
+            }}</span>
           </button>
         </NDropdown>
-        <NDropdown
-          trigger="click"
-          :options="themeDropdownOptions"
-          :value="currentThemeId"
-          @select="handleThemeSelect"
-        >
+        <NDropdown trigger="click" :options="themeDropdownOptions" :value="currentThemeId" @select="handleThemeSelect">
           <button class="btn-action-theme" title="切换主题">
-            <span class="theme-swatch" :style="{ background: THEMES.find(t => t.id === currentThemeId)?.swatch.rootFill }"></span>
+            <span class="theme-swatch"
+              :style="{ background: THEMES.find(t => t.id === currentThemeId)?.swatch.rootFill }"></span>
             <span class="btn-icon">🎨</span>
             <span class="btn-label">{{ THEMES.find(t => t.id === currentThemeId)?.name ?? '主题' }}</span>
           </button>
@@ -1333,13 +671,8 @@ watch(() => route.params.id, () => {
     <main class="editor-main">
       <!-- 导图内搜索栏 -->
       <div class="search-bar">
-        <input
-          v-model="searchKeyword"
-          class="search-input"
-          type="text"
-          placeholder="搜索节点..."
-          @keyup.enter="handleSearch"
-        />
+        <input v-model="searchKeyword" class="search-input" type="text" placeholder="搜索节点..."
+          @keyup.enter="handleSearch" />
         <button v-if="searchMatchCount > 0" class="search-nav-btn" @click="handleSearchPrev" title="上一个">▲</button>
         <button v-if="searchMatchCount > 0" class="search-nav-btn" @click="handleSearchNext" title="下一个">▼</button>
         <button v-if="searchKeyword" class="search-nav-btn" @click="handleSearchClear" title="清除">✕</button>
@@ -1355,963 +688,34 @@ watch(() => route.params.id, () => {
     </main>
 
     <!-- 浮动工具栏 -->
-    <NodeToolbar
-      v-if="showToolbar && selectedNodeId"
-      :node="nodesStore.findNode(selectedNodeId)"
-      @add-child="handleAddChild"
-      @add-sibling="handleAddSibling"
-      @delete="handleDelete"
-      @update="handleUpdateStyle"
-      @copy="handleCopy"
-      @paste="handlePaste"
-    />
+    <NodeToolbar v-if="showToolbar && selectedNodeId" :node="nodesStore.findNode(selectedNodeId)"
+      @add-child="handleAddChild" @add-sibling="handleAddSibling" @delete="handleDelete" @update="handleUpdateStyle"
+      @copy="handleCopy" @paste="handlePaste" />
 
-    <!-- 创建版本弹窗 -->
-    <NModal
-      v-model:show="createVersionModalVisible"
-      preset="card"
-      title="保存版本快照"
-      style="width: 420px"
-      :mask-closable="false"
-    >
-      <div class="create-version-body">
-        <p class="tip">当前节点数：<strong>{{ nodesStore.nodes.length }}</strong>，保存后可随时回滚到此状态。</p>
-        <NInput
-          v-model:value="createVersionRemark"
-          type="textarea"
-          placeholder="输入版本备注（可选），例如：完成需求分析阶段"
-          :autosize="{ minRows: 3, maxRows: 5 }"
-          maxlength="200"
-          show-count
-        />
-      </div>
-      <template #footer>
-        <NSpace justify="end">
-          <NButton @click="createVersionModalVisible = false">取消</NButton>
-          <NButton
-            type="primary"
-            :loading="creatingVersion"
-            @click="submitCreateVersion"
-          >
-            {{ creatingVersion ? '保存中...' : '确认保存' }}
-          </NButton>
-        </NSpace>
-      </template>
-    </NModal>
+    <!-- 版本历史抽屉（含新建版本弹窗） -->
+    <VersionDrawer ref="versionDrawerRef" v-model:show="versionsDrawerVisible" :mind-map-id="mindMapId"
+      :node-count="nodesStore.nodes.length" @rollback="handleVersionRollback" />
 
-    <!-- 版本历史抽屉 -->
-    <NDrawer
-      v-model:show="versionsDrawerVisible"
-      :width="420"
-      placement="right"
-      display-directive="if"
-      title="版本历史"
-    >
-      <NDrawerContent>
-        <template #header>
-          <div class="drawer-header">
-            <span>🕘 版本历史</span>
-            <NButton size="small" type="primary" @click="openCreateVersion">+ 新建版本</NButton>
-          </div>
-        </template>
-        <div class="versions-list-wrap">
-          <NSpin v-if="versionsStore.loading" :show="true">
-            <div style="height: 200px" />
-          </NSpin>
-          <template v-else>
-            <NEmpty
-              v-if="versionsStore.items.length === 0"
-              description="暂无版本快照，点击右上角「新建版本」保存第一个快照"
-            />
-            <div v-else class="versions-list">
-              <NCard
-                v-for="v in versionsStore.items"
-                :key="v.id"
-                class="version-card"
-                :bordered="true"
-              >
-                <div class="version-card-header">
-                  <div class="version-title">
-                    <NTag type="info" round>V{{ v.versionNumber }}</NTag>
-                    <span class="version-note" v-if="v.remark">{{ v.remark }}</span>
-                    <span class="version-note no-remark" v-else>（无备注）</span>
-                  </div>
-                  <div class="version-meta">
-                    <span class="meta-item">📊 {{ v.nodeCount }} 节点</span>
-                    <span class="meta-item">👤 {{ v.createdByName }}</span>
-                    <span class="meta-item">⏰ {{ formatVersionTime(v.createdAt) }}</span>
-                  </div>
-                </div>
-                <div class="version-actions">
-                  <NPopconfirm
-                    @positive-click="handleRollback(v.id, v.versionNumber)"
-                    positive-text="确认回滚"
-                    negative-text="取消"
-                  >
-                    <template #trigger>
-                      <NButton
-                        size="small"
-                        type="warning"
-                        :loading="rollingBackId === v.id"
-                      >
-                        {{ rollingBackId === v.id ? '回滚中...' : '回滚到此版本' }}
-                      </NButton>
-                    </template>
-                    确认回滚到 V{{ v.versionNumber }}？当前所有未保存的修改将丢失，且操作不可撤销。
-                  </NPopconfirm>
-                  <NPopconfirm
-                    @positive-click="handleDeleteVersion(v.id)"
-                    positive-text="删除"
-                    negative-text="取消"
-                  >
-                    <template #trigger>
-                      <NButton size="small" type="error" quaternary>删除</NButton>
-                    </template>
-                    确认删除此版本快照？此操作不可撤销。
-                  </NPopconfirm>
-                </div>
-              </NCard>
-            </div>
-          </template>
-        </div>
-      </NDrawerContent>
-    </NDrawer>
-
-    <!-- 分享抽屉 -->
-    <NDrawer
-      v-model:show="shareDrawerVisible"
-      placement="right"
-      :width="420"
-      auto-focus
-    >
-      <NDrawerContent closable>
-        <template #header>
-          <div style="display:flex;align-items:center;justify-content:space-between;width:100%;gap:10px">
-            <span>🔗 分享此思维导图</span>
-            <NButton size="small" type="primary" @click="openCreateShare">
-              + 新建分享
-            </NButton>
-          </div>
-        </template>
-        <div v-if="shareLoading" class="drawer-loading">
-          <NSpin />
-        </div>
-        <template v-else-if="shareList.length === 0">
-          <div class="drawer-empty">
-            <NEmpty description="暂无分享链接，点击右上角「+ 新建分享」创建">
-              <NButton type="primary" @click="openCreateShare">新建分享链接</NButton>
-            </NEmpty>
-          </div>
-        </template>
-        <div v-else class="share-list">
-          <NCard
-            v-for="share in shareList"
-            :key="share.id"
-            class="share-card"
-            size="small"
-          >
-            <div class="share-card-head">
-              <div class="share-token-title">
-                <NTag type="success" size="small" round>
-                  分享链接
-                </NTag>
-                <span class="share-token-code">{{ share.shareToken }}</span>
-              </div>
-              <div v-if="share.hasPassword" class="share-tags">
-                <NTag size="small">🔐 密码</NTag>
-              </div>
-            </div>
-
-            <div class="share-url-row">
-              <code class="share-url">{{ buildShareUrl(share) }}</code>
-              <NButton
-                size="tiny"
-                type="primary"
-                quaternary
-                @click="copyShareUrl(share)"
-              >
-                {{ shareUrlCopied === share.id ? '✓ 已复制' : '复制' }}
-              </NButton>
-            </div>
-
-            <div class="share-meta">
-              <div class="meta-item">
-                <span>📊 访问次数</span>
-                <NTag size="small" type="info">
-                  {{ share.accessCount }}
-                  <template v-if="share.maxAccessCount">/{{ share.maxAccessCount }}</template>
-                </NTag>
-              </div>
-              <div class="meta-item">
-                <span>📝 另存为</span>
-                <NTag size="small" :type="share.allowCopy ? 'success' : 'warning'">
-                  {{ share.allowCopy ? '允许' : '仅查看' }}
-                </NTag>
-              </div>
-              <div v-if="share.expiresAt" class="meta-item">
-                <span>⏰ 过期时间</span>
-                <span class="meta-val">{{ formatShareTime(share.expiresAt) }}</span>
-              </div>
-              <div class="meta-item">
-                <span>🕒 创建</span>
-                <span class="meta-val">{{ formatShareTime(share.createdAt) }}</span>
-              </div>
-              <div v-if="share.lastAccessedAt" class="meta-item">
-                <span>👀 最近访问</span>
-                <span class="meta-val">{{ formatShareTime(share.lastAccessedAt) }}</span>
-              </div>
-            </div>
-
-            <div class="share-card-actions">
-              <NPopconfirm
-                @positive-click="handleDeleteShare(share)"
-              >
-                <template #trigger>
-                  <NButton size="small" type="error" quaternary>删除</NButton>
-                </template>
-                确认删除此分享链接？访问该链接的所有人将无法再查看导图。
-              </NPopconfirm>
-            </div>
-          </NCard>
-        </div>
-      </NDrawerContent>
-    </NDrawer>
-
-    <!-- 新建分享弹窗 -->
-    <NModal
-      v-model:show="createShareVisible"
-      preset="card"
-      title="新建分享链接"
-      style="width: 480px; max-width: 92vw"
-    >
-      <div class="create-share-body">
-        <div class="field-group">
-          <label class="field-label">
-            <span class="label-title">同时设为公开</span>
-            <NCheckbox v-model:checked="newShare.setPublic">
-              所有人可在首页「公开导图」列表中浏览
-            </NCheckbox>
-          </label>
-        </div>
-        <div class="field-group">
-          <label class="field-label">访问密码（可选）</label>
-          <NInput
-            v-model:value="newShare.password"
-            placeholder="留空则无需密码即可访问"
-            maxlength="32"
-            show-password-on="mousedown"
-            type="password"
-          />
-        </div>
-        <div class="field-group">
-          <label class="field-label">过期时间（可选）</label>
-          <NDatePicker
-            v-model:value="(newShare.expiresAt as unknown) as number | null"
-            type="datetime"
-            placeholder="留空表示永不过期"
-            style="width: 100%"
-            :disabled-date="(t: number) => t < Date.now() - 86400000"
-            value-format="yyyy-MM-dd HH:mm:ss"
-            :allow-input="false"
-          />
-        </div>
-        <div class="field-group">
-          <label class="field-label">最大访问次数（可选）</label>
-          <NInputNumber
-            v-model:value="newShare.maxAccessCount"
-            placeholder="留空表示不限次"
-            :min="1"
-            style="width: 100%"
-          />
-        </div>
-        <div class="field-group">
-          <label class="field-label">
-            <span class="label-title">访问者权限</span>
-            <NCheckbox v-model:checked="newShare.allowCopy">
-              允许访问者另存为副本
-            </NCheckbox>
-          </label>
-        </div>
-      </div>
-      <template #footer>
-        <NSpace justify="end">
-          <NButton @click="createShareVisible = false">取消</NButton>
-          <NButton
-            type="primary"
-            :loading="creatingShare"
-            @click="submitCreateShare"
-          >
-            {{ creatingShare ? '创建中...' : '创建' }}
-          </NButton>
-        </NSpace>
-      </template>
-    </NModal>
+    <!-- 分享抽屉（含新建分享弹窗） -->
+    <ShareDrawer ref="shareDrawerRef" v-model:show="shareDrawerVisible" :mind-map-id="mindMapId"
+      :is-public-default="mapDetail?.isPublic ?? false" @public-change="handleSharePublicChange" />
 
     <!-- 富文本节点内容编辑弹窗 -->
-    <NModal
-      v-model:show="contentModalVisible"
-      preset="card"
-      title="📝 编辑节点内容"
-      style="width: 600px; max-width: 92vw"
-      :mask-closable="false"
-    >
-      <div class="content-edit-body">
-        <div class="field-group">
-          <label class="field-label">标题</label>
-          <NInput
-            v-model:value="editingNodeTitle"
-            placeholder="节点标题"
-            maxlength="200"
-          />
-        </div>
-        <div class="field-group">
-          <label class="field-label">正文内容</label>
-          <RichTextEditor v-model="editingNodeContent" />
-        </div>
-        <div class="field-group">
-          <label class="field-label">备注</label>
-          <NInput
-            v-model:value="editingNodeNote"
-            type="textarea"
-            placeholder="节点备注（可选）"
-            :autosize="{ minRows: 2, maxRows: 4 }"
-            maxlength="2000"
-          />
-        </div>
-      </div>
-      <template #footer>
-        <NSpace justify="end">
-          <NButton @click="contentModalVisible = false">取消</NButton>
-          <NButton
-            type="primary"
-            :loading="savingContent"
-            @click="saveNodeContent"
-          >
-            {{ savingContent ? '保存中...' : '保存' }}
-          </NButton>
-        </NSpace>
-      </template>
-    </NModal>
+    <NodeContentModal v-model:show="contentModalVisible" :node="selectedNodeForContent" @save="handleContentSave" />
 
     <!-- 根节点不能删除提示 -->
-    <NModal
-      v-model:show="rootDeleteTipVisible"
-      preset="dialog"
-      type="warning"
-      title="无法删除"
-      positive-text="我知道了"
-      :negative-button-props="{ style: { display: 'none' } }"
-      display-directive="if"
-      style="max-width: 420px"
-    >
+    <NModal v-model:show="rootDeleteTipVisible" preset="dialog" type="warning" title="无法删除" positive-text="我知道了"
+      :negative-button-props="{ style: { display: 'none' } }" display-directive="if" style="max-width: 420px">
       根节点不能删除。你可以清空内容但不能删除中心主题。
     </NModal>
 
     <!-- 删除节点确认 -->
-    <NModal
-      v-model:show="nodeDeleteConfirmVisible"
-      preset="dialog"
-      type="warning"
-      title="确认删除"
-      positive-text="删除"
-      negative-text="取消"
-      :positive-button-props="{ type: 'error', loading: nodeDeleteSubmitting }"
-      display-directive="if"
-      style="max-width: 420px"
-      @positive-click="submitNodeDelete"
-    >
+    <NModal v-model:show="nodeDeleteConfirmVisible" preset="dialog" type="warning" title="确认删除" positive-text="删除"
+      negative-text="取消" :positive-button-props="{ type: 'error', loading: nodeDeleteSubmitting }"
+      display-directive="if" style="max-width: 420px" @positive-click="submitNodeDelete">
       删除「{{ nodeDeleteTargetTitle }}」及其所有子节点？
     </NModal>
   </div>
 </template>
 
-<style scoped lang="scss">
-.editor-container {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  width: 100vw;
-  background: var(--app-bg, #f5f7fa);
-  overflow: hidden;
-}
-
-.editor-header {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 12px 16px;
-  padding-top: calc(12px + var(--safe-top, 0px));
-  background: var(--app-card-bg, #fff);
-  border-bottom: 1px solid var(--app-border, #e0e0e6);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-  z-index: 10;
-}
-
-.btn-back {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 8px 12px;
-  background: transparent;
-  border: 1px solid var(--app-border, #e0e0e6);
-  border-radius: 6px;
-  color: var(--app-text-primary, #333);
-  cursor: pointer;
-  font-size: 14px;
-  transition: all 0.2s;
-
-  &:hover {
-    background: var(--app-hover-bg, #f0f0f0);
-    border-color: var(--app-primary, #18a058);
-  }
-
-  .icon {
-    font-size: 18px;
-    font-weight: bold;
-  }
-}
-
-.editor-title {
-  flex: 1;
-  max-width: 400px;
-}
-
-.title-text {
-  font-size: 16px;
-  font-weight: 500;
-  color: var(--app-text-primary, #333);
-  text-align: center;
-  display: block;
-  padding: 6px 12px;
-}
-
-.title-input {
-  width: 100%;
-  padding: 8px 12px;
-  font-size: 16px;
-  font-weight: 500;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--app-text-primary, #333);
-  outline: none;
-  text-align: center;
-  transition: all 0.2s;
-
-  &:hover,
-  &:focus {
-    border-color: var(--app-border, #e0e0e6);
-    background: var(--app-bg, #f5f7fa);
-  }
-}
-
-.editor-actions {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-}
-
-.action-divider {
-  width: 1px;
-  height: 24px;
-  background: var(--app-border, #e0e0e6);
-  margin: 0 4px;
-}
-
-.btn-tool {
-  width: 36px;
-  height: 36px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: 1px solid var(--app-border, #e0e0e6);
-  border-radius: 6px;
-  color: var(--app-text-primary, #333);
-  cursor: pointer;
-  font-size: 16px;
-  font-weight: bold;
-  transition: all 0.2s;
-
-  &:hover:not(:disabled) {
-    background: var(--app-hover-bg, #f0f0f0);
-    border-color: var(--app-primary, #18a058);
-  }
-
-  &:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
-}
-
-.editor-main {
-  flex: 1;
-  position: relative;
-  overflow: hidden;
-}
-
-.search-bar {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  z-index: 50;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  background: var(--app-card-bg, #fff);
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  padding: 4px 8px;
-}
-
-.search-input {
-  width: 180px;
-  padding: 6px 10px;
-  border: 1px solid var(--app-border, #e0e0e6);
-  border-radius: 6px;
-  font-size: 13px;
-  background: transparent;
-  color: var(--app-text-primary, #333);
-  outline: none;
-  transition: border-color 0.2s;
-
-  &:focus {
-    border-color: var(--app-primary, #18a058);
-  }
-}
-
-.search-nav-btn {
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: 1px solid var(--app-border, #e0e0e6);
-  border-radius: 6px;
-  color: var(--app-text-primary, #333);
-  cursor: pointer;
-  font-size: 12px;
-  transition: all 0.2s;
-
-  &:hover {
-    background: var(--app-hover-bg, #f0f0f0);
-    border-color: var(--app-primary, #18a058);
-  }
-}
-
-.search-count {
-  font-size: 12px;
-  color: var(--app-text-secondary, #666);
-  white-space: nowrap;
-  padding: 0 4px;
-}
-
-.loading-wrap {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-  color: var(--app-text-secondary, #666);
-}
-
-.spinner {
-  width: 40px;
-  height: 40px;
-  border: 3px solid var(--app-border, #e0e0e6);
-  border-top-color: var(--app-primary, #18a058);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.mindmap-canvas {
-  width: 100%;
-  height: 100%;
-  background: var(--app-bg, #f5f7fa);
-  /* 阻止浏览器默认手势（移动端滚动/双指缩放）抢占节点拖拽 */
-  touch-action: pan-x pan-y;
-  -ms-touch-action: pan-x pan-y;
-
-  // simple-mind-map 内部样式覆盖
-  :deep(.mind-map) {
-    width: 100%;
-    height: 100%;
-    /* SVG 内部允许触摸操作以派发事件 */
-    touch-action: none;
-  }
-}
-
-.btn-action-save,
-.btn-action-history,
-.btn-action-share,
-.btn-action-export,
-.btn-action-theme {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 12px;
-  border: 1px solid var(--app-border, #e0e0e6);
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 500;
-  transition: all 0.2s;
-  white-space: nowrap;
-}
-
-.btn-icon {
-  font-size: 15px;
-  line-height: 1;
-}
-
-.btn-label {
-  line-height: 1;
-}
-
-.btn-action-save {
-  background: var(--app-primary, #18a058);
-  color: #fff;
-  border-color: var(--app-primary, #18a058);
-
-  &:hover {
-    filter: brightness(1.05);
-  }
-}
-
-.btn-action-history,
-.btn-action-share,
-.btn-action-export,
-.btn-action-theme {
-  background: #fff;
-  color: var(--app-text-primary, #333);
-
-  &:hover {
-    background: var(--app-hover-bg, #f0f0f0);
-    border-color: var(--app-primary, #18a058);
-    color: var(--app-primary, #18a058);
-  }
-}
-
-.theme-swatch {
-  display: inline-block;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  border: 2px solid rgba(0, 0, 0, 0.15);
-  flex-shrink: 0;
-}
-
-.btn-action-export {
-  &:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  &.is-loading {
-    border-color: var(--app-primary, #18a058);
-    color: var(--app-primary, #18a058);
-  }
-}
-
-.create-version-body {
-  .tip {
-    margin: 0 0 16px;
-    font-size: 14px;
-    color: var(--app-text-secondary, #666);
-
-    strong {
-      color: var(--app-primary, #18a058);
-      font-size: 15px;
-    }
-  }
-}
-
-.content-edit-body {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.field-group {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.field-label {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--app-text-secondary, #666);
-}
-
-.drawer-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  padding-right: 12px;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--app-text-primary, #333);
-}
-
-.versions-list-wrap {
-  padding: 0 4px 16px;
-}
-
-.versions-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.version-card {
-  transition: all 0.2s;
-
-  &:hover {
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
-  }
-
-  :deep(.n-card__content) {
-    padding: 16px !important;
-  }
-}
-
-.version-card-header {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.version-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--app-text-primary, #333);
-}
-
-.version-note {
-  color: var(--app-text-primary, #333);
-  font-weight: 500;
-
-  &.no-remark {
-    color: var(--app-text-secondary, #999);
-    font-weight: 400;
-    font-style: italic;
-  }
-}
-
-.version-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  font-size: 12px;
-  color: var(--app-text-secondary, #666);
-}
-
-.meta-item {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.version-actions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-}
-
-.share-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.share-card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-}
-
-.share-token-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.share-token-code {
-  font-size: 12px;
-  color: var(--app-text-secondary, #666);
-  font-family: monospace;
-}
-
-.share-tags {
-  display: flex;
-  gap: 4px;
-}
-
-.share-url-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  background: var(--app-bg, #f5f7fa);
-  border-radius: 6px;
-  margin-bottom: 8px;
-}
-
-.share-url {
-  flex: 1;
-  font-size: 12px;
-  color: var(--app-primary, #18a058);
-  word-break: break-all;
-  font-family: monospace;
-  padding: 2px 4px;
-  margin: 0;
-}
-
-.share-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 12px;
-  color: var(--app-text-secondary, #666);
-  margin-bottom: 10px;
-}
-
-.share-meta .meta-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.meta-val {
-  color: var(--app-text-primary, #333);
-}
-
-.share-card-actions {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.create-share-body {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.label-title {
-  display: block;
-  margin-bottom: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--app-text-secondary, #666);
-}
-
-@media (max-width: 767px) {
-  .editor-header {
-    padding: 10px 10px;
-    gap: 8px;
-    flex-wrap: wrap;
-    overflow: visible;
-  }
-
-  .btn-back {
-    flex: 0 0 auto;
-    padding: 8px 10px;
-    font-size: 15px;
-    .text {
-      display: none;
-    }
-  }
-
-  .editor-title {
-    flex: 1 1 auto;
-    max-width: none;
-    min-width: 0;
-  }
-
-  .title-input {
-    font-size: 14px;
-    padding: 8px 8px;
-    text-align: left;
-  }
-
-  .editor-actions {
-    flex: 1 0 100%;
-    flex-wrap: wrap;
-    gap: 6px;
-    overflow: visible;
-  }
-
-  .btn-tool {
-    width: 38px;
-    height: 38px;
-    font-size: 16px;
-    flex: 0 0 auto;
-  }
-
-  .btn-action-save .btn-label,
-  .btn-action-history .btn-label,
-  .btn-action-share .btn-label,
-  .btn-action-export .btn-label,
-  .btn-action-theme .btn-label {
-    display: none;
-  }
-
-  .btn-action-save,
-  .btn-action-history,
-  .btn-action-share,
-  .btn-action-export,
-  .btn-action-theme {
-    padding: 8px 12px;
-    font-size: 18px;
-    min-width: 38px;
-    min-height: 38px;
-    flex: 0 0 auto;
-  }
-
-  .action-divider {
-    display: none;
-  }
-
-  /* 移动端搜索栏更紧凑 */
-  .search-bar {
-    top: 8px;
-    left: 8px;
-    padding: 4px 6px;
-    gap: 2px;
-  }
-
-  .search-input {
-    width: 120px;
-    font-size: 12px;
-    padding: 4px 8px;
-  }
-
-  .search-nav-btn {
-    width: 24px;
-    height: 24px;
-    font-size: 10px;
-  }
-
-  /* 移动端 loading 不遮挡工具栏 */
-  .loading-wrap {
-    background: rgba(255, 255, 255, 0.8);
-  backdrop-filter: blur(2px);
-  }
-}
-</style>
+<style scoped lang="scss" src="./MindMapEditorView.scss"></style>
