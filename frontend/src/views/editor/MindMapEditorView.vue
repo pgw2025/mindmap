@@ -120,7 +120,7 @@ function convertToMindMapData(nodes: NodeDto[]): unknown {
   return roots[0]
 }
 
-/** 触摸事件 → 鼠标事件桥接（simple-mind-map 默认不绑定 touch 事件） */
+/** 触摸事件 → 鼠标事件桥接 + 双指捏合缩放（simple-mind-map 默认不绑定 touch 事件） */
 let touchBridgeBound = false
 function bindTouchBridge() {
   const el = mindMapRef.value
@@ -139,7 +139,6 @@ function bindTouchBridge() {
       button: 0,
       buttons: type === 'mouseup' ? 0 : 1
     })
-    // 保留 hasTouchEvent 标记供判断来源
     ;(evt as any)._fromTouch = true
     target.dispatchEvent(evt)
   }
@@ -151,27 +150,76 @@ function bindTouchBridge() {
     return el
   }
 
+  /** 两指距离 */
+  function distance(t1: Touch, t2: Touch) {
+    const dx = t1.clientX - t2.clientX
+    const dy = t1.clientY - t2.clientY
+    return Math.hypot(dx, dy)
+  }
+
+  /** 两指中心点（相对于容器） */
+  function pinchCenter(t1: Touch, t2: Touch) {
+    const rect = el!.getBoundingClientRect()
+    return {
+      cx: (t1.clientX + t2.clientX) / 2 - rect.left,
+      cy: (t1.clientY + t2.clientY) / 2 - rect.top
+    }
+  }
+
+  // —— 单指拖拽状态 ——
   let downTarget: Element | null = null
   let lastTouch: Touch | null = null
   let moved = false
 
+  // —— 双指捏合状态 ——
+  let pinching = false
+  let pinchStartDist = 0
+  let pinchStartScale = 1
+  let pinchCenterPoint = { cx: 0, cy: 0 }
+
   el.addEventListener('touchstart', (e: TouchEvent) => {
-    // 多指：交给浏览器处理（捏合缩放）
-    if (e.touches.length > 1) {
+    if (e.touches.length >= 2) {
+      // 进入捏合模式，重置单指状态
+      pinching = true
       downTarget = null
+      lastTouch = null
+      moved = false
+      const t1 = e.touches[0]
+      const t2 = e.touches[1]
+      pinchStartDist = distance(t1, t2)
+      pinchStartScale = (mindMapInstance?.view as any)?.scale ?? 1
+      pinchCenterPoint = pinchCenter(t1, t2)
+      e.preventDefault()
       return
+    }
+    if (pinching) {
+      // 之前是捏合，现在只剩一指：退出捏合模式
+      pinching = false
     }
     const t = e.touches[0]
     lastTouch = t
     moved = false
     downTarget = elemAtPoint(el, t.clientX, t.clientY)
     dispatchMouse('mousedown', t, downTarget)
-  }, { passive: true, capture: false })
+  }, { passive: false, capture: false })
 
   el.addEventListener('touchmove', (e: TouchEvent) => {
+    if (pinching && e.touches.length >= 2) {
+      // 双指捏合缩放
+      const t1 = e.touches[0]
+      const t2 = e.touches[1]
+      const curDist = distance(t1, t2)
+      const view: any = mindMapInstance?.view
+      if (pinchStartDist > 0 && view) {
+        const ratio = curDist / pinchStartDist
+        const targetScale = Math.max(0.2, Math.min(4, pinchStartScale * ratio))
+        view.setScale(targetScale, pinchCenterPoint.cx, pinchCenterPoint.cy)
+      }
+      e.preventDefault()
+      return
+    }
     if (e.touches.length > 1 || !lastTouch || !downTarget) return
     const t = e.touches[0]
-    // 触发拖拽后阻止页面滚动
     if (moved || Math.abs(t.clientX - lastTouch.clientX) > 4 || Math.abs(t.clientY - lastTouch.clientY) > 4) {
       moved = true
       e.preventDefault()
@@ -180,7 +228,24 @@ function bindTouchBridge() {
     dispatchMouse('mousemove', t, downTarget)
   }, { passive: false, capture: false })
 
-  el.addEventListener('touchend', () => {
+  el.addEventListener('touchend', (e: TouchEvent) => {
+    if (e.touches.length >= 2) {
+      // 还在捏合，保持状态
+      return
+    }
+    if (pinching) {
+      // 捏合结束，可能还有一指残留
+      pinching = false
+      if (e.touches.length === 1) {
+        // 只剩一指：作为新的单指起点
+        const t = e.touches[0]
+        lastTouch = t
+        moved = false
+        downTarget = elemAtPoint(el, t.clientX, t.clientY)
+        dispatchMouse('mousedown', t, downTarget)
+      }
+      return
+    }
     if (!lastTouch || !downTarget) {
       downTarget = null
       lastTouch = null
@@ -193,12 +258,13 @@ function bindTouchBridge() {
   }, { passive: true, capture: false })
 
   el.addEventListener('touchcancel', () => {
-    if (lastTouch && downTarget) {
+    if (lastTouch && downTarget && !pinching) {
       dispatchMouse('mouseup', lastTouch, downTarget)
     }
     downTarget = null
     lastTouch = null
     moved = false
+    pinching = false
   }, { passive: true })
 }
 
