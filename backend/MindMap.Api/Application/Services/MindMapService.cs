@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using MindMap.Api.Application.DTOs.MindMaps;
 using MindMap.Api.Common.Exceptions;
@@ -111,6 +112,7 @@ public class MindMapService : IMindMapService
                 UpdatedAt = m.UpdatedAt,
                 LastEditedAt = m.LastEditedAt,
                 Theme = m.Theme,
+                TemplateId = m.TemplateId,
                 RootNodeId = m.RootNodeId,
                 OwnerId = m.OwnerId,
                 OwnerName = m.Owner.Username,
@@ -133,6 +135,14 @@ public class MindMapService : IMindMapService
 
         var validTagIds = await FilterOwnedTagIdsAsync(userId, req.TagIds, ct);
 
+        // 校验模板：必须存在且启用
+        Template? template = null;
+        if (req.TemplateId.HasValue)
+        {
+            template = await _db.Templates.FirstOrDefaultAsync(t => t.Id == req.TemplateId.Value && t.IsEnabled, ct)
+                ?? throw ApiException.NotFound("Template", req.TemplateId.Value);
+        }
+
         var map = new MindMapEntity
         {
             Id = Guid.NewGuid(),
@@ -143,6 +153,7 @@ public class MindMapService : IMindMapService
             IsPublic = req.IsPublic,
             DefaultLayout = req.DefaultLayout,
             Theme = req.Theme,
+            TemplateId = template?.Id,
             NodeCount = 0,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
@@ -158,7 +169,111 @@ public class MindMapService : IMindMapService
         _db.MindMaps.Add(map);
         await _db.SaveChangesAsync(ct);
 
+        // 若套用了模板且模板含初始结构，按 simple-mind-map data 树递归生成节点
+        if (template is not null && !string.IsNullOrWhiteSpace(template.InitialStructureJson))
+        {
+            var nodeCount = await SeedNodesFromTemplateAsync(map.Id, template.InitialStructureJson, ct);
+            if (nodeCount > 0)
+            {
+                map.NodeCount = nodeCount;
+                map.UpdatedAt = DateTime.UtcNow;
+                map.LastEditedAt = DateTime.UtcNow;
+                await _db.SaveChangesAsync(ct);
+            }
+        }
+
         return (await GetAsync(userId, map.Id, ct))!;
+    }
+
+    /// <summary>
+    /// 按 simple-mind-map 的 data 树结构递归生成节点。
+    /// 格式：{ data: { text: "..." }, children: [ { data: {...}, children: [...] } ] }
+    /// 根节点 ParentId=null；根的直接子节点方向默认朝右（Direction=1）。
+    /// </summary>
+    private async Task<int> SeedNodesFromTemplateAsync(Guid mindMapId, string structureJson, CancellationToken ct)
+    {
+        JsonDocument doc;
+        try
+        {
+            doc = JsonDocument.Parse(structureJson);
+        }
+        catch
+        {
+            return 0;
+        }
+
+        var root = doc.RootElement;
+        if (root.ValueKind != JsonValueKind.Object) return 0;
+
+        var created = new List<Node>();
+        var rootId = Guid.NewGuid();
+        var rootNode = BuildNodeFromJson(root, mindMapId, null, rootId, isRoot: true, sortOrder: 0, isRootChild: false);
+        if (rootNode is null) return 0;
+        created.Add(rootNode);
+
+        // 递归构建子节点
+        if (root.TryGetProperty("children", out var childrenEl) && childrenEl.ValueKind == JsonValueKind.Array)
+        {
+            var order = 0;
+            foreach (var child in childrenEl.EnumerateArray())
+            {
+                BuildChildrenRecursive(child, mindMapId, rootId, isRootChild: true, sortOrder: order++, created);
+            }
+        }
+
+        // 设置根节点 Id
+        var map = await _db.MindMaps.FirstOrDefaultAsync(m => m.Id == mindMapId, ct);
+        if (map is not null && map.RootNodeId is null)
+        {
+            map.RootNodeId = rootId;
+        }
+
+        _db.Nodes.AddRange(created);
+        return created.Count;
+    }
+
+    private static Node? BuildNodeFromJson(JsonElement el, Guid mindMapId, Guid? parentId, Guid nodeId,
+        bool isRoot, int sortOrder, bool isRootChild)
+    {
+        if (el.ValueKind != JsonValueKind.Object) return null;
+        if (!el.TryGetProperty("data", out var dataEl) || dataEl.ValueKind != JsonValueKind.Object) return null;
+
+        var text = dataEl.TryGetProperty("text", out var textEl) && textEl.ValueKind == JsonValueKind.String
+            ? textEl.GetString() ?? "新节点"
+            : "新节点";
+
+        var node = new Node
+        {
+            Id = nodeId,
+            MindMapId = mindMapId,
+            ParentId = parentId,
+            Title = text,
+            SortOrder = sortOrder,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            // 根节点的直接子节点默认朝右（与编辑器 handleAddChild 逻辑一致）
+            Direction = isRootChild ? Direction.Right : null
+        };
+        return node;
+    }
+
+    private static void BuildChildrenRecursive(JsonElement el, Guid mindMapId, Guid parentId,
+        bool isRootChild, int sortOrder, List<Node> acc)
+    {
+        var nodeId = Guid.NewGuid();
+        var node = BuildNodeFromJson(el, mindMapId, parentId, nodeId, isRoot: false, sortOrder, isRootChild);
+        if (node is null) return;
+        acc.Add(node);
+
+        if (el.TryGetProperty("children", out var childrenEl) && childrenEl.ValueKind == JsonValueKind.Array)
+        {
+            // 孙子节点不再是 root 的直接子节点，isRootChild=false
+            var order = 0;
+            foreach (var child in childrenEl.EnumerateArray())
+            {
+                BuildChildrenRecursive(child, mindMapId, nodeId, isRootChild: false, sortOrder: order++, acc);
+            }
+        }
     }
 
     public async Task<MindMapDetailDto> UpdateAsync(Guid userId, Guid id, MindMapUpdateRequest req, CancellationToken ct = default)
@@ -171,6 +286,22 @@ public class MindMapService : IMindMapService
         if (req.IsPublic.HasValue) map.IsPublic = req.IsPublic.Value;
         if (req.DefaultLayout.HasValue) map.DefaultLayout = req.DefaultLayout.Value;
         if (req.Theme is not null) map.Theme = req.Theme;
+
+        // 切换模板：仅更新引用，不重建节点（切换样式而非结构）
+        if (req.TemplateId.HasValue)
+        {
+            if (req.TemplateId.Value != Guid.Empty)
+            {
+                var tpl = await _db.Templates.FirstOrDefaultAsync(t => t.Id == req.TemplateId.Value && t.IsEnabled, ct)
+                    ?? throw ApiException.NotFound("Template", req.TemplateId.Value);
+                map.TemplateId = tpl.Id;
+            }
+            else
+            {
+                // Guid.Empty 表示清除模板，回退到 Theme
+                map.TemplateId = null;
+            }
+        }
 
         if (req.FolderId.HasValue)
         {
@@ -238,6 +369,7 @@ public class MindMapService : IMindMapService
             IsPublic = false,
             DefaultLayout = src.DefaultLayout,
             Theme = src.Theme,
+            TemplateId = src.TemplateId,
             NodeCount = 0,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,

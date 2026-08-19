@@ -10,7 +10,8 @@ import {
   MenuOutline,
   ArrowBackOutline,
   MoonOutline,
-  SunnyOutline
+  SunnyOutline,
+  LayersOutline
 } from '@vicons/ionicons5'
 import { useThemeStore } from '@/stores/theme'
 import { useAuthStore } from '@/stores/auth'
@@ -36,7 +37,8 @@ const navItems: NavItem[] = [
   { name: 'admin-dashboard', label: '管理看板', icon: GridOutline },
   { name: 'admin-users', label: '用户管理', icon: PeopleOutline },
   { name: 'admin-mindmaps', label: '导图管理', icon: MapOutline },
-  { name: 'admin-reports', label: '举报审核', icon: FlagOutline }
+  { name: 'admin-reports', label: '举报审核', icon: FlagOutline },
+  { name: 'admin-templates', label: '模板管理', icon: LayersOutline }
 ]
 
 const activeKey = computed(() => route.name as string)

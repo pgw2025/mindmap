@@ -15,6 +15,7 @@ public class MindMapConfiguration : IEntityTypeConfiguration<MindMapEntity>
         builder.Property(m => m.OwnerId).HasColumnType("char(36)");
         builder.Property(m => m.FolderId).HasColumnType("char(36)");
         builder.Property(m => m.RootNodeId).HasColumnType("char(36)");
+        builder.Property(m => m.TemplateId).HasColumnType("char(36)");
 
         builder.Property(m => m.Title).HasMaxLength(128).IsRequired();
         builder.Property(m => m.Description).HasMaxLength(2048);

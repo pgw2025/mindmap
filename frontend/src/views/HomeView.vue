@@ -30,6 +30,8 @@ import { useMindMapsStore } from '@/stores/mindmaps'
 import { useTagsStore } from '@/stores/tags'
 import { useFoldersStore } from '@/stores/folders'
 import { useAuthStore } from '@/stores/auth'
+import { useTemplatesStore } from '@/stores/templates'
+import { parseSwatch } from '@/api/templates'
 import { reportMindMap } from '@/api/admin'
 import { THEMES } from '@/themes/presets'
 import SidebarView from './home/SidebarView.vue'
@@ -40,6 +42,7 @@ const mapsStore = useMindMapsStore()
 const tagsStore = useTagsStore()
 const foldersStore = useFoldersStore()
 const authStore = useAuthStore()
+const templatesStore = useTemplatesStore()
 
 const keywordInput = ref('')
 
@@ -53,6 +56,7 @@ const removeSubmitting = ref(false)
 const createModalVisible = ref(false)
 const createTitleInput = ref('')
 const createThemeId = ref('classic')
+const createTemplateId = ref<string | null>(null)
 const createSubmitting = ref(false)
 
 // 举报 Modal
@@ -137,7 +141,10 @@ async function onSearch() {
 function openCreateModal() {
   createTitleInput.value = ''
   createThemeId.value = 'classic'
+  createTemplateId.value = null
   createModalVisible.value = true
+  // 懒加载启用的模板列表
+  templatesStore.loadEnabled().catch(() => { /* ignore */ })
 }
 
 async function submitCreate(): Promise<boolean> {
@@ -148,12 +155,18 @@ async function submitCreate(): Promise<boolean> {
   }
   createSubmitting.value = true
   try {
-    await mapsStore.create({
+    // 选择了模板则优先用模板（含初始结构 + 完整样式），否则用主题
+    const payload: Parameters<typeof mapsStore.create>[0] = {
       title,
       folderId: mapsStore.folderId,
-      isPublic: false,
-      theme: createThemeId.value
-    })
+      isPublic: false
+    }
+    if (createTemplateId.value) {
+      payload.templateId = createTemplateId.value
+    } else {
+      payload.theme = createThemeId.value
+    }
+    await mapsStore.create(payload)
     message.success('已创建')
     createModalVisible.value = false
     return true
@@ -511,15 +524,62 @@ onMounted(async () => {
             @keyup.enter="submitCreate"
           />
         </div>
-        <div class="create-field">
-          <label class="create-label">选择主题</label>
+        <div v-if="templatesStore.enabledList.length > 0" class="create-field">
+          <label class="create-label">
+            选择模板（含初始结构 + 样式，优先于主题）
+            <span
+              v-if="createTemplateId"
+              class="clear-template"
+              @click="createTemplateId = null"
+            >不使用模板</span>
+          </label>
+          <div class="theme-grid">
+            <div
+              v-for="tpl in templatesStore.enabledList"
+              :key="tpl.id"
+              class="theme-card"
+              :class="{ 'is-active': createTemplateId === tpl.id }"
+              @click="createTemplateId = tpl.id"
+            >
+              <div
+                class="theme-preview"
+                :style="{ background: (parseSwatch(tpl.swatchJson)?.bg ?? '#fafafa') }"
+              >
+                <div
+                  class="preview-root"
+                  :style="{
+                    background: parseSwatch(tpl.swatchJson)?.rootFill ?? '#549688',
+                    borderColor: parseSwatch(tpl.swatchJson)?.rootFill ?? '#549688'
+                  }"
+                ></div>
+                <div
+                  class="preview-line"
+                  :style="{ background: parseSwatch(tpl.swatchJson)?.lineColor ?? '#549688' }"
+                ></div>
+                <div
+                  class="preview-second"
+                  :style="{
+                    background: parseSwatch(tpl.swatchJson)?.secondFill ?? '#fff',
+                    borderColor: parseSwatch(tpl.swatchJson)?.lineColor ?? '#549688'
+                  }"
+                ></div>
+              </div>
+              <div class="theme-name">{{ tpl.name }}</div>
+            </div>
+          </div>
+        </div>
+        <div class="create-field" :class="{ 'is-dimmed': !!createTemplateId }">
+          <label class="create-label">
+            选择主题
+            <span v-if="createTemplateId" class="theme-hint">（已使用模板，主题被覆盖）</span>
+          </label>
           <div class="theme-grid">
             <div
               v-for="t in THEMES"
               :key="t.id"
               class="theme-card"
-              :class="{ 'is-active': createThemeId === t.id }"
-              @click="createThemeId = t.id"
+              :class="{ 'is-active': !createTemplateId && createThemeId === t.id }"
+              @click="createTemplateId = null; createThemeId = t.id"
             >
               <div class="theme-preview" :style="{ background: t.swatch.bg }">
                 <div class="preview-root" :style="{ background: t.swatch.rootFill, borderColor: t.swatch.rootFill }"></div>
@@ -945,5 +1005,24 @@ onMounted(async () => {
   font-size: 12px;
   color: var(--app-text-primary, #333);
   margin-top: 6px;
+}
+
+.clear-template {
+  float: right;
+  font-size: 12px;
+  color: var(--app-primary, #18a058);
+  cursor: pointer;
+  font-weight: normal;
+}
+
+.theme-hint {
+  font-size: 12px;
+  color: var(--app-text-secondary, #999);
+  font-weight: normal;
+}
+
+.create-field.is-dimmed {
+  opacity: 0.5;
+  pointer-events: none;
 }
 </style>

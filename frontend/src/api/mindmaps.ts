@@ -25,6 +25,7 @@ export interface MindMapListItem {
 export interface MindMapDetail extends MindMapListItem {
   updatedAt: string
   theme?: string | null
+  templateId?: string | null
   rootNodeId?: string | null
 }
 
@@ -44,6 +45,7 @@ export interface MindMapCreatePayload {
   isPublic?: boolean
   defaultLayout?: MindMapLayout
   theme?: string
+  templateId?: string | null
   tagIds?: string[]
 }
 
@@ -54,6 +56,7 @@ export interface MindMapUpdatePayload {
   isPublic?: boolean
   defaultLayout?: MindMapLayout
   theme?: string
+  templateId?: string | null
 }
 
 export async function fetchMindMaps(

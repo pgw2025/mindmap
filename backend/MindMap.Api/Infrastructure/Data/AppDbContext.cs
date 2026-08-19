@@ -21,6 +21,7 @@ public class AppDbContext : DbContext
     public DbSet<MindMapVersion> MindMapVersions => Set<MindMapVersion>();
     public DbSet<MindMapShare> MindMapShares => Set<MindMapShare>();
     public DbSet<MindMapReport> MindMapReports => Set<MindMapReport>();
+    public DbSet<Template> Templates => Set<Template>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

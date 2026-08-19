@@ -22,19 +22,25 @@ import { fetchMindMap, updateMindMap } from '@/api/mindmaps'
 import { useNodesStore } from '@/stores/nodes'
 import { useMindMapsStore } from '@/stores/mindmaps'
 import { useAuthStore } from '@/stores/auth'
+import { useTemplatesStore } from '@/stores/templates'
+import { fetchTemplate } from '@/api/templates'
 import NodeToolbar from './NodeToolbar.vue'
 import ShareDrawer from './components/ShareDrawer.vue'
 import VersionDrawer from './components/VersionDrawer.vue'
 import NodeContentModal from './components/NodeContentModal.vue'
 import { useTouchBridge } from './composables/useTouchBridge'
 import { useMindMapSync } from './composables/useMindMapSync'
-import { THEMES, getThemeConfig, getThemeIdOrDefault } from '@/themes/presets'
+import { THEMES, getThemeConfig, getThemeIdOrDefault, type MindMapThemeConfig } from '@/themes/presets'
 
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
 const nodesStore = useNodesStore()
 const mapsStore = useMindMapsStore()
+const templatesStore = useTemplatesStore()
+
+// 后端约定 Guid.Empty 表示清除引用（JSON null 不会触发 Guid? 更新）
+const EMPTY_GUID = '00000000-0000-0000-0000-000000000000'
 
 // 根节点不能删除提示弹窗
 const rootDeleteTipVisible = ref(false)
@@ -141,19 +147,58 @@ function initMindMap() {
     // simple-mind-map 没有 once API，用 on + off 手动实现
     const onFirstRender = () => {
       mindMapInstance?.off('node_tree_render_end', onFirstRender)
-      // 主题在 setData 之后应用，否则会被 setData 的异步渲染覆盖
-      // setThemeConfig 第二个参数 notRender=false 表示立即触发重绘
-      mindMapInstance?.setThemeConfig(getThemeConfig(themeId), false)
-      const root = mindMapInstance?.renderer?.root
-      if (root) {
-        // moveNodeToCenter 在 Render 实例上，不在 MindMap 实例上
-        ;(mindMapInstance?.renderer as any)?.moveNodeToCenter(root)
+      // 样式应用优先级：模板 > 主题
+      // 模板：异步获取 configJson 后应用（完整自定义配置）
+      // 主题：同步获取内置预设应用
+      const templateId = mapDetail.value?.templateId
+      if (templateId) {
+        fetchTemplate(templateId)
+          .then((tpl) => {
+            try {
+              const cfg = JSON.parse(tpl.configJson) as MindMapThemeConfig
+              mindMapInstance?.setThemeConfig(cfg, false)
+            } catch {
+              mindMapInstance?.setThemeConfig(getThemeConfig(themeId), false)
+            }
+            const r = mindMapInstance?.renderer?.root
+            if (r) {
+              ;(mindMapInstance?.renderer as any)?.moveNodeToCenter(r)
+            }
+          })
+          .catch(() => {
+            mindMapInstance?.setThemeConfig(getThemeConfig(themeId), false)
+          })
+      } else {
+        // 主题在 setData 之后应用，否则会被 setData 的异步渲染覆盖
+        // setThemeConfig 第二个参数 notRender=false 表示立即触发重绘
+        mindMapInstance?.setThemeConfig(getThemeConfig(themeId), false)
+        const root = mindMapInstance?.renderer?.root
+        if (root) {
+          // moveNodeToCenter 在 Render 实例上，不在 MindMap 实例上
+          ;(mindMapInstance?.renderer as any)?.moveNodeToCenter(root)
+        }
       }
     }
     mindMapInstance.on('node_tree_render_end', onFirstRender)
   } else {
-    // 没有数据时直接应用主题
-    mindMapInstance.setThemeConfig(getThemeConfig(themeId), false)
+    // 没有数据时直接应用样式（模板优先，否则主题）
+    const templateId = mapDetail.value?.templateId
+    if (templateId) {
+      fetchTemplate(templateId)
+        .then((tpl) => {
+          try {
+            const cfg = JSON.parse(tpl.configJson) as MindMapThemeConfig
+            mindMapInstance?.setThemeConfig(cfg, false)
+          } catch {
+            mindMapInstance?.setThemeConfig(getThemeConfig(themeId), false)
+          }
+        })
+        .catch(() => {
+          mindMapInstance?.setThemeConfig(getThemeConfig(themeId), false)
+        })
+    } else {
+      mindMapInstance.setThemeConfig(getThemeConfig(themeId), false)
+    }
   }
 
   // 3. 延迟关闭保护开关，确保初始渲染引发的 data_change 被安全跳过
@@ -326,6 +371,7 @@ function handleReset() {
 }
 
 const currentThemeId = computed(() => getThemeIdOrDefault(mapDetail.value?.theme))
+const currentTemplateId = computed(() => mapDetail.value?.templateId ?? null)
 
 const themeDropdownOptions = computed(() =>
   THEMES.map((t) => ({
@@ -335,17 +381,62 @@ const themeDropdownOptions = computed(() =>
   }))
 )
 
+const templateDropdownOptions = computed(() => [
+  { key: '__none__', label: '不使用模板（用主题）' },
+  ...templatesStore.enabledList.map((t) => ({ key: t.id, label: t.name }))
+])
+
 async function handleThemeSelect(key: string) {
   if (!mindMapInstance || !mapDetail.value) return
-  if (key === currentThemeId.value) return
+  if (key === currentThemeId.value && !currentTemplateId.value) return
   mindMapInstance.setThemeConfig(getThemeConfig(key))
   if (!readonly.value) {
     try {
-      await updateMindMap(mindMapId.value, { theme: key })
+      // 切换主题时清除模板（模板优先级高于主题，切换主题=放弃模板）
+      // 后端约定 Guid.Empty 表示清除；JSON null 不会触发更新
+      await updateMindMap(mindMapId.value, { theme: key, templateId: EMPTY_GUID })
       mapDetail.value.theme = key
+      mapDetail.value.templateId = null
     } catch (e) {
       message.error('主题保存失败：' + (e as Error).message)
     }
+  }
+}
+
+async function handleTemplateSelect(key: string) {
+  if (!mindMapInstance || !mapDetail.value) return
+  if (key === '__none__') {
+    // 清除模板，回退到当前主题
+    const themeId = currentThemeId.value
+    mindMapInstance.setThemeConfig(getThemeConfig(themeId))
+    if (!readonly.value) {
+      try {
+        await updateMindMap(mindMapId.value, { templateId: EMPTY_GUID })
+        mapDetail.value.templateId = null
+      } catch (e) {
+        message.error('模板清除失败：' + (e as Error).message)
+      }
+    }
+    return
+  }
+  if (key === currentTemplateId.value) return
+  // 套用模板：拉取详情 → 应用 configJson → 保存 templateId
+  try {
+    const tpl = await fetchTemplate(key)
+    let cfg: MindMapThemeConfig
+    try {
+      cfg = JSON.parse(tpl.configJson) as MindMapThemeConfig
+    } catch {
+      message.error('模板样式解析失败')
+      return
+    }
+    mindMapInstance.setThemeConfig(cfg)
+    if (!readonly.value) {
+      await updateMindMap(mindMapId.value, { templateId: key })
+      mapDetail.value.templateId = key
+    }
+  } catch (e) {
+    message.error('模板切换失败：' + (e as Error).message)
   }
 }
 
@@ -543,6 +634,9 @@ onMounted(async () => {
     if (nodesStore.nodes.length === 0) {
       await initEmptyMindMap()
     }
+
+    // 懒加载启用的模板列表（供工具栏模板下拉使用）
+    templatesStore.loadEnabled().catch(() => { /* ignore */ })
   } catch (e) {
     message.error((e as Error).message || '加载失败')
     router.push({ name: 'home' })
@@ -660,8 +754,18 @@ watch(() => route.params.id, () => {
             }}</span>
           </button>
         </NDropdown>
+        <NDropdown trigger="click" :options="templateDropdownOptions" :value="currentTemplateId ?? '__none__'" @select="handleTemplateSelect">
+          <button class="btn-action-template" :class="{ 'is-active': !!currentTemplateId }" title="切换模板">
+            <span class="btn-icon">📋</span>
+            <span class="btn-label">{{
+              currentTemplateId
+                ? (templatesStore.enabledList.find(t => t.id === currentTemplateId)?.name ?? '模板')
+                : '模板'
+            }}</span>
+          </button>
+        </NDropdown>
         <NDropdown trigger="click" :options="themeDropdownOptions" :value="currentThemeId" @select="handleThemeSelect">
-          <button class="btn-action-theme" title="切换主题">
+          <button class="btn-action-theme" :class="{ 'is-dimmed': !!currentTemplateId }" title="切换主题">
             <span class="theme-swatch"
               :style="{ background: THEMES.find(t => t.id === currentThemeId)?.swatch.rootFill }"></span>
             <span class="btn-icon">🎨</span>

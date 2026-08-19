@@ -20,6 +20,9 @@ public class MindMapCreateRequest
     [StringLength(64)]
     public string? Theme { get; set; }
 
+    /// <summary>新建时套用的模板 Id。设置后后端会按模板的初始结构生成节点。</summary>
+    public Guid? TemplateId { get; set; }
+
     public List<Guid> TagIds { get; set; } = new();
 }
 
@@ -39,6 +42,9 @@ public class MindMapUpdateRequest
 
     [StringLength(64)]
     public string? Theme { get; set; }
+
+    /// <summary>切换所用模板；传 null 表示清除模板（回退到 Theme）。切换不会重建节点。</summary>
+    public Guid? TemplateId { get; set; }
 }
 
 public class MindMapListQuery
@@ -95,5 +101,6 @@ public class MindMapDetailDto : MindMapListItemDto
 {
     public DateTime UpdatedAt { get; set; }
     public string? Theme { get; set; }
+    public Guid? TemplateId { get; set; }
     public Guid? RootNodeId { get; set; }
 }

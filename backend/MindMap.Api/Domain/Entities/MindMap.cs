@@ -28,6 +28,11 @@ public class MindMap
 
     public MindMapLayout DefaultLayout { get; set; } = MindMapLayout.Left;
     public string? Theme { get; set; }
+
+    /// <summary>所用模板 Id（可空）。设置后编辑器优先加载模板的完整样式配置，覆盖 Theme。</summary>
+    public Guid? TemplateId { get; set; }
+    public Template? Template { get; set; }
+
     public int NodeCount { get; set; }
 
     /// <summary>是否已被管理员下架。下架后公开列表和分享不可访问。</summary>

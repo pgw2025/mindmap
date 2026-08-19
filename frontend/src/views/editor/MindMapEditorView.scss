@@ -226,6 +226,7 @@
 .btn-action-history,
 .btn-action-share,
 .btn-action-export,
+.btn-action-template,
 .btn-action-theme {
   display: inline-flex;
   align-items: center;
@@ -262,6 +263,7 @@
 .btn-action-history,
 .btn-action-share,
 .btn-action-export,
+.btn-action-template,
 .btn-action-theme {
   background: #fff;
   color: var(--app-text-primary, #333);
@@ -271,6 +273,18 @@
     border-color: var(--app-primary, #18a058);
     color: var(--app-primary, #18a058);
   }
+}
+
+/* 模板按钮激活态：边框/字色高亮，表示当前套用了模板 */
+.btn-action-template.is-active {
+  border-color: var(--app-primary, #18a058);
+  color: var(--app-primary, #18a058);
+  background: rgba(24, 160, 88, 0.08);
+}
+
+/* 当模板激活时，主题按钮变暗（模板优先级高于主题） */
+.btn-action-theme.is-dimmed {
+  opacity: 0.5;
 }
 
 .theme-swatch {
@@ -342,6 +356,7 @@
   .btn-action-history .btn-label,
   .btn-action-share .btn-label,
   .btn-action-export .btn-label,
+  .btn-action-template .btn-label,
   .btn-action-theme .btn-label {
     display: none;
   }
@@ -350,6 +365,7 @@
   .btn-action-history,
   .btn-action-share,
   .btn-action-export,
+  .btn-action-template,
   .btn-action-theme {
     padding: 8px 12px;
     font-size: 18px;

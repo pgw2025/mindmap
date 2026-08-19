@@ -86,6 +86,7 @@ builder.Services.AddScoped<IMindMapVersionService, MindMapVersionService>();
 builder.Services.AddScoped<IExportService, ExportService>();
 builder.Services.AddScoped<IShareService, ShareService>();
 builder.Services.AddScoped<IAdminService, AdminService>();
+builder.Services.AddScoped<ITemplateService, TemplateService>();
 
 // ---- Controllers + 全局异常 ----
 builder.Services.AddControllers(options => options.Filters.Add<GlobalExceptionFilter>())
