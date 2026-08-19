@@ -124,6 +124,13 @@ export const useMindMapsStore = defineStore('mindmaps', () => {
     await refreshTags()
   }
 
+  async function importFile(payload: mapsApi.MindMapImportPayload) {
+    const map = await mapsApi.importMindMap(payload)
+    await load()
+    await refreshFolders()
+    return map
+  }
+
   function reset() {
     items.value = []
     total.value = 0
@@ -156,6 +163,7 @@ export const useMindMapsStore = defineStore('mindmaps', () => {
     copy,
     remove,
     setTags,
+    importFile,
     reset
   }
 })

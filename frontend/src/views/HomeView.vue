@@ -17,6 +17,7 @@ import {
 } from 'naive-ui'
 import {
   AddOutline,
+  CloudUploadOutline,
   CopyOutline,
   DocumentTextOutline,
   LockClosedOutline,
@@ -58,6 +59,16 @@ const createTitleInput = ref('')
 const createThemeId = ref('classic')
 const createTemplateId = ref<string | null>(null)
 const createSubmitting = ref(false)
+
+// 导入导图 Modal
+const importModalVisible = ref(false)
+const importTitleInput = ref('')
+const importThemeId = ref('classic')
+const importFolderId = ref<string | null>(null)
+const importFile = ref<File | null>(null)
+const importFileDragOver = ref(false)
+const importSubmitting = ref(false)
+const importFileInputEl = ref<HTMLInputElement | null>(null)
 
 // 举报 Modal
 const reportModalVisible = ref(false)
@@ -178,6 +189,95 @@ async function submitCreate(): Promise<boolean> {
   }
 }
 
+// ---------- 导入导图 ----------
+function openImportModal() {
+  importModalVisible.value = true
+  importTitleInput.value = ''
+  importThemeId.value = 'classic'
+  importFolderId.value = mapsStore.folderId
+  importFile.value = null
+  importFileDragOver.value = false
+  importSubmitting.value = false
+  if (importFileInputEl.value) importFileInputEl.value.value = ''
+  // 懒加载模板列表
+  templatesStore.loadEnabled().catch(() => { /* ignore */ })
+}
+
+function handleImportFileInputChange(e: Event): void {
+  const t = e.target as HTMLInputElement
+  const file = t.files?.[0] ?? null
+  setImportFile(file)
+}
+
+function handleImportDrop(e: DragEvent): void {
+  e.preventDefault()
+  importFileDragOver.value = false
+  const file = e.dataTransfer?.files?.[0] ?? null
+  setImportFile(file)
+}
+
+function setImportFile(file: File | null): void {
+  if (!file) {
+    importFile.value = null
+    importTitleInput.value = ''
+    return
+  }
+  // 大小校验
+  if (file.size > 5 * 1024 * 1024) {
+    message.warning('文件超过 5MB 上限')
+    return
+  }
+  const ext = (file.name.split('.').pop() ?? '').toLowerCase()
+  const allowed = new Set(['mm', 'json', 'smm', 'md', 'markdown', 'xmind'])
+  if (!allowed.has(ext)) {
+    message.warning('暂不支持的文件格式，支持 .mm / .json / .smm / .md / .xmind')
+    return
+  }
+  importFile.value = file
+  // 默认标题 = 文件名去扩展名
+  const base = file.name.replace(/\.[^.]+$/, '')
+  if (!importTitleInput.value.trim()) {
+    importTitleInput.value = base
+  }
+}
+
+function removeImportFile(): void {
+  importFile.value = null
+  if (importFileInputEl.value) importFileInputEl.value.value = ''
+}
+
+async function submitImport(): Promise<boolean> {
+  if (!importFile.value) {
+    message.warning('请选择要导入的文件')
+    return false
+  }
+  const title = importTitleInput.value.trim()
+  if (!title) {
+    message.warning('请输入导图标题')
+    return false
+  }
+  importSubmitting.value = true
+  try {
+    const map = await mapsStore.importFile({
+      file: importFile.value,
+      title,
+      folderId: importFolderId.value,
+      theme: importThemeId.value,
+      defaultLayout: 0
+    })
+    message.success(`导入成功，共 ${map.nodeCount} 个节点`)
+    importModalVisible.value = false
+    // 跳转到编辑器
+    router.push({ name: 'mindmap-edit', params: { id: map.id } })
+    return true
+  } catch (e) {
+    message.error((e as Error).message)
+    return false
+  } finally {
+    importSubmitting.value = false
+  }
+}
+
 async function onCopy(id: string) {
   try {
     await mapsStore.copy(id)
@@ -226,6 +326,12 @@ async function submitRemove(): Promise<void> {
 
 function formatTime(s: string): string {
   return new Date(s).toLocaleString('zh-CN', { hour12: false })
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`
 }
 
 const folderOptions = computed<{ label: string; value: string | null }[]>(() => {
@@ -333,15 +439,23 @@ onMounted(async () => {
     <div class="home-header">
       <div class="title-row">
         <h1 class="title">{{ titleText }}</h1>
-        <NButton
-          v-if="mapsStore.scope === 'mine'"
-          type="primary"
-          size="small"
-          @click="openCreateModal"
-        >
-          <template #icon><NIcon><AddOutline /></NIcon></template>
-          新建导图
-        </NButton>
+        <NSpace v-if="mapsStore.scope === 'mine'" size="small" :wrap="false">
+          <NButton
+            type="primary"
+            size="small"
+            @click="openCreateModal"
+          >
+            <template #icon><NIcon><AddOutline /></NIcon></template>
+            新建导图
+          </NButton>
+          <NButton
+            size="small"
+            @click="openImportModal"
+          >
+            <template #icon><NIcon><CloudUploadOutline /></NIcon></template>
+            导入导图
+          </NButton>
+        </NSpace>
       </div>
       <p v-if="showFolderFilter" class="folder-filter">
         <span>文件夹：</span>
@@ -601,6 +715,126 @@ onMounted(async () => {
             @click="submitCreate"
           >
             创建
+          </NButton>
+        </NSpace>
+      </template>
+    </NModal>
+
+    <!-- 导入导图 Modal -->
+    <NModal
+      v-model:show="importModalVisible"
+      preset="card"
+      title="导入思维导图"
+      display-directive="if"
+      style="max-width: 560px"
+    >
+      <div class="create-form">
+        <!-- 文件拖放区域 -->
+        <div class="create-field">
+          <label class="create-label">选择文件</label>
+          <div
+            class="import-dropzone"
+            :class="{ 'is-dragover': importFileDragOver, 'is-filled': !!importFile }"
+            @dragover.prevent="importFileDragOver = true"
+            @dragleave="importFileDragOver = false"
+            @drop="handleImportDrop"
+            @click="importFileInputEl?.click()"
+          >
+            <input
+              ref="importFileInputEl"
+              type="file"
+              accept=".mm,.json,.smm,.md,.markdown,.xmind"
+              style="display: none"
+              @change="handleImportFileInputChange"
+            />
+            <template v-if="!importFile">
+              <div class="dropzone-icon">📥</div>
+              <div class="dropzone-text">
+                <div class="dropzone-title">点击选择文件，或拖拽文件到此处</div>
+                <div class="dropzone-hint">
+                  支持：FreeMind (.mm)、simple-mind-map (.json/.smm)、Markdown (.md)、XMind (.xmind)，单文件 ≤ 5MB
+                </div>
+              </div>
+            </template>
+            <template v-else>
+              <div class="dropzone-filled">
+                <div class="file-info">
+                  <div class="file-icon">📄</div>
+                  <div class="file-meta">
+                    <div class="file-name">{{ importFile.name }}</div>
+                    <div class="file-size">{{ formatFileSize(importFile.size) }}</div>
+                  </div>
+                </div>
+                <NButton
+                  text
+                  size="small"
+                  type="error"
+                  @click.stop="removeImportFile"
+                >
+                  移除
+                </NButton>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- 标题 -->
+        <div class="create-field">
+          <label class="create-label">导图标题</label>
+          <NInput
+            v-model:value="importTitleInput"
+            placeholder="请输入导图标题（默认取文件名）"
+            maxlength="128"
+            :autofocus="!!importFile"
+            @keyup.enter="submitImport"
+          />
+        </div>
+
+        <!-- 文件夹 -->
+        <div class="create-field">
+          <label class="create-label">保存到文件夹</label>
+          <NSelect
+            v-model:value="importFolderId"
+            :options="folderOptions"
+            placeholder="选择目标文件夹（可选）"
+            style="width: 100%"
+            clearable
+            :loading="foldersStore.loading"
+          />
+        </div>
+
+        <!-- 主题 -->
+        <div class="create-field">
+          <label class="create-label">选择主题</label>
+          <div class="theme-grid">
+            <div
+              v-for="t in THEMES"
+              :key="t.id"
+              class="theme-card"
+              :class="{ 'is-active': importThemeId === t.id }"
+              @click="importThemeId = t.id"
+            >
+              <div class="theme-preview" :style="{ background: t.swatch.bg }">
+                <div class="preview-root" :style="{ background: t.swatch.rootFill, borderColor: t.swatch.rootFill }"></div>
+                <div class="preview-line" :style="{ background: t.swatch.lineColor }"></div>
+                <div class="preview-second" :style="{ background: t.swatch.secondFill, borderColor: t.swatch.lineColor }"></div>
+              </div>
+              <div class="theme-name">{{ t.name }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <NSpace justify="end">
+          <NButton @click="importModalVisible = false">取消</NButton>
+          <NButton
+            type="primary"
+            :loading="importSubmitting"
+            :disabled="!importFile || !importTitleInput.trim()"
+            @click="submitImport"
+          >
+            <template #icon><NIcon><CloudUploadOutline /></NIcon></template>
+            开始导入
           </NButton>
         </NSpace>
       </template>
@@ -1024,5 +1258,96 @@ onMounted(async () => {
 .create-field.is-dimmed {
   opacity: 0.5;
   pointer-events: none;
+}
+
+/* ---------- 导入拖放区 ---------- */
+.import-dropzone {
+  border: 2px dashed var(--app-border, #d9d9d9);
+  border-radius: 10px;
+  padding: 24px 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: var(--app-bg, #fafafa);
+  user-select: none;
+
+  &:hover {
+    border-color: var(--app-primary, #18a058);
+    background: rgba(24, 160, 88, 0.04);
+  }
+
+  &.is-dragover {
+    border-color: var(--app-primary, #18a058);
+    background: rgba(24, 160, 88, 0.1);
+    transform: scale(1.01);
+  }
+
+  &.is-filled {
+    border-color: var(--app-primary, #18a058);
+    background: #fff;
+    cursor: default;
+  }
+
+  .dropzone-icon {
+    font-size: 36px;
+    text-align: center;
+    margin-bottom: 10px;
+  }
+
+  .dropzone-text {
+    text-align: center;
+    .dropzone-title {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--app-text-primary, #333);
+      margin-bottom: 4px;
+    }
+    .dropzone-hint {
+      font-size: 12px;
+      color: var(--app-text-secondary, #999);
+      line-height: 1.6;
+    }
+  }
+
+  .dropzone-filled {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    .file-info {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+      .file-icon {
+        font-size: 28px;
+        flex-shrink: 0;
+      }
+      .file-meta {
+        min-width: 0;
+        .file-name {
+          font-size: 14px;
+          font-weight: 500;
+          color: var(--app-text-primary, #333);
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .file-size {
+          font-size: 12px;
+          color: var(--app-text-secondary, #999);
+          margin-top: 2px;
+        }
+      }
+    }
+  }
+}
+
+@media (max-width: 767px) {
+  .import-dropzone {
+    padding: 18px 12px;
+    .dropzone-icon {
+      font-size: 28px;
+    }
+  }
 }
 </style>

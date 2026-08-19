@@ -84,6 +84,7 @@ builder.Services.AddScoped<IMindMapService, MindMapService>();
 builder.Services.AddScoped<INodeService, NodeService>();
 builder.Services.AddScoped<IMindMapVersionService, MindMapVersionService>();
 builder.Services.AddScoped<IExportService, ExportService>();
+builder.Services.AddScoped<IImportService, ImportService>();
 builder.Services.AddScoped<IShareService, ShareService>();
 builder.Services.AddScoped<IAdminService, AdminService>();
 builder.Services.AddScoped<ITemplateService, TemplateService>();

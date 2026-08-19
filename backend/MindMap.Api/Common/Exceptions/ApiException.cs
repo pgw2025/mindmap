@@ -21,4 +21,7 @@ public class ApiException : Exception
 
     public static ApiException Conflict(string message)
         => new(message, StatusCodes.Status409Conflict);
+
+    public static ApiException BadRequest(string message)
+        => new(message, StatusCodes.Status400BadRequest);
 }

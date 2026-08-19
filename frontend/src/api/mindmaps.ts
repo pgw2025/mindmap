@@ -99,3 +99,22 @@ export async function copyMindMap(id: string, newTitle?: string): Promise<MindMa
 export async function setMindMapTags(id: string, tagIds: string[]): Promise<void> {
   await http.put(`/mindmaps/${id}/tags`, { tagIds })
 }
+
+export interface MindMapImportPayload {
+  file: File
+  title?: string
+  folderId?: string | null
+  theme?: string
+  defaultLayout?: MindMapLayout
+}
+
+export async function importMindMap(payload: MindMapImportPayload): Promise<MindMapDetail> {
+  const fd = new FormData()
+  fd.append('file', payload.file)
+  if (payload.title !== undefined) fd.append('title', payload.title)
+  if (payload.folderId !== undefined && payload.folderId !== null) fd.append('folderId', payload.folderId)
+  if (payload.theme) fd.append('theme', payload.theme)
+  if (payload.defaultLayout !== undefined) fd.append('defaultLayout', String(payload.defaultLayout))
+  // 传 FormData 时 axios 会自动设置 multipart/form-data + boundary，不要手动覆写 Content-Type
+  return (await http.post('/mindmaps/import', fd)) as unknown as MindMapDetail
+}
