@@ -137,7 +137,7 @@ export function useMindMapSync(opts: {
 
   function enqueueStructuralOp(fn: () => Promise<void>): Promise<void> {
     opQueue = opQueue
-      .catch(() => {})
+      .catch(() => { })
       .then(async () => {
         await fn()
       })
@@ -274,8 +274,11 @@ export function useMindMapSync(opts: {
       if (n.edgeColor) data.lineColor = n.edgeColor
       if (n.edgeStyle != null && n.edgeStyle in edgeStyleMap) data.lineDasharray = edgeStyleMap[n.edgeStyle]
       if (n.note) data.note = n.note
-      if (n.direction === 0) data.dir = 'left'
-      else if (n.direction === 1) data.dir = 'right'
+      // 仅根节点的直接子节点设置明确的 dir，非根直接子节点不显式设置 dir，交由 simple-mind-map 向上继承分支方向
+      if (n.parentId && n.parentId === nodesStore.rootNode?.id) {
+        if (n.direction === 0) data.dir = 'left'
+        else data.dir = 'right'
+      }
 
       const nodeData = {
         id: n.id,
@@ -392,7 +395,7 @@ export function useMindMapSync(opts: {
       if (uidToBackendId.has(uid)) continue
       if (pendingCreates.has(uid)) {
         // 同一个 uid 已经在 create 中（data_change_detail 多次触发？）等待完成即可
-        try { await pendingCreates.get(uid)! } catch {}
+        try { await pendingCreates.get(uid)! } catch { }
         continue
       }
 
@@ -582,11 +585,22 @@ export function useMindMapSync(opts: {
     const parentChanged = newParentBackendId !== (backendNode.parentId ?? null)
     const orderChanged = newSortOrder !== backendNode.sortOrder
 
+    const isNewParentRoot = newParentBackendId === nodesStore.rootNode?.id
+    let newDirection: 0 | 1 | undefined = undefined
+    if (isNewParentRoot) {
+      const { x: mouseCanvasX } = inst.toPos(lastMouseClientX, lastMouseClientY)
+      const { scaleX = 1, translateX = 0 } = inst.draw.transform()
+      const rootCanvasCenterX = (renderRoot.left + (renderRoot.width || 0) / 2) * scaleX + translateX
+      const targetDir = mouseCanvasX < rootCanvasCenterX ? 'left' : 'right'
+      newDirection = targetDir === 'left' ? 0 : 1
+    }
+
     if (parentChanged) {
-      // 移动
+      // 移动节点并同步更新 direction
       await nodesStore.move(backendId, {
         parentId: newParentBackendId,
-        sortOrder: newSortOrder
+        sortOrder: newSortOrder,
+        direction: newDirection
       })
     } else if (orderChanged) {
       // 仅排序变化：检查兄弟节点是否也都变了 → 如果是，批量 reorder
@@ -764,6 +778,30 @@ export function useMindMapSync(opts: {
     return result
   }
 
+  function cleanDescendantDirs(node: any) {
+    if (!node) return
+    const recurse = (item: any) => {
+      if (!item) return
+      if (item.nodeData && item.nodeData.data) {
+        delete item.nodeData.data.dir
+      }
+      if (item.data && typeof item.data === 'object') {
+        delete item.data.dir
+      }
+      if (typeof item.setData === 'function') {
+        item.setData({ dir: undefined })
+      }
+      const children = item.children || item.nodeData?.children
+      if (Array.isArray(children)) {
+        children.forEach(recurse)
+      }
+    }
+    const children = node.children || node.nodeData?.children
+    if (Array.isArray(children)) {
+      children.forEach(recurse)
+    }
+  }
+
   function handleDragEnd(info: {
     overlapNodeUid?: string
     prevNodeUid?: string
@@ -772,6 +810,8 @@ export function useMindMapSync(opts: {
       parent?: { getData: (k?: string) => unknown; isRoot?: boolean }
       setData: (data: Record<string, unknown>) => void
       getData: (k?: string) => unknown
+      children?: unknown[]
+      nodeData?: { children?: unknown[] }
     }>
   }) {
     const inst = getMindMapInstance()
@@ -780,9 +820,11 @@ export function useMindMapSync(opts: {
     const root = inst.renderer.root
     if (!root) return
 
-    const rbox = root.group?.rbox ? root.group.rbox() : (root.getRect ? root.getRect() : null)
-    const rootCenterClientX = rbox ? (rbox.cx ?? (rbox.left + (rbox.width || 0) / 2)) : 0
-    const targetDir = lastMouseClientX < rootCenterClientX ? 'left' : 'right'
+    // 优先使用画布绝对坐标系计算落点方向
+    const { x: mouseCanvasX } = inst.toPos(lastMouseClientX, lastMouseClientY)
+    const { scaleX = 1, translateX = 0 } = inst.draw.transform()
+    const rootCanvasCenterX = (root.left + (root.width || 0) / 2) * scaleX + translateX
+    const targetDir: 'left' | 'right' = mouseCanvasX < rootCanvasCenterX ? 'left' : 'right'
 
     const rootUid = root.getData?.('uid')
 
@@ -794,6 +836,13 @@ export function useMindMapSync(opts: {
     if (willBeRootChild) {
       for (const node of info.beingDragNodeList) {
         node.setData({ dir: targetDir })
+        cleanDescendantDirs(node)
+      }
+    } else {
+      // 成为非根节点子节点时，清除自身及后代的显式 dir，使之完全继承分支方向
+      for (const node of info.beingDragNodeList) {
+        node.setData({ dir: undefined })
+        cleanDescendantDirs(node)
       }
     }
   }
@@ -862,11 +911,11 @@ export function useMindMapSync(opts: {
     const inst = getMindMapInstance()
     if (!inst) return
 
-    // 核心事件：simple-mind-map 内置 diff
-    ;(inst as any).on('data_change_detail', processDataChangeDetail)
+      // 核心事件：simple-mind-map 内置 diff
+      ; (inst as any).on('data_change_detail', processDataChangeDetail)
 
-    // 文本编辑实时 debounce（优先于 data_change_detail 触发的文本更新）
-    ;(inst as any).on('node_text_edit_change', handleTextEditChange)
+      // 文本编辑实时 debounce（优先于 data_change_detail 触发的文本更新）
+      ; (inst as any).on('node_text_edit_change', handleTextEditChange)
   }
 
   return {

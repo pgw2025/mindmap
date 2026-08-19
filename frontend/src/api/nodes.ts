@@ -91,12 +91,14 @@ export interface NodeUpdatePayload {
 export interface NodeMovePayload {
   parentId?: string | null
   sortOrder?: number
+  direction?: Direction | null
 }
 
 export interface NodeBatchItem {
   id: string
   sortOrder?: number
   parentId?: string | null
+  direction?: Direction | null
   x?: number
   y?: number
   isCollapsed?: boolean
