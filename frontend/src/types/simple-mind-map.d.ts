@@ -18,6 +18,21 @@ declare module 'simple-mind-map/src/plugins/ExportXMind.js' {
   export default ExportXMind
 }
 
+declare module 'simple-mind-map/src/plugins/Drag.js' {
+  const Drag: { instanceName: string; prototype: any }
+  export default Drag
+}
+
+declare module 'simple-mind-map/src/plugins/Select.js' {
+  const Select: { instanceName: string; prototype: any }
+  export default Select
+}
+
+declare module 'simple-mind-map/src/plugins/TouchEvent.js' {
+  const TouchEvent: { instanceName: string; prototype: any }
+  export default TouchEvent
+}
+
 declare module 'simple-mind-map' {
   export default class MindMap {
     static readonly TREE: string
@@ -44,6 +59,10 @@ declare module 'simple-mind-map' {
       export(type: string, isDownload?: boolean, name?: string, ...args: unknown[]): Promise<unknown>
     }
 
+    renderer?: any
+    draggable?: any
+    draw?: any
+
     constructor(opt?: {
       el?: HTMLElement
       data?: unknown
@@ -57,8 +76,12 @@ declare module 'simple-mind-map' {
       scrollbarStyle?: string
       minScale?: number
       maxScale?: number
+      beforeDragEnd?: unknown
+      [key: string]: any
     })
 
+    setThemeConfig(config: any, notRender?: boolean, ...args: any[]): void
+    setTheme(theme: string): void
     setData(data: unknown): void
     getData(): unknown
     execCommand(name: string, ...args: unknown[]): void
@@ -66,5 +89,6 @@ declare module 'simple-mind-map' {
     destroy(): void
     on(event: string, handler: (...args: unknown[]) => void): void
     off(event: string, handler?: (...args: unknown[]) => void): void
+    [key: string]: any
   }
 }

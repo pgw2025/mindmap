@@ -209,9 +209,9 @@
   width: 100%;
   height: 100%;
   background: var(--app-bg, #f5f7fa);
-  /* 阻止浏览器默认手势（移动端滚动/双指缩放）抢占节点拖拽 */
-  touch-action: pan-x pan-y;
-  -ms-touch-action: pan-x pan-y;
+  /* 阻止浏览器默认手势（移动端滚动/双指缩放）抢占节点拖拽与双指缩放 */
+  touch-action: none;
+  -ms-touch-action: none;
 
   // simple-mind-map 内部样式覆盖
   :deep(.mind-map) {

@@ -212,10 +212,25 @@ export function useMindMapSync(opts: {
    *  全局鼠标位置追踪
    *  ============================================================ */
   function bindGlobalMouseTracker() {
+    const updatePos = (clientX: number, clientY: number) => {
+      lastMouseClientX = clientX
+      lastMouseClientY = clientY
+    }
     document.addEventListener('mousemove', (e) => {
-      lastMouseClientX = e.clientX
-      lastMouseClientY = e.clientY
-    })
+      updatePos(e.clientX, e.clientY)
+    }, { passive: true })
+    document.addEventListener('touchmove', (e) => {
+      if (e.touches && e.touches.length > 0) {
+        updatePos(e.touches[0].clientX, e.touches[0].clientY)
+      } else if (e.changedTouches && e.changedTouches.length > 0) {
+        updatePos(e.changedTouches[0].clientX, e.changedTouches[0].clientY)
+      }
+    }, { passive: true })
+    document.addEventListener('touchstart', (e) => {
+      if (e.touches && e.touches.length > 0) {
+        updatePos(e.touches[0].clientX, e.touches[0].clientY)
+      }
+    }, { passive: true })
   }
 
   /** ============================================================
@@ -765,11 +780,8 @@ export function useMindMapSync(opts: {
     const root = inst.renderer.root
     if (!root) return
 
-    const svgEl = inst.draw.node as SVGSVGElement
-    if (!svgEl) return
-
-    const svgRect = svgEl.getBoundingClientRect()
-    const rootCenterClientX = svgRect.left + root.left + (root.width || 0) / 2
+    const rbox = root.group?.rbox ? root.group.rbox() : (root.getRect ? root.getRect() : null)
+    const rootCenterClientX = rbox ? (rbox.cx ?? (rbox.left + (rbox.width || 0) / 2)) : 0
     const targetDir = lastMouseClientX < rootCenterClientX ? 'left' : 'right'
 
     const rootUid = root.getData?.('uid')

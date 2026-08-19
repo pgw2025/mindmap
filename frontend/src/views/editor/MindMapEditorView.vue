@@ -8,6 +8,161 @@ import Export from 'simple-mind-map/src/plugins/Export.js'
 import ExportPDF from 'simple-mind-map/src/plugins/ExportPDF.js'
 import ExportXMind from 'simple-mind-map/src/plugins/ExportXMind.js'
 import Drag from 'simple-mind-map/src/plugins/Drag.js'
+import Select from 'simple-mind-map/src/plugins/Select.js'
+import TouchEvent from 'simple-mind-map/src/plugins/TouchEvent.js'
+
+// 1. 增强 Drag 插件：修复松手后画布漂移 bug，并在松手时即时同步执行重叠检测，防止 300ms 节流导致落位判定失效
+if (Drag && (Drag as any).prototype) {
+  const dragProto = (Drag as any).prototype
+  const origDragOnMouseup = dragProto.onMouseup
+
+  dragProto.onMouseup = async function (this: any, e: MouseEvent) {
+    // 强制清除边缘移动定时器，杜绝任何情况下画布无休止平移
+    if (this.autoMove) {
+      this.autoMove.clearAutoMoveTimer()
+    }
+
+    // 若处于拖拽中，在松手瞬间强制同步触发一次非节流的 checkOverlapNode，精准判定目标父节点或兄弟节点
+    if (this.isMousedown && this.isDragging && Drag.prototype.checkOverlapNode) {
+      try {
+        Drag.prototype.checkOverlapNode.call(this)
+      } catch (err) {
+        console.warn('[Drag] immediate checkOverlapNode call error:', err)
+      }
+    }
+
+    // 执行原有 onMouseup 逻辑
+    const result = await origDragOnMouseup.call(this, e)
+
+    // 再次无条件确保定时器被清除
+    if (this.autoMove) {
+      this.autoMove.clearAutoMoveTimer()
+    }
+
+    return result
+  }
+}
+
+// 2. 增强 TouchEvent 插件：处理 touchmove 阻止浏览器手势干扰，完善 touchcancel，并精确派发 mouseup 坐标
+if (TouchEvent && (TouchEvent as any).prototype) {
+  const proto = (TouchEvent as any).prototype
+
+  // 单指移动时调用 preventDefault，防止浏览器手势拦截/触发 touchcancel
+  proto.onTouchmove = function (this: any, e: globalThis.TouchEvent) {
+    const len = e.touches.length
+    if (len === 1) {
+      const touch = e.touches[0]
+      if (e.cancelable) {
+        e.preventDefault()
+      }
+      this.dispatchMouseEvent('mousemove', touch.target, touch)
+    } else if (len === 2) {
+      const { disableTouchZoom, minTouchZoomScale, maxTouchZoomScale } = this.mindMap.opt
+      if (disableTouchZoom) return
+      const minScale = minTouchZoomScale === -1 ? -Infinity : minTouchZoomScale / 100
+      const maxScale = maxTouchZoomScale === -1 ? Infinity : maxTouchZoomScale / 100
+      const touch1 = e.touches[0]
+      const touch2 = e.touches[1]
+      const ox = touch1.clientX - touch2.clientX
+      const oy = touch1.clientY - touch2.clientY
+      const distance = Math.sqrt(Math.pow(ox, 2) + Math.pow(oy, 2))
+      const { x: touch1ClientX, y: touch1ClientY } = this.mindMap.toPos(touch1.clientX, touch1.clientY)
+      const { x: touch2ClientX, y: touch2ClientY } = this.mindMap.toPos(touch2.clientX, touch2.clientY)
+      const cx = (touch1ClientX + touch2ClientX) / 2
+      const cy = (touch1ClientY + touch2ClientY) / 2
+      const view = this.mindMap.view
+      if (!this.touchStartScaleView) {
+        this.touchStartScaleView = {
+          distance,
+          scale: view.scale,
+          x: view.x,
+          y: view.y,
+          cx,
+          cy
+        }
+        return
+      }
+      const viewBefore = this.touchStartScaleView
+      let scale = viewBefore.scale * (distance / viewBefore.distance)
+      if (Math.abs(distance - viewBefore.distance) <= 10) {
+        scale = viewBefore.scale
+      }
+      scale = scale < minScale ? minScale : scale > maxScale ? maxScale : scale
+      const ratio = 1 - scale / viewBefore.scale
+      view.scale = scale
+      view.x = viewBefore.x + (cx - viewBefore.x) * ratio + (cx - viewBefore.cx) * scale
+      view.y = viewBefore.y + (cy - viewBefore.y) * ratio + (cy - viewBefore.cy) * scale
+      view.transform()
+      this.mindMap.emit('scale', scale)
+    }
+  }
+
+  // 触摸取消时派发 mouseup 安全收尾
+  proto.onTouchcancel = function (this: any, e: globalThis.TouchEvent) {
+    const touch = (e.changedTouches && e.changedTouches[0]) || (e.touches && e.touches[0]) || this.singleTouchstartEvent || null
+    const target = touch?.target || e.target || document.body
+    if (touch) {
+      this.dispatchMouseEvent('mouseup', target, touch)
+    } else {
+      this.dispatchMouseEvent('mouseup', target)
+    }
+    this.touchesNum = 0
+    this.singleTouchstartEvent = null
+    this.touchStartScaleView = null
+  }
+
+  // 触摸结束时精准传递落点坐标
+  proto.onTouchend = function (this: any, e: globalThis.TouchEvent) {
+    const touch = (e.changedTouches && e.changedTouches[0]) || (e.touches && e.touches[0]) || this.singleTouchstartEvent || null
+    const target = touch?.target || e.target || document.body
+    if (touch) {
+      this.dispatchMouseEvent('mouseup', target, touch)
+    } else {
+      this.dispatchMouseEvent('mouseup', target)
+    }
+    if (this.touchesNum === 1) {
+      this.clickNum++
+      setTimeout(() => {
+        this.clickNum = 0
+        this.lastTouchStartPosition = null
+        this.lastTouchStartDistance = 0
+      }, 300)
+      const ev = this.singleTouchstartEvent
+      if (this.clickNum > 1 && this.lastTouchStartDistance <= 5 && ev) {
+        this.clickNum = 0
+        this.dispatchMouseEvent('dblclick', ev.target, ev)
+      }
+    }
+    this.touchesNum = 0
+    this.singleTouchstartEvent = null
+    this.touchStartScaleView = null
+  }
+
+  // 发送带精确坐标与状态的合成鼠标事件
+  proto.dispatchMouseEvent = function (this: any, eventName: string, target: EventTarget, e?: any) {
+    let opt: any = {
+      which: 1,
+      button: 0,
+      buttons: eventName === 'mouseup' ? 0 : 1
+    }
+    if (e) {
+      opt = {
+        ...opt,
+        screenX: e.screenX ?? 0,
+        screenY: e.screenY ?? 0,
+        clientX: e.clientX ?? 0,
+        clientY: e.clientY ?? 0
+      }
+    }
+    const event = new MouseEvent(eventName, {
+      view: document.defaultView,
+      bubbles: true,
+      cancelable: true,
+      ...opt
+    })
+    target.dispatchEvent(event)
+  }
+}
 
 // 注册插件
 MindMap.usePlugin(Search)
@@ -15,6 +170,8 @@ MindMap.usePlugin(Export)
 MindMap.usePlugin(ExportPDF)
 MindMap.usePlugin(ExportXMind)
 MindMap.usePlugin(Drag)
+MindMap.usePlugin(Select)
+MindMap.usePlugin(TouchEvent)
 
 import type { NodeDto, NodeCreatePayload, NodeUpdatePayload } from '@/api/nodes'
 import type { MindMapDetail } from '@/api/mindmaps'
@@ -28,7 +185,6 @@ import NodeToolbar from './NodeToolbar.vue'
 import ShareDrawer from './components/ShareDrawer.vue'
 import VersionDrawer from './components/VersionDrawer.vue'
 import NodeContentModal from './components/NodeContentModal.vue'
-import { useTouchBridge } from './composables/useTouchBridge'
 import { useMindMapSync } from './composables/useMindMapSync'
 import { THEMES, getThemeConfig, getThemeIdOrDefault, type MindMapThemeConfig } from '@/themes/presets'
 
@@ -67,12 +223,6 @@ const clipboardNode = ref<NodeDto | null>(null)
 const searchKeyword = ref('')
 const searchMatchCount = ref(0)
 const searchCurrentIndex = ref(0)
-
-// —— 组合式函数：触摸桥接 + 双指缩放 ——
-const { bindTouchBridge } = useTouchBridge({
-  mindMapRef,
-  getMindMapInstance: () => mindMapInstance
-})
 
 // —— 组合式函数：数据转换/同步/方向归一化/拖拽预判 ——
 const {
@@ -207,9 +357,6 @@ function initMindMap() {
       isSettingData.value = false
     }, 500) // 延迟 500ms 避开初始化渲染期
   })
-
-  // 移动端触摸事件桥接到鼠标事件（simple-mind-map 默认只绑定 mouse 事件）
-  bindTouchBridge()
 
   // 监听选中节点：node_active 回调参数为 (node, activeNodeList)
   mindMapInstance.on('node_active', (...args: unknown[]) => {
@@ -817,7 +964,7 @@ watch(() => route.params.id, () => {
 
     <!-- 根节点不能删除提示 -->
     <NModal v-model:show="rootDeleteTipVisible" preset="dialog" type="warning" title="无法删除" positive-text="我知道了"
-      :negative-button-props="{ style: { display: 'none' } }" display-directive="if" style="max-width: 420px">
+      display-directive="if" style="max-width: 420px">
       根节点不能删除。你可以清空内容但不能删除中心主题。
     </NModal>
 
