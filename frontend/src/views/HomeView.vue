@@ -334,8 +334,8 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`
 }
 
-const folderOptions = computed<{ label: string; value: string | null }[]>(() => {
-  const options: { label: string; value: string | null }[] = [
+const folderOptions = computed(() => {
+  const options: { label: string; value: any }[] = [
     { label: '根目录（不放入文件夹）', value: null }
   ]
   function walk(nodes: typeof foldersStore.tree, depth: number) {

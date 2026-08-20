@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useMessage, NInput, NButton, NModal, NDropdown } from 'naive-ui'
+import { useMessage, NInput, NModal, NDropdown } from 'naive-ui'
 import MindMap from 'simple-mind-map'
 import Search from 'simple-mind-map/src/plugins/Search.js'
 import Export from 'simple-mind-map/src/plugins/Export.js'
@@ -240,7 +240,6 @@ const {
 })
 
 // —— 子组件引用 ——
-const shareDrawerRef = ref<InstanceType<typeof ShareDrawer> | null>(null)
 const versionDrawerRef = ref<InstanceType<typeof VersionDrawer> | null>(null)
 
 // —— 弹窗/抽屉可见状态 ——
@@ -956,7 +955,7 @@ watch(() => route.params.id, () => {
       :node-count="nodesStore.nodes.length" @rollback="handleVersionRollback" />
 
     <!-- 分享抽屉（含新建分享弹窗） -->
-    <ShareDrawer ref="shareDrawerRef" v-model:show="shareDrawerVisible" :mind-map-id="mindMapId"
+    <ShareDrawer v-model:show="shareDrawerVisible" :mind-map-id="mindMapId"
       :is-public-default="mapDetail?.isPublic ?? false" @public-change="handleSharePublicChange" />
 
     <!-- 富文本节点内容编辑弹窗 -->

@@ -2,7 +2,6 @@
 import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   NButton,
-  NCard,
   NColorPicker,
   NDataTable,
   NInput,
@@ -13,7 +12,6 @@ import {
   NSwitch,
   NTag,
   NPagination,
-  NDivider,
   NCollapse,
   NCollapseItem,
   useMessage,

@@ -1,6 +1,6 @@
 import { ref, type ComputedRef } from 'vue'
 import type MindMap from 'simple-mind-map'
-import type { NodeDto, NodeUpdatePayload, NodeBatchItem } from '@/api/nodes'
+import type { NodeDto, NodeBatchItem } from '@/api/nodes'
 import { useNodesStore } from '@/stores/nodes'
 
 type NodesStore = ReturnType<typeof useNodesStore>
@@ -67,15 +67,6 @@ export function useMindMapSync(opts: {
    *  这是增量同步最核心的状态
    *  ============================================================ */
   const uidToBackendId = new Map<string, string>()
-
-  /**
-   * 注册一个已存在的 ID 映射（初始加载后端数据时调用）
-   */
-  function registerIdMapping(uid: string, backendId: string) {
-    if (uid && backendId) {
-      uidToBackendId.set(uid, backendId)
-    }
-  }
 
   /**
    * 根据 uid 获取后端 ID（找不到返回 null）
@@ -184,28 +175,6 @@ export function useMindMapSync(opts: {
       if (c) clearTimeout(c)
       collapseDebounceTimers.delete(bid)
     }
-  }
-
-  /** ============================================================
-   *  工具：在 DetailNode 树中构建 uid → parentUid + sortOrder 的映射
-   *  ============================================================ */
-  function buildRelationalMaps(root: DetailNode): {
-    parentOf: Map<string, string | null>
-    sortOrderOf: Map<string, number>
-    nodesByUid: Map<string, DetailNode>
-  } {
-    const parentOf = new Map<string, string | null>()
-    const sortOrderOf = new Map<string, number>()
-    const nodesByUid = new Map<string, DetailNode>()
-    const walk = (node: DetailNode, parentUid: string | null, idx: number) => {
-      const uid = node.data.uid
-      parentOf.set(uid, parentUid)
-      sortOrderOf.set(uid, idx)
-      nodesByUid.set(uid, node)
-      node.children.forEach((child, i) => walk(child, uid, i))
-    }
-    walk(root, null, 0)
-    return { parentOf, sortOrderOf, nodesByUid }
   }
 
   /** ============================================================
