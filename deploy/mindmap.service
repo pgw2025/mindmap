@@ -1,0 +1,27 @@
+[Service]
+Type=simple
+WorkingDirectory=/opt/mindmap/backend
+ExecStart=/root/.dotnet/dotnet /opt/mindmap/backend/MindMap.Api.dll
+Restart=always
+RestartSec=10
+SyslogIdentifier=mindmap
+
+# 安全与权限
+User=root
+Group=root
+
+# 环境变量（按需修改）
+  Environment=ASPNETCORE_ENVIRONMENT=Production
+  Environment=ASPNETCORE_URLS=http://127.0.0.1:5522
+  Environment=DOTNET_PRINT_TELEMETRY_MESSAGE=false
+
+# 标准输出/错误交由 systemd 管理（默认即为 journal）
+StandardOutput=journal
+StandardError=journal
+
+# 可选：资源限制
+# LimitNOFILE=65536
+# MemoryMax=1G
+
+[Install]
+WantedBy=multi-user.target

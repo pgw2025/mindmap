@@ -4,7 +4,7 @@
 ## 编译产物
 **/bin/
 **/obj/
-
+/publish/
 ## 日志
 **/logs/
 
@@ -57,3 +57,14 @@
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# ======================
+# 发布脚本（Deploy scripts）
+# ======================
+## 本地发布配置（含数据库密码、JWT 密钥等敏感信息）
+scripts/.env.deploy
+
+## 本地构建产物与打包文件
+scripts/artifacts/
+scripts/*.tar.gz
+
