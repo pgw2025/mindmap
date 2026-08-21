@@ -1087,12 +1087,12 @@ watch(() => route.params.id, () => {
         <div class="spinner"></div>
         <p>加载中...</p>
       </div>
-    </main>
 
-    <!-- 浮动工具栏 -->
-    <NodeToolbar v-if="showToolbar && selectedNodeId" :node="nodesStore.findNode(selectedNodeId)"
-      @add-child="handleAddChild" @add-sibling="handleAddSibling" @delete="handleDelete" @update="handleUpdateStyle"
-      @copy="handleCopy" @paste="handlePaste" />
+      <!-- 浮动工具栏（挂载在画布主容器内，随主容器定位） -->
+      <NodeToolbar v-if="showToolbar && selectedNodeId" :node="nodesStore.findNode(selectedNodeId)"
+        @add-child="handleAddChild" @add-sibling="handleAddSibling" @delete="handleDelete" @update="handleUpdateStyle"
+        @copy="handleCopy" @paste="handlePaste" />
+    </main>
 
     <!-- 版本历史抽屉（含新建版本弹窗） -->
     <VersionDrawer ref="versionDrawerRef" v-model:show="versionsDrawerVisible" :mind-map-id="mindMapId"

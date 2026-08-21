@@ -241,25 +241,29 @@ function selectEdgeStyle(style: EdgeStyle) {
   position: absolute;
   top: 16px;
   right: 16px;
-  width: 260px;
-  max-height: calc(100vh - 100px);
+  width: 290px;
+  box-sizing: border-box;
+  max-height: calc(100% - 32px);
   overflow-y: auto;
+  overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   background: var(--app-card-bg, #fff);
   border-radius: 12px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
   padding: 16px;
-  z-index: 100;
+  z-index: 80;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .toolbar-section {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .section-title {
@@ -277,8 +281,9 @@ function selectEdgeStyle(style: EdgeStyle) {
 }
 
 .tool-btn {
-  flex: 1;
+  flex: 1 1 calc(33.333% - 6px);
   min-width: 60px;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -318,18 +323,20 @@ function selectEdgeStyle(style: EdgeStyle) {
 .divider {
   height: 1px;
   background: var(--app-border, #e0e0e6);
-  margin: 4px 0;
+  margin: 2px 0;
 }
 
 .color-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 4px;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+  justify-items: center;
 }
 
 .color-swatch {
   width: 32px;
   height: 32px;
+  box-sizing: border-box;
   border-radius: 6px;
   border: 2px solid transparent;
   cursor: pointer;
@@ -341,7 +348,7 @@ function selectEdgeStyle(style: EdgeStyle) {
   font-size: 10px;
 
   &:hover {
-    transform: scale(1.1);
+    transform: scale(1.08);
   }
 
   &.active {
@@ -363,11 +370,12 @@ function selectEdgeStyle(style: EdgeStyle) {
 .size-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 4px;
+  gap: 6px;
 }
 
 .size-btn {
   padding: 6px 4px;
+  box-sizing: border-box;
   background: var(--app-bg, #f5f7fa);
   border: 1px solid var(--app-border, #e0e0e6);
   border-radius: 6px;
@@ -390,11 +398,12 @@ function selectEdgeStyle(style: EdgeStyle) {
 .shape-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 4px;
+  gap: 6px;
 }
 
 .shape-btn {
   padding: 6px 4px;
+  box-sizing: border-box;
   background: var(--app-bg, #f5f7fa);
   border: 1px solid var(--app-border, #e0e0e6);
   border-radius: 6px;
@@ -416,26 +425,32 @@ function selectEdgeStyle(style: EdgeStyle) {
 
 .icon-grid {
   display: grid;
-  grid-template-columns: repeat(8, 1fr);
-  gap: 2px;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
 }
 
 .icon-btn {
-  padding: 4px;
+  height: 32px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
   background: var(--app-bg, #f5f7fa);
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
-  font-size: 14px;
-  transition: all 0.2s;
+  font-size: 16px;
+  line-height: 1;
+  transition: all 0.15s ease;
 
   &:hover {
     background: var(--app-hover-bg, #e8eaed);
-    transform: scale(1.2);
+    transform: scale(1.1);
   }
 
   &.active {
-    background: var(--app-primary, #18a058);
+    background: rgba(24, 160, 88, 0.15);
     border-color: var(--app-primary, #18a058);
   }
 }
@@ -443,7 +458,7 @@ function selectEdgeStyle(style: EdgeStyle) {
 .edge-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 4px;
+  gap: 6px;
 }
 
 .edge-btn {

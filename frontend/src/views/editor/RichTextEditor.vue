@@ -74,117 +74,57 @@ function openLinkEditor() {
 <template>
   <div class="rich-text-editor">
     <div class="toolbar" v-if="editor">
-      <NButton
-        size="tiny"
-        :type="editor.isActive('bold') ? 'primary' : 'default'"
-        quaternary
-        @click="editor.chain().focus().toggleBold().run()"
-        title="加粗"
-      >
+      <NButton size="tiny" :type="editor.isActive('bold') ? 'primary' : 'default'" quaternary
+        @click="editor.chain().focus().toggleBold().run()" title="加粗">
         <span class="tb-icon"><b>B</b></span>
       </NButton>
-      <NButton
-        size="tiny"
-        :type="editor.isActive('italic') ? 'primary' : 'default'"
-        quaternary
-        @click="editor.chain().focus().toggleItalic().run()"
-        title="斜体"
-      >
+      <NButton size="tiny" :type="editor.isActive('italic') ? 'primary' : 'default'" quaternary
+        @click="editor.chain().focus().toggleItalic().run()" title="斜体">
         <span class="tb-icon"><i>I</i></span>
       </NButton>
-      <NButton
-        size="tiny"
-        :type="editor.isActive('underline') ? 'primary' : 'default'"
-        quaternary
-        @click="editor.chain().focus().toggleUnderline().run()"
-        title="下划线"
-      >
+      <NButton size="tiny" :type="editor.isActive('underline') ? 'primary' : 'default'" quaternary
+        @click="editor.chain().focus().toggleUnderline().run()" title="下划线">
         <span class="tb-icon"><u>U</u></span>
       </NButton>
-      <NButton
-        size="tiny"
-        :type="editor.isActive('strike') ? 'primary' : 'default'"
-        quaternary
-        @click="editor.chain().focus().toggleStrike().run()"
-        title="删除线"
-      >
+      <NButton size="tiny" :type="editor.isActive('strike') ? 'primary' : 'default'" quaternary
+        @click="editor.chain().focus().toggleStrike().run()" title="删除线">
         <span class="tb-icon"><s>S</s></span>
       </NButton>
       <span class="tb-divider"></span>
-      <NButton
-        size="tiny"
-        :type="editor.isActive('bulletList') ? 'primary' : 'default'"
-        quaternary
-        @click="editor.chain().focus().toggleBulletList().run()"
-        title="无序列表"
-      >
+      <NButton size="tiny" :type="editor.isActive('bulletList') ? 'primary' : 'default'" quaternary
+        @click="editor.chain().focus().toggleBulletList().run()" title="无序列表">
         <span class="tb-icon">• ─</span>
       </NButton>
-      <NButton
-        size="tiny"
-        :type="editor.isActive('orderedList') ? 'primary' : 'default'"
-        quaternary
-        @click="editor.chain().focus().toggleOrderedList().run()"
-        title="有序列表"
-      >
+      <NButton size="tiny" :type="editor.isActive('orderedList') ? 'primary' : 'default'" quaternary
+        @click="editor.chain().focus().toggleOrderedList().run()" title="有序列表">
         <span class="tb-icon">1. ─</span>
       </NButton>
-      <NButton
-        size="tiny"
-        :type="editor.isActive('blockquote') ? 'primary' : 'default'"
-        quaternary
-        @click="editor.chain().focus().toggleBlockquote().run()"
-        title="引用"
-      >
+      <NButton size="tiny" :type="editor.isActive('blockquote') ? 'primary' : 'default'" quaternary
+        @click="editor.chain().focus().toggleBlockquote().run()" title="引用">
         <span class="tb-icon">❝</span>
       </NButton>
       <span class="tb-divider"></span>
-      <NButton
-        size="tiny"
-        :type="editor.isActive('link') ? 'primary' : 'default'"
-        quaternary
-        @click="openLinkEditor"
-        title="链接"
-      >
+      <NButton size="tiny" :type="editor.isActive('link') ? 'primary' : 'default'" quaternary @click="openLinkEditor"
+        title="链接">
         <span class="tb-icon">🔗</span>
       </NButton>
       <span class="tb-divider"></span>
-      <NButton
-        size="tiny"
-        :type="editor.isActive({ textAlign: 'left' }) ? 'primary' : 'default'"
-        quaternary
-        @click="editor.chain().focus().setTextAlign('left').run()"
-        title="左对齐"
-      >
+      <NButton size="tiny" :type="editor.isActive({ textAlign: 'left' }) ? 'primary' : 'default'" quaternary
+        @click="editor.chain().focus().setTextAlign('left').run()" title="左对齐">
         <span class="tb-icon">⬅</span>
       </NButton>
-      <NButton
-        size="tiny"
-        :type="editor.isActive({ textAlign: 'center' }) ? 'primary' : 'default'"
-        quaternary
-        @click="editor.chain().focus().setTextAlign('center').run()"
-        title="居中"
-      >
+      <NButton size="tiny" :type="editor.isActive({ textAlign: 'center' }) ? 'primary' : 'default'" quaternary
+        @click="editor.chain().focus().setTextAlign('center').run()" title="居中">
         <span class="tb-icon">⬌</span>
       </NButton>
-      <NButton
-        size="tiny"
-        :type="editor.isActive({ textAlign: 'right' }) ? 'primary' : 'default'"
-        quaternary
-        @click="editor.chain().focus().setTextAlign('right').run()"
-        title="右对齐"
-      >
+      <NButton size="tiny" :type="editor.isActive({ textAlign: 'right' }) ? 'primary' : 'default'" quaternary
+        @click="editor.chain().focus().setTextAlign('right').run()" title="右对齐">
         <span class="tb-icon">➡</span>
       </NButton>
     </div>
 
     <div v-if="showLinkInput" class="link-input-bar">
-      <NInput
-        v-model:value="linkUrl"
-        size="small"
-        placeholder="输入链接 URL"
-        @keyup.enter="setLink"
-      />
+      <NInput v-model:value="linkUrl" size="small" placeholder="输入链接 URL" @keyup.enter="setLink" />
       <NSpace>
         <NButton size="small" type="primary" @click="setLink">确定</NButton>
         <NButton size="small" @click="showLinkInput = false; linkUrl = ''">取消</NButton>
@@ -197,6 +137,8 @@ function openLinkEditor() {
 
 <style scoped lang="scss">
 .rich-text-editor {
+  width: 100%;
+  box-sizing: border-box;
   border: 1px solid var(--app-border, #e0e0e6);
   border-radius: 8px;
   overflow: hidden;
@@ -205,11 +147,12 @@ function openLinkEditor() {
 .toolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 2px;
+  gap: 4px;
   align-items: center;
   padding: 4px 6px;
   background: var(--app-bg, #f5f7fa);
   border-bottom: 1px solid var(--app-border, #e0e0e6);
+  box-sizing: border-box;
 }
 
 .tb-icon {
@@ -238,6 +181,8 @@ function openLinkEditor() {
   min-height: 120px;
   max-height: 300px;
   overflow-y: auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
   padding: 12px 16px;
 
   :deep(.tiptap) {
@@ -246,6 +191,9 @@ function openLinkEditor() {
     font-size: 14px;
     line-height: 1.6;
     color: var(--app-text-primary, #333);
+    word-break: break-word;
+    overflow-wrap: break-word;
+    white-space: pre-wrap;
 
     p {
       margin: 0 0 8px;

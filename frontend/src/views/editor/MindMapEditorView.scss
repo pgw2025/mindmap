@@ -17,7 +17,7 @@
   background: var(--app-card-bg, #fff);
   border-bottom: 1px solid var(--app-border, #e5e7eb);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
-  z-index: 10;
+  z-index: 100;
   min-height: 52px;
 }
 
@@ -451,6 +451,16 @@
     width: 100% !important;
     height: 100% !important;
     touch-action: none;
+  }
+
+  // simple-mind-map 节点双击内联编辑输入框：禁止横向滚动条，自动换行
+  :deep(.smm-text-edit-node),
+  :deep(.smm-node-text-edit-input),
+  :deep(.simple-mind-map-text-edit-input) {
+    overflow-x: hidden !important;
+    word-break: break-word !important;
+    white-space: pre-wrap !important;
+    box-sizing: border-box !important;
   }
 }
 

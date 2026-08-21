@@ -51,7 +51,7 @@ async function saveNodeContent() {
 
 <template>
   <NModal :show="show" @update:show="emit('update:show', $event)" preset="card" title="📝 编辑节点内容"
-    style="width: 600px; max-width: 92vw" :mask-closable="false">
+    style="width: 600px; max-width: 92vw; margin-top: 60px; margin-bottom: 40px;" :mask-closable="false">
     <div class="content-edit-body">
       <div class="field-group">
         <label class="field-label">标题</label>
@@ -83,12 +83,18 @@ async function saveNodeContent() {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  width: 100%;
+  box-sizing: border-box;
+  overflow-x: hidden;
 }
 
 .field-group {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  width: 100%;
+  box-sizing: border-box;
+  overflow-x: hidden;
 }
 
 .field-label {
