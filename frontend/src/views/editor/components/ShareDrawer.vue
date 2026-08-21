@@ -145,7 +145,7 @@ async function handleDeleteShare(share: ShareDto) {
 function formatShareTime(s: string | null | undefined): string {
   if (!s) return ''
   const d = new Date(s)
-  return d.toLocaleDateString() + ' ' + d.toLocaleTimeString().slice(0, 5)
+  return d.toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' }) + ' ' + d.toLocaleTimeString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' }).slice(0, 5)
 }
 
 /** 暴露给父组件：在外部按钮直接打开"新建分享"弹窗 */

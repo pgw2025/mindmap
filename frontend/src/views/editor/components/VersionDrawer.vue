@@ -94,7 +94,7 @@ function formatVersionTime(iso: string): string {
   if (diffHours < 24) return `${diffHours} 小时前`
   const diffDays = Math.floor(diffHours / 24)
   if (diffDays < 30) return `${diffDays} 天前`
-  return d.toLocaleDateString() + ' ' + d.toLocaleTimeString().slice(0, 5)
+  return d.toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' }) + ' ' + d.toLocaleTimeString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' }).slice(0, 5)
 }
 
 /** 暴露给父组件：外部按钮直接打开"保存版本快照"弹窗 */

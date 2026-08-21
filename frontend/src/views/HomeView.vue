@@ -333,7 +333,7 @@ async function submitRemove(): Promise<boolean> {
 }
 
 function formatTime(s: string): string {
-  return new Date(s).toLocaleString('zh-CN', { hour12: false })
+  return new Date(s).toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' })
 }
 
 function formatFileSize(bytes: number): string {
