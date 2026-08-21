@@ -50,8 +50,8 @@ if (TouchEvent && (TouchEvent as any).prototype) {
   // 单指移动时判断是否落在工具栏或输入控件内，如果在内部则允许原生滚动，不拦截；在画布上才 preventDefault
   proto.onTouchstart = function (this: any, e: globalThis.TouchEvent) {
     const target = e.target as HTMLElement | null
-    if (target && target.closest('.node-toolbar, .n-modal, .n-drawer, .search-bar, .editor-header, input, textarea, button, select')) {
-      // 允许工具栏和输入控件原生滚动与交互，不转化为画布 mousedown
+    if (target && target.closest('.node-toolbar, .mobile-zen-pill, .btn-mobile-zen-toggle, .n-modal, .n-drawer, .search-bar, .editor-header, input, textarea, button, select')) {
+      // 允许工具栏、悬浮胶囊和输入控件原生交互与点击，不转化为画布 mousedown
       this.touchesNum = 0
       this.singleTouchstartEvent = null
       return
@@ -68,7 +68,7 @@ if (TouchEvent && (TouchEvent as any).prototype) {
   // 单指移动时：如果触摸目标在工具栏/弹窗内，不阻止默认滚动；否则调用 preventDefault 驱动画布拖动
   proto.onTouchmove = function (this: any, e: globalThis.TouchEvent) {
     const target = e.target as HTMLElement | null
-    if (target && target.closest('.node-toolbar, .n-modal, .n-drawer, .search-bar, .editor-header, input, textarea, button, select')) {
+    if (target && target.closest('.node-toolbar, .mobile-zen-pill, .btn-mobile-zen-toggle, .n-modal, .n-drawer, .search-bar, .editor-header, input, textarea, button, select')) {
       return
     }
 
@@ -187,6 +187,19 @@ if (TouchEvent && (TouchEvent as any).prototype) {
   }
 }
 
+// 3. 增强 MindMap 核心：容错容器尺寸计算，杜绝 "容器元素el的宽高不能为0" 崩溃
+if (MindMap && (MindMap as any).prototype) {
+  const mapProto = (MindMap as any).prototype
+  mapProto.getElRectInfo = function (this: any) {
+    if (!this.el) return
+    this.elRect = this.el.getBoundingClientRect()
+    this.width = this.elRect.width || this.el.clientWidth || window.innerWidth || 800
+    this.height = this.elRect.height || this.el.clientHeight || (window.innerHeight - 60) || 600
+    if (this.width <= 0) this.width = 800
+    if (this.height <= 0) this.height = 600
+  }
+}
+
 // 注册插件
 MindMap.usePlugin(Search)
 MindMap.usePlugin(Export)
@@ -235,9 +248,20 @@ const loading = ref(true)
 const mindMapRef = ref<HTMLDivElement | null>(null)
 let mindMapInstance: MindMap | null = null
 
-/** 选中的节点样式 */
+// 选中的节点样式
 const selectedNodeId = ref<string | null>(null)
 const showToolbar = ref(false)
+
+// 移动端顶部标题/描述/导航栏沉浸折叠状态（Zen 模式）
+const isMobileHeaderCollapsed = ref(false)
+let containerResizeObserver: ResizeObserver | null = null
+
+function toggleMobileHeader() {
+  isMobileHeaderCollapsed.value = !isMobileHeaderCollapsed.value
+  nextTick(() => {
+    mindMapInstance?.resize()
+  })
+}
 
 /** 复制/粘贴剪贴板 */
 const clipboardNode = ref<NodeDto | null>(null)
@@ -334,7 +358,7 @@ function initMindMap() {
             }
             const r = mindMapInstance?.renderer?.root
             if (r) {
-              ;(mindMapInstance?.renderer as any)?.moveNodeToCenter(r)
+              ; (mindMapInstance?.renderer as any)?.moveNodeToCenter(r)
             }
           })
           .catch(() => {
@@ -347,7 +371,7 @@ function initMindMap() {
         const root = mindMapInstance?.renderer?.root
         if (root) {
           // moveNodeToCenter 在 Render 实例上，不在 MindMap 实例上
-          ;(mindMapInstance?.renderer as any)?.moveNodeToCenter(root)
+          ; (mindMapInstance?.renderer as any)?.moveNodeToCenter(root)
         }
       }
     }
@@ -838,11 +862,22 @@ onMounted(async () => {
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       initMindMap()
+
+      // 监听容器尺寸变动（窗口缩放、横竖屏切换、工具栏折叠等）自动自适应
+      if (mindMapRef.value && typeof ResizeObserver !== 'undefined') {
+        containerResizeObserver?.disconnect()
+        containerResizeObserver = new ResizeObserver(() => {
+          mindMapInstance?.resize()
+        })
+        containerResizeObserver.observe(mindMapRef.value)
+      }
     })
   })
 })
 
 onUnmounted(() => {
+  containerResizeObserver?.disconnect()
+  containerResizeObserver = null
   mindMapInstance?.destroy()
   mindMapInstance = null
   nodesStore.reset()
@@ -895,9 +930,9 @@ watch(() => route.params.id, () => {
 </script>
 
 <template>
-  <div class="editor-container">
+  <div class="editor-container" :class="{ 'is-zen-mode': isMobileHeaderCollapsed }">
     <!-- 顶部工具栏 -->
-    <header class="editor-header">
+    <header class="editor-header" :class="{ 'is-collapsed': isMobileHeaderCollapsed }">
       <button class="btn-back" @click="handleBack">
         <span class="icon">←</span>
         <span class="text">返回</span>
@@ -907,16 +942,18 @@ watch(() => route.params.id, () => {
         <NInput v-if="!readonly" v-model:value="mapDetail.title" class="title-input" @blur="handleTitleBlur" />
         <span v-else class="title-text">{{ mapDetail.title }}</span>
         <div v-if="!readonly" class="desc-row">
-          <NInput
-            v-model:value="mapDetail.description"
-            class="desc-input"
-            placeholder="添加导图描述（可选）"
-            clearable
-            @blur="handleDescriptionBlur"
-          />
+          <NInput v-model:value="mapDetail.description" class="desc-input" placeholder="添加导图描述（可选）" clearable
+            @blur="handleDescriptionBlur" />
         </div>
         <p v-else-if="mapDetail.description" class="desc-text">{{ mapDetail.description }}</p>
       </div>
+
+      <!-- 移动端收起/展开快捷按钮 -->
+      <button class="btn-mobile-zen-toggle" @click="toggleMobileHeader"
+        :title="isMobileHeaderCollapsed ? '展开顶栏' : '收起顶栏 (沉浸模式)'">
+        <span class="zen-icon">{{ isMobileHeaderCollapsed ? '▾' : '▴' }}</span>
+        <span class="zen-text">{{ isMobileHeaderCollapsed ? '展开' : '沉浸' }}</span>
+      </button>
 
       <div class="editor-actions">
         <template v-if="!readonly">
@@ -950,10 +987,11 @@ watch(() => route.params.id, () => {
           <button class="btn-action-export" :class="{ 'is-loading': exporting }" title="导出导图" :disabled="exporting">
             <span class="btn-icon">{{ exporting ? '⏳' : '📤' }}</span><span class="btn-label">{{ exporting ? '导出中...' :
               '导出'
-            }}</span>
+              }}</span>
           </button>
         </NDropdown>
-        <NDropdown trigger="click" :options="templateDropdownOptions" :value="currentTemplateId ?? '__none__'" @select="handleTemplateSelect">
+        <NDropdown trigger="click" :options="templateDropdownOptions" :value="currentTemplateId ?? '__none__'"
+          @select="handleTemplateSelect">
           <button class="btn-action-template" :class="{ 'is-active': !!currentTemplateId }" title="切换模板">
             <span class="btn-icon">📋</span>
             <span class="btn-label">{{
@@ -968,7 +1006,7 @@ watch(() => route.params.id, () => {
             <span class="theme-swatch"
               :style="{ background: THEMES.find(t => t.id === currentThemeId)?.swatch.rootFill }"></span>
             <span class="btn-icon">🎨</span>
-            <span class="btn-label">{{ THEMES.find(t => t.id === currentThemeId)?.name ?? '主题' }}</span>
+            <span class="btn-label">{{THEMES.find(t => t.id === currentThemeId)?.name ?? '主题'}}</span>
           </button>
         </NDropdown>
         <span class="action-divider"></span>
@@ -980,6 +1018,17 @@ watch(() => route.params.id, () => {
 
     <!-- 画布区域 -->
     <main class="editor-main">
+      <!-- 移动端沉浸胶囊（Zen 模式下浮动在顶部中间） -->
+      <transition name="zen-fade">
+        <div v-if="isMobileHeaderCollapsed" class="mobile-zen-pill" @click="toggleMobileHeader" title="点击展开导航与操作栏">
+          <button class="zen-pill-back" @click.stop="handleBack" title="返回">
+            ←
+          </button>
+          <span class="zen-pill-title">{{ mapDetail?.title || '思维导图' }}</span>
+          <span class="zen-pill-icon">▾</span>
+        </div>
+      </transition>
+
       <!-- 导图内搜索栏 -->
       <div class="search-bar">
         <input v-model="searchKeyword" class="search-input" type="text" placeholder="搜索节点..."
@@ -1015,14 +1064,8 @@ watch(() => route.params.id, () => {
     <NodeContentModal v-model:show="contentModalVisible" :node="selectedNodeForContent" @save="handleContentSave" />
 
     <!-- 根节点不能删除提示 -->
-    <NModal
-      v-model:show="rootDeleteTipVisible"
-      preset="card"
-      title="无法删除"
-      style="max-width: 420px"
-      :bordered="false"
-      size="medium"
-    >
+    <NModal v-model:show="rootDeleteTipVisible" preset="card" title="无法删除" style="max-width: 420px" :bordered="false"
+      size="medium">
       <div style="font-size: 14px; color: #475569; line-height: 1.6;">
         根节点不能删除。你可以清空内容但不能删除中心主题。
       </div>
@@ -1036,14 +1079,8 @@ watch(() => route.params.id, () => {
     </NModal>
 
     <!-- 删除节点确认 -->
-    <NModal
-      v-model:show="nodeDeleteConfirmVisible"
-      preset="card"
-      title="确认删除"
-      style="max-width: 420px"
-      :bordered="false"
-      size="medium"
-    >
+    <NModal v-model:show="nodeDeleteConfirmVisible" preset="card" title="确认删除" style="max-width: 420px"
+      :bordered="false" size="medium">
       <div style="font-size: 14px; color: #334155; line-height: 1.6;">
         删除「<b>{{ nodeDeleteTargetTitle }}</b>」及其所有子节点？
       </div>

@@ -7,8 +7,13 @@ export default defineConfig({
   plugins: [vue()],
   resolve: {
     alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url))
-    }
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+      stream: fileURLToPath(new URL('./src/shims/stream.ts', import.meta.url)),
+    },
+  },
+  define: {
+    'process.env': {},
+    global: 'globalThis',
   },
   server: {
     host: '0.0.0.0',
@@ -17,12 +22,13 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: 'http://localhost:5000',
-        changeOrigin: true
-      }
-    }
+        changeOrigin: true,
+      },
+    },
   },
   build: {
     target: 'es2020',
-    sourcemap: false
-  }
+    sourcemap: false,
+  },
 })
+
