@@ -357,6 +357,10 @@
   display: none;
 }
 
+.mobile-zen-topbar {
+  display: contents;
+}
+
 @media (max-width: 767px) {
   .editor-container {
     position: relative;
@@ -398,17 +402,37 @@
     }
   }
 
+  /* 移动端沉浸模式顶部浮动控制排：胶囊与搜索框同排居中分布、互不重叠 */
+  .mobile-zen-topbar {
+    display: flex;
+    align-items: center;
+    position: absolute;
+    top: calc(10px + var(--safe-top, 0px));
+    left: 8px;
+    right: 8px;
+    z-index: 30;
+    gap: 8px;
+    pointer-events: none;
+    transition: top 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+
+    &.is-collapsed {
+      top: calc(96px + var(--safe-top, 0px));
+    }
+  }
+
   /* 移动端顶栏上的沉浸模式按钮 */
   .btn-mobile-zen-toggle {
     display: flex;
     align-items: center;
-    gap: 2px;
-    padding: 6px 10px;
+    gap: 4px;
+    padding: 6px 12px;
+    min-height: 36px;
     background: rgba(24, 160, 88, 0.08);
     border: 1px solid rgba(24, 160, 88, 0.25);
-    border-radius: 6px;
+    border-radius: 8px;
     color: var(--app-primary, #18a058);
-    font-size: 12px;
+    font-size: 13px;
+    font-weight: 500;
     cursor: pointer;
     flex: 0 0 auto;
     transition: all 0.2s;
@@ -418,84 +442,106 @@
     }
 
     .zen-icon {
-      font-size: 14px;
+      font-size: 15px;
       line-height: 1;
     }
   }
 
-  /* 沉浸状态下的悬浮胶囊 */
+  /* 沉浸状态下的悬浮胶囊：与搜索框位于同一行，尺寸加大易点击 */
   .mobile-zen-pill {
     display: flex;
     align-items: center;
-    position: absolute;
-    top: calc(10px + var(--safe-top, 0px));
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 30;
-    background: rgba(255, 255, 255, 0.88);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(0, 0, 0, 0.08);
-    border-radius: 20px;
-    padding: 4px 12px 4px 6px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+    pointer-events: auto;
+    height: 42px;
+    box-sizing: border-box;
+    background: rgba(255, 255, 255, 0.94);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 21px;
+    padding: 0 6px 0 4px;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.12);
     cursor: pointer;
-    max-width: 88vw;
-    gap: 8px;
+    flex: 0 1 auto;
+    min-width: 0;
+    gap: 6px;
     user-select: none;
     -webkit-user-select: none;
+    transition: background 0.2s, box-shadow 0.2s;
 
     &:active {
-      background: rgba(255, 255, 255, 0.98);
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.16);
+      background: rgba(255, 255, 255, 1);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
     }
 
+    /* 放大返回键触控区域 */
     .zen-pill-back {
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 24px;
-      height: 24px;
+      width: 34px;
+      height: 34px;
       border-radius: 50%;
-      background: rgba(0, 0, 0, 0.05);
+      background: rgba(0, 0, 0, 0.06);
       border: none;
-      font-size: 14px;
-      color: #333;
+      font-size: 18px;
+      font-weight: bold;
+      color: #222;
       cursor: pointer;
       flex-shrink: 0;
+      transition: background 0.15s, transform 0.1s;
 
       &:active {
-        background: rgba(0, 0, 0, 0.12);
+        background: rgba(0, 0, 0, 0.14);
+        transform: scale(0.92);
       }
     }
 
     .zen-pill-title {
       font-size: 13px;
-      font-weight: 500;
-      color: var(--app-text-primary, #333);
-      max-width: 140px;
+      font-weight: 600;
+      color: var(--app-text-primary, #222);
+      max-width: 100px;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      padding: 0 2px;
     }
 
-    .zen-pill-icon {
-      font-size: 12px;
-      color: var(--app-primary, #18a058);
+    /* 放大展开键触控区域 */
+    .zen-pill-expand {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: rgba(24, 160, 88, 0.1);
+      border: none;
+      font-size: 16px;
       font-weight: bold;
+      color: var(--app-primary, #18a058);
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background 0.15s, transform 0.1s;
+
+      &:active {
+        background: rgba(24, 160, 88, 0.22);
+        transform: scale(0.92);
+      }
     }
   }
 
   /* 胶囊过渡动画 */
   .zen-fade-enter-active,
   .zen-fade-leave-active {
-    transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1), transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: opacity 0.22s cubic-bezier(0.4, 0, 0.2, 1), transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   .zen-fade-enter-from,
   .zen-fade-leave-to {
     opacity: 0;
-    transform: translate(-50%, -10px);
+    transform: translateY(-6px) scale(0.95);
   }
 
   .btn-back {
@@ -574,30 +620,48 @@
     display: none;
   }
 
-  /* 移动端搜索栏：展开时置于顶栏下方，沉浸模式时贴近顶部 */
+  /* 移动端搜索栏：作为 topbar 内部同排子项，启用点击事件，高度与胶囊完全对齐 (42px) */
   .search-bar {
-    top: calc(96px + var(--safe-top, 0px));
-    left: 8px;
-    padding: 4px 6px;
-    gap: 2px;
+    position: static;
+    top: auto;
+    left: auto;
     z-index: 10;
-    transition: top 0.28s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-
-  .editor-container.is-zen-mode .search-bar {
-    top: calc(8px + var(--safe-top, 0px));
+    pointer-events: auto;
+    height: 42px;
+    box-sizing: border-box;
+    padding: 0 6px 0 10px;
+    gap: 3px;
+    display: flex;
+    align-items: center;
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 220px;
+    margin-left: auto;
+    background: rgba(255, 255, 255, 0.94);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 21px;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.12);
   }
 
   .search-input {
-    width: 120px;
-    font-size: 12px;
-    padding: 4px 8px;
+    width: 100%;
+    min-width: 50px;
+    font-size: 13px;
+    padding: 0 4px;
+    border: none;
+    background: transparent;
+    height: 100%;
+    outline: none;
   }
 
   .search-nav-btn {
-    width: 24px;
-    height: 24px;
-    font-size: 10px;
+    width: 28px;
+    height: 28px;
+    font-size: 11px;
+    border-radius: 50%;
+    flex-shrink: 0;
   }
 
   /* 移动端 loading 不遮挡工具栏 */

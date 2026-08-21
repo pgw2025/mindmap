@@ -252,8 +252,8 @@ let mindMapInstance: MindMap | null = null
 const selectedNodeId = ref<string | null>(null)
 const showToolbar = ref(false)
 
-// 移动端顶部标题/描述/导航栏沉浸折叠状态（Zen 模式）
-const isMobileHeaderCollapsed = ref(false)
+// 移动端顶部标题/描述/导航栏沉浸折叠状态（Zen 模式，默认开启沉浸式）
+const isMobileHeaderCollapsed = ref(true)
 let containerResizeObserver: ResizeObserver | null = null
 
 function toggleMobileHeader() {
@@ -1018,27 +1018,31 @@ watch(() => route.params.id, () => {
 
     <!-- 画布区域 -->
     <main class="editor-main">
-      <!-- 移动端沉浸胶囊（Zen 模式下浮动在顶部中间） -->
-      <transition name="zen-fade">
-        <div v-if="isMobileHeaderCollapsed" class="mobile-zen-pill" @click="toggleMobileHeader" title="点击展开导航与操作栏">
-          <button class="zen-pill-back" @click.stop="handleBack" title="返回">
-            ←
-          </button>
-          <span class="zen-pill-title">{{ mapDetail?.title || '思维导图' }}</span>
-          <span class="zen-pill-icon">▾</span>
-        </div>
-      </transition>
+      <!-- 移动端沉浸模式顶部控制栏（收起胶囊 + 搜索框同排无遮挡布局） -->
+      <div class="mobile-zen-topbar" :class="{ 'is-collapsed': !isMobileHeaderCollapsed }">
+        <transition name="zen-fade">
+          <div v-if="isMobileHeaderCollapsed" class="mobile-zen-pill" @click="toggleMobileHeader" title="点击展开导航与操作栏">
+            <button class="zen-pill-back" @click.stop="handleBack" title="返回" aria-label="返回上一页">
+              ←
+            </button>
+            <span class="zen-pill-title">{{ mapDetail?.title || '思维导图' }}</span>
+            <button class="zen-pill-expand" @click.stop="toggleMobileHeader" title="展开顶栏" aria-label="展开顶栏">
+              ▾
+            </button>
+          </div>
+        </transition>
 
-      <!-- 导图内搜索栏 -->
-      <div class="search-bar">
-        <input v-model="searchKeyword" class="search-input" type="text" placeholder="搜索节点..."
-          @keyup.enter="handleSearch" />
-        <button v-if="searchMatchCount > 0" class="search-nav-btn" @click="handleSearchPrev" title="上一个">▲</button>
-        <button v-if="searchMatchCount > 0" class="search-nav-btn" @click="handleSearchNext" title="下一个">▼</button>
-        <button v-if="searchKeyword" class="search-nav-btn" @click="handleSearchClear" title="清除">✕</button>
-        <span v-if="searchMatchCount > 0" class="search-count">
-          {{ searchCurrentIndex }}/{{ searchMatchCount }}
-        </span>
+        <!-- 导图内搜索栏 -->
+        <div class="search-bar">
+          <input v-model="searchKeyword" class="search-input" type="text" placeholder="搜索节点..."
+            @keyup.enter="handleSearch" />
+          <button v-if="searchMatchCount > 0" class="search-nav-btn" @click="handleSearchPrev" title="上一个">▲</button>
+          <button v-if="searchMatchCount > 0" class="search-nav-btn" @click="handleSearchNext" title="下一个">▼</button>
+          <button v-if="searchKeyword" class="search-nav-btn" @click="handleSearchClear" title="清除">✕</button>
+          <span v-if="searchMatchCount > 0" class="search-count">
+            {{ searchCurrentIndex }}/{{ searchMatchCount }}
+          </span>
+        </div>
       </div>
       <div ref="mindMapRef" class="mindmap-canvas"></div>
       <div v-if="loading" class="loading-wrap">
