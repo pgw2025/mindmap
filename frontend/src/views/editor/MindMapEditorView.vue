@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useMessage, NInput, NModal, NDropdown } from 'naive-ui'
+import { useMessage, NModal, NDropdown } from 'naive-ui'
 import MindMap from 'simple-mind-map'
 import Search from 'simple-mind-map/src/plugins/Search.js'
 import Export from 'simple-mind-map/src/plugins/Export.js'
@@ -933,19 +933,30 @@ watch(() => route.params.id, () => {
   <div class="editor-container" :class="{ 'is-zen-mode': isMobileHeaderCollapsed }">
     <!-- 顶部工具栏 -->
     <header class="editor-header" :class="{ 'is-collapsed': isMobileHeaderCollapsed }">
-      <button class="btn-back" @click="handleBack">
-        <span class="icon">←</span>
-        <span class="text">返回</span>
-      </button>
+      <!-- 左侧：返回与文档元信息内联编辑区 -->
+      <div class="header-left-zone">
+        <button class="btn-back" @click="handleBack" title="返回列表">
+          <span class="icon">←</span>
+          <span class="text">返回</span>
+        </button>
 
-      <div class="editor-title" v-if="mapDetail">
-        <NInput v-if="!readonly" v-model:value="mapDetail.title" class="title-input" @blur="handleTitleBlur" />
-        <span v-else class="title-text">{{ mapDetail.title }}</span>
-        <div v-if="!readonly" class="desc-row">
-          <NInput v-model:value="mapDetail.description" class="desc-input" placeholder="添加导图描述（可选）" clearable
-            @blur="handleDescriptionBlur" />
+        <span class="header-v-divider"></span>
+
+        <div class="doc-meta-box" v-if="mapDetail">
+          <div class="doc-title-row">
+            <input v-if="!readonly" v-model="mapDetail.title" class="inline-title-input" placeholder="未命名思维导图"
+              @blur="handleTitleBlur" />
+            <span v-else class="inline-title-text">{{ mapDetail.title }}</span>
+            <span class="save-status-badge" title="更改已实时自动保存">
+              <span class="status-dot"></span>已保存
+            </span>
+          </div>
+          <div class="doc-desc-row">
+            <input v-if="!readonly" v-model="mapDetail.description" class="inline-desc-input" placeholder="添加描述或备注..."
+              @blur="handleDescriptionBlur" />
+            <span v-else-if="mapDetail.description" class="inline-desc-text">{{ mapDetail.description }}</span>
+          </div>
         </div>
-        <p v-else-if="mapDetail.description" class="desc-text">{{ mapDetail.description }}</p>
       </div>
 
       <!-- 移动端收起/展开快捷按钮 -->
@@ -955,64 +966,91 @@ watch(() => route.params.id, () => {
         <span class="zen-text">{{ isMobileHeaderCollapsed ? '展开' : '沉浸' }}</span>
       </button>
 
+      <!-- 中间与右侧：现代工具胶囊组与动作按钮 -->
       <div class="editor-actions">
+        <!-- 历史与编辑胶囊组 (桌面端) -->
         <template v-if="!readonly">
-          <button class="btn-tool" :disabled="!nodesStore.canUndo" @click="handleUndo" title="撤销 (Ctrl+Z)">
-            ↶
-          </button>
-          <button class="btn-tool" :disabled="!nodesStore.canRedo" @click="handleRedo" title="重做 (Ctrl+Y)">
-            ↷
-          </button>
-          <button class="btn-tool" :disabled="!selectedNodeId" @click="handleCopy" title="复制 (Ctrl+C)">
-            ⧉
-          </button>
-          <button class="btn-tool" :disabled="!clipboardNode" @click="handlePaste" title="粘贴 (Ctrl+V)">
-            📋
-          </button>
-          <button class="btn-tool" :disabled="!selectedNodeId" @click="openContentEditor" title="编辑节点内容">
-            📝
-          </button>
-          <span class="action-divider"></span>
-          <button class="btn-action-save" @click="versionDrawerRef?.openCreateVersion()" title="保存为版本快照">
-            <span class="btn-icon">💾</span><span class="btn-label">保存版本</span>
-          </button>
+          <div class="btn-group-pill">
+            <button class="btn-tool-pill" :disabled="!nodesStore.canUndo" @click="handleUndo" title="撤销 (Ctrl+Z)">
+              <span class="pill-icon">↶</span>
+            </button>
+            <button class="btn-tool-pill" :disabled="!nodesStore.canRedo" @click="handleRedo" title="重做 (Ctrl+Y)">
+              <span class="pill-icon">↷</span>
+            </button>
+            <span class="group-divider"></span>
+            <button class="btn-tool-pill" :disabled="!selectedNodeId" @click="handleCopy" title="复制选中节点 (Ctrl+C)">
+              <span class="pill-icon">⧉</span>
+            </button>
+            <button class="btn-tool-pill" :disabled="!clipboardNode" @click="handlePaste" title="粘贴节点 (Ctrl+V)">
+              <span class="pill-icon">📋</span>
+            </button>
+            <button class="btn-tool-pill" :disabled="!selectedNodeId" @click="openContentEditor" title="编辑节点富文本内容">
+              <span class="pill-icon">📝</span>
+            </button>
+          </div>
         </template>
-        <button class="btn-action-history" @click="versionsDrawerVisible = true" title="查看版本历史">
-          <span class="btn-icon">🕘</span><span class="btn-label">历史</span>
-        </button>
-        <button class="btn-action-share" @click="shareDrawerVisible = true" title="分享此导图">
-          <span class="btn-icon">🔗</span><span class="btn-label">分享</span>
-        </button>
-        <NDropdown trigger="click" :options="exportOptions" @select="handleExport">
-          <button class="btn-action-export" :class="{ 'is-loading': exporting }" title="导出导图" :disabled="exporting">
-            <span class="btn-icon">{{ exporting ? '⏳' : '📤' }}</span><span class="btn-label">{{ exporting ? '导出中...' :
-              '导出'
+
+        <!-- 视图缩放胶囊组 -->
+        <div class="btn-group-pill zoom-group">
+          <button class="btn-tool-pill" @click="handleZoomIn" title="放大画布 (Ctrl + +)">
+            <span class="pill-icon">+</span>
+          </button>
+          <button class="btn-tool-pill" @click="handleZoomOut" title="缩小画布 (Ctrl + -)">
+            <span class="pill-icon">−</span>
+          </button>
+          <button class="btn-tool-pill" @click="handleReset" title="自适应居中视图">
+            <span class="pill-icon">⟲</span>
+          </button>
+        </div>
+
+        <span class="header-v-divider"></span>
+
+        <!-- 主题与模板定制 -->
+        <div class="action-btn-group">
+          <NDropdown trigger="click" :options="templateDropdownOptions" :value="currentTemplateId ?? '__none__'"
+            @select="handleTemplateSelect">
+            <button class="btn-action-ghost" :class="{ 'is-active': !!currentTemplateId }" title="切换模版结构">
+              <span class="btn-icon">📐</span>
+              <span class="btn-label">{{
+                currentTemplateId
+                  ? (templatesStore.enabledList.find(t => t.id === currentTemplateId)?.name ?? '模板')
+                  : '模板'
               }}</span>
+            </button>
+          </NDropdown>
+          <NDropdown trigger="click" :options="themeDropdownOptions" :value="currentThemeId"
+            @select="handleThemeSelect">
+            <button class="btn-action-ghost" :class="{ 'is-dimmed': !!currentTemplateId }" title="切换配色主题">
+              <span class="theme-swatch"
+                :style="{ background: THEMES.find(t => t.id === currentThemeId)?.swatch.rootFill }"></span>
+              <span class="btn-label">{{THEMES.find(t => t.id === currentThemeId)?.name ?? '主题'}}</span>
+            </button>
+          </NDropdown>
+        </div>
+
+        <!-- 协同、历史与保存 -->
+        <div class="action-btn-group">
+          <button class="btn-action-ghost" @click="versionsDrawerVisible = true" title="查看版本历史">
+            <span class="btn-icon">🕘</span><span class="btn-label">历史</span>
+          </button>
+          <button class="btn-action-ghost" v-if="!readonly" @click="versionDrawerRef?.openCreateVersion()"
+            title="保存当前快照">
+            <span class="btn-icon">💾</span><span class="btn-label">快照</span>
+          </button>
+          <button class="btn-action-ghost" @click="shareDrawerVisible = true" title="分享与协作">
+            <span class="btn-icon">🔗</span><span class="btn-label">分享</span>
+          </button>
+        </div>
+
+        <!-- 核心导出主操作 -->
+        <NDropdown trigger="click" :options="exportOptions" @select="handleExport">
+          <button class="btn-action-primary" :class="{ 'is-loading': exporting }" title="导出导图文件或图片"
+            :disabled="exporting">
+            <span class="btn-icon">{{ exporting ? '⏳' : '📤' }}</span>
+            <span class="btn-label">{{ exporting ? '导出中...' : '导出' }}</span>
+            <span class="dropdown-arrow">▾</span>
           </button>
         </NDropdown>
-        <NDropdown trigger="click" :options="templateDropdownOptions" :value="currentTemplateId ?? '__none__'"
-          @select="handleTemplateSelect">
-          <button class="btn-action-template" :class="{ 'is-active': !!currentTemplateId }" title="切换模板">
-            <span class="btn-icon">📋</span>
-            <span class="btn-label">{{
-              currentTemplateId
-                ? (templatesStore.enabledList.find(t => t.id === currentTemplateId)?.name ?? '模板')
-                : '模板'
-            }}</span>
-          </button>
-        </NDropdown>
-        <NDropdown trigger="click" :options="themeDropdownOptions" :value="currentThemeId" @select="handleThemeSelect">
-          <button class="btn-action-theme" :class="{ 'is-dimmed': !!currentTemplateId }" title="切换主题">
-            <span class="theme-swatch"
-              :style="{ background: THEMES.find(t => t.id === currentThemeId)?.swatch.rootFill }"></span>
-            <span class="btn-icon">🎨</span>
-            <span class="btn-label">{{THEMES.find(t => t.id === currentThemeId)?.name ?? '主题'}}</span>
-          </button>
-        </NDropdown>
-        <span class="action-divider"></span>
-        <button class="btn-tool" @click="handleZoomIn" title="放大">+</button>
-        <button class="btn-tool" @click="handleZoomOut" title="缩小">−</button>
-        <button class="btn-tool" @click="handleReset" title="重置视图">⟲</button>
       </div>
     </header>
 

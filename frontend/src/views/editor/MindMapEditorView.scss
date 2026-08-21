@@ -10,145 +10,334 @@
 .editor-header {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 12px 16px;
-  padding-top: calc(12px + var(--safe-top, 0px));
+  justify-content: space-between;
+  gap: 14px;
+  padding: 8px 16px;
+  padding-top: calc(8px + var(--safe-top, 0px));
   background: var(--app-card-bg, #fff);
-  border-bottom: 1px solid var(--app-border, #e0e0e6);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  border-bottom: 1px solid var(--app-border, #e5e7eb);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
   z-index: 10;
+  min-height: 52px;
+}
+
+/* 左侧：返回与文档信息 */
+.header-left-zone {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1 1 auto;
+  max-width: 480px;
+}
+
+.header-v-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--app-border, #e5e7eb);
+  flex-shrink: 0;
 }
 
 .btn-back {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 8px 12px;
+  gap: 5px;
+  padding: 6px 10px;
+  height: 32px;
   background: transparent;
-  border: 1px solid var(--app-border, #e0e0e6);
-  border-radius: 6px;
-  color: var(--app-text-primary, #333);
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--app-text-secondary, #4b5563);
   cursor: pointer;
-  font-size: 14px;
-  transition: all 0.2s;
+  font-size: 13px;
+  font-weight: 500;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
 
   &:hover {
-    background: var(--app-hover-bg, #f0f0f0);
-    border-color: var(--app-primary, #18a058);
+    background: var(--app-hover-bg, #f3f4f6);
+    color: var(--app-primary, #18a058);
   }
 
   .icon {
-    font-size: 18px;
+    font-size: 16px;
     font-weight: bold;
+    line-height: 1;
+  }
+
+  .text {
+    line-height: 1;
   }
 }
 
-.editor-title {
-  flex: 1;
-  max-width: 400px;
+/* 现代化内联文档元信息 */
+.doc-meta-box {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
-.title-text {
-  font-size: 16px;
-  font-weight: 500;
-  color: var(--app-text-primary, #333);
-  text-align: center;
-  display: block;
-  padding: 6px 12px;
-}
-
-.title-input {
-  width: 100%;
-  padding: 8px 12px;
-  font-size: 16px;
-  font-weight: 500;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--app-text-primary, #333);
-  outline: none;
-  text-align: center;
-  transition: all 0.2s;
-
-  &:hover,
-  &:focus {
-    border-color: var(--app-border, #e0e0e6);
-    background: var(--app-bg, #f5f7fa);
-  }
-}
-
-.desc-row {
-  width: 100%;
+.doc-title-row {
   display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
-.desc-input {
+.inline-title-input {
   width: 100%;
-  font-size: 12px;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 6px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--app-text-primary, #1f2937);
+  padding: 2px 6px;
+  outline: none;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 
-  :deep(.n-input__input-el) {
-    text-align: center;
+  &:hover {
+    background: var(--app-hover-bg, #f3f4f6);
+    border-color: rgba(0, 0, 0, 0.08);
   }
 
-  :deep(.n-input__placeholder) {
-    text-align: center;
+  &:focus {
+    background: #fff;
+    border-color: var(--app-primary, #18a058);
+    box-shadow: 0 0 0 2px rgba(24, 160, 88, 0.12);
   }
 }
 
-.desc-text {
-  margin: 0;
-  padding: 0 12px;
-  font-size: 12px;
-  color: var(--app-text-secondary, #999);
-  text-align: center;
-  line-height: 1.4;
-  display: -webkit-box;
-  -webkit-line-clamp: 1;
-  -webkit-box-orient: vertical;
+.inline-title-text {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--app-text-primary, #1f2937);
+  padding: 2px 6px;
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.save-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--app-text-secondary, #6b7280);
+  font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
+  padding: 2px 7px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.03);
+
+  .status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--app-primary, #18a058);
+    box-shadow: 0 0 0 2px rgba(24, 160, 88, 0.2);
+  }
+}
+
+.doc-desc-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.inline-desc-input {
+  width: 100%;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--app-text-secondary, #6b7280);
+  padding: 1px 6px;
+  outline: none;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  &:hover {
+    background: var(--app-hover-bg, #f3f4f6);
+  }
+
+  &:focus {
+    background: #fff;
+    border-color: rgba(0, 0, 0, 0.15);
+    color: var(--app-text-primary, #374151);
+  }
+}
+
+.inline-desc-text {
+  font-size: 12px;
+  color: var(--app-text-secondary, #6b7280);
+  padding: 1px 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .editor-actions {
   display: flex;
-  gap: 4px;
+  gap: 8px;
   align-items: center;
+  flex-shrink: 0;
 }
 
-.action-divider {
-  width: 1px;
-  height: 24px;
-  background: var(--app-border, #e0e0e6);
-  margin: 0 4px;
+/* 工具胶囊浮岛 (Button Group Pills) */
+.btn-group-pill {
+  display: inline-flex;
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid var(--app-border, #e2e8f0);
+  border-radius: 8px;
+  padding: 2px;
+  gap: 1px;
 }
 
-.btn-tool {
-  width: 36px;
-  height: 36px;
-  display: flex;
+.btn-tool-pill {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   background: transparent;
-  border: 1px solid var(--app-border, #e0e0e6);
+  border: none;
   border-radius: 6px;
-  color: var(--app-text-primary, #333);
+  color: var(--app-text-secondary, #475569);
   cursor: pointer;
-  font-size: 16px;
-  font-weight: bold;
-  transition: all 0.2s;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.15s ease;
 
   &:hover:not(:disabled) {
-    background: var(--app-hover-bg, #f0f0f0);
-    border-color: var(--app-primary, #18a058);
+    background: #ffffff;
+    color: var(--app-primary, #18a058);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
   }
 
   &:disabled {
-    opacity: 0.4;
+    opacity: 0.3;
     cursor: not-allowed;
   }
+
+  .pill-icon {
+    line-height: 1;
+  }
+}
+
+.group-divider {
+  width: 1px;
+  height: 14px;
+  background: var(--app-border, #cbd5e1);
+  margin: 0 2px;
+  flex-shrink: 0;
+}
+
+/* 动作按钮组与幽灵按钮 */
+.action-btn-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-action-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+  padding: 0 10px;
+  background: #f8fafc;
+  border: 1px solid var(--app-border, #e2e8f0);
+  border-radius: 7px;
+  color: var(--app-text-secondary, #475569);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+
+  &:hover {
+    background: #ffffff;
+    border-color: rgba(24, 160, 88, 0.35);
+    color: var(--app-primary, #18a058);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  }
+
+  &.is-active {
+    background: rgba(24, 160, 88, 0.08);
+    border-color: var(--app-primary, #18a058);
+    color: var(--app-primary, #18a058);
+  }
+
+  &.is-dimmed {
+    opacity: 0.5;
+  }
+}
+
+/* 核心导出按钮 (Primary) */
+.btn-action-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+  padding: 0 12px;
+  background: var(--app-primary, #18a058);
+  border: 1px solid var(--app-primary, #18a058);
+  border-radius: 7px;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(24, 160, 88, 0.22);
+  transition: all 0.18s ease;
+  white-space: nowrap;
+
+  &:hover:not(:disabled) {
+    filter: brightness(1.06);
+    box-shadow: 0 3px 10px rgba(24, 160, 88, 0.32);
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  &.is-loading {
+    opacity: 0.85;
+  }
+
+  .dropdown-arrow {
+    font-size: 10px;
+    opacity: 0.85;
+    margin-left: 1px;
+  }
+}
+
+.theme-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(0, 0, 0, 0.15);
+  flex-shrink: 0;
+}
+
+.btn-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.btn-label {
+  line-height: 1;
 }
 
 .editor-main {
@@ -262,92 +451,6 @@
     width: 100% !important;
     height: 100% !important;
     touch-action: none;
-  }
-}
-
-.btn-action-save,
-.btn-action-history,
-.btn-action-share,
-.btn-action-export,
-.btn-action-template,
-.btn-action-theme {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 12px;
-  border: 1px solid var(--app-border, #e0e0e6);
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 500;
-  transition: all 0.2s;
-  white-space: nowrap;
-}
-
-.btn-icon {
-  font-size: 15px;
-  line-height: 1;
-}
-
-.btn-label {
-  line-height: 1;
-}
-
-.btn-action-save {
-  background: var(--app-primary, #18a058);
-  color: #fff;
-  border-color: var(--app-primary, #18a058);
-
-  &:hover {
-    filter: brightness(1.05);
-  }
-}
-
-.btn-action-history,
-.btn-action-share,
-.btn-action-export,
-.btn-action-template,
-.btn-action-theme {
-  background: #fff;
-  color: var(--app-text-primary, #333);
-
-  &:hover {
-    background: var(--app-hover-bg, #f0f0f0);
-    border-color: var(--app-primary, #18a058);
-    color: var(--app-primary, #18a058);
-  }
-}
-
-/* 模板按钮激活态：边框/字色高亮，表示当前套用了模板 */
-.btn-action-template.is-active {
-  border-color: var(--app-primary, #18a058);
-  color: var(--app-primary, #18a058);
-  background: rgba(24, 160, 88, 0.08);
-}
-
-/* 当模板激活时，主题按钮变暗（模板优先级高于主题） */
-.btn-action-theme.is-dimmed {
-  opacity: 0.5;
-}
-
-.theme-swatch {
-  display: inline-block;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  border: 2px solid rgba(0, 0, 0, 0.15);
-  flex-shrink: 0;
-}
-
-.btn-action-export {
-  &:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  &.is-loading {
-    border-color: var(--app-primary, #18a058);
-    color: var(--app-primary, #18a058);
   }
 }
 
