@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useMessage, NModal, NDropdown } from 'naive-ui'
 import MindMap from 'simple-mind-map'
 import Search from 'simple-mind-map/src/plugins/Search.js'
@@ -363,7 +363,9 @@ const {
   reloadMindMap,
   handleDragEnd,
   normalizeRootChildDirections,
-  bindIncrementalSyncHandlers
+  bindIncrementalSyncHandlers,
+  flushPendingUpdates,
+  waitForPendingOps
 } = useMindMapSync({
   getMindMapInstance: () => mindMapInstance,
   nodesStore,
@@ -843,7 +845,11 @@ async function handleTemplateSelect(key: string) {
   }
 }
 
-function handleBack() {
+async function handleBack() {
+  // 返回前 flush 所有 pending 的防抖修改并等待 API 完成
+  try {
+    await waitForPendingOps()
+  } catch { /* ignore */ }
   router.push({ name: 'home' })
 }
 
@@ -1084,11 +1090,34 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  // 组件卸载前 flush 所有 pending 防抖修改（不等待完成，尽最大努力保存）
+  flushPendingUpdates()
   containerResizeObserver?.disconnect()
   containerResizeObserver = null
   mindMapInstance?.destroy()
   mindMapInstance = null
   nodesStore.reset()
+})
+
+/** 路由离开前 flush + 等待所有 pending 操作完成，防止数据丢失 */
+onBeforeRouteLeave(async (_to, _from, next) => {
+  if (readonly.value) {
+    next()
+    return
+  }
+  try {
+    await waitForPendingOps()
+  } catch { /* ignore */ }
+  next()
+})
+
+/** 页面刷新/关闭前 flush 所有 pending 防抖修改 */
+function handleBeforeUnload() {
+  flushPendingUpdates()
+}
+
+onMounted(() => {
+  window.addEventListener('beforeunload', handleBeforeUnload)
 })
 
 /** 全局键盘事件 */
@@ -1130,6 +1159,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown)
+  window.removeEventListener('beforeunload', handleBeforeUnload)
 })
 
 watch(() => route.params.id, () => {

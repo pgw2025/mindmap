@@ -160,30 +160,36 @@ export function useMindMapSync(opts: {
     return null
   }
 
-  /** 节点级文本 debounce 定时器（key = backendId，保证 data_change_detail 和 node_text_edit_change 共用同一把锁） */
-  const textDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>()
-  /** 节点级折叠 debounce 定时器（key = backendId） */
-  const collapseDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>()
-  /** 节点级备注 debounce 定时器（key = backendId） */
-  const noteDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>()
-  /** 节点级 extraData debounce 定时器（key = backendId，关联线数据同步用） */
-  const extraDataDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  /** 节点级 debounce 条目：定时器 + flush 函数，flush 时可直接调用 */
+  interface DebounceEntry {
+    timer: ReturnType<typeof setTimeout>
+    flush: () => Promise<void>
+  }
+
+  /** 节点级文本 debounce（key = backendId，保证 data_change_detail 和 node_text_edit_change 共用同一把锁） */
+  const textDebounceTimers = new Map<string, DebounceEntry>()
+  /** 节点级折叠 debounce（key = backendId） */
+  const collapseDebounceTimers = new Map<string, DebounceEntry>()
+  /** 节点级备注 debounce（key = backendId） */
+  const noteDebounceTimers = new Map<string, DebounceEntry>()
+  /** 节点级 extraData debounce（key = backendId，关联线数据同步用） */
+  const extraDataDebounceTimers = new Map<string, DebounceEntry>()
 
   function clearPerNodeTimers(uid: string, backendId?: string | null) {
     // 清除 uid → backendId 对应的 timer（可能只知道其中一个）
     const bid = backendId ?? getBackendId(uid)
     if (bid) {
       const t = textDebounceTimers.get(bid)
-      if (t) clearTimeout(t)
+      if (t) clearTimeout(t.timer)
       textDebounceTimers.delete(bid)
       const c = collapseDebounceTimers.get(bid)
-      if (c) clearTimeout(c)
+      if (c) clearTimeout(c.timer)
       collapseDebounceTimers.delete(bid)
       const n = noteDebounceTimers.get(bid)
-      if (n) clearTimeout(n)
+      if (n) clearTimeout(n.timer)
       noteDebounceTimers.delete(bid)
       const e = extraDataDebounceTimers.get(bid)
-      if (e) clearTimeout(e)
+      if (e) clearTimeout(e.timer)
       extraDataDebounceTimers.delete(bid)
     }
   }
@@ -568,75 +574,80 @@ export function useMindMapSync(opts: {
    *  key 统一使用 backendId，保证 data_change_detail 和 node_text_edit_change
    *  对同一节点的连续文本触发最终只产生一次 API 请求。 */
   function scheduleTextUpdate(backendId: string, rawText: string) {
-    const t = textDebounceTimers.get(backendId)
-    if (t) clearTimeout(t)
-    textDebounceTimers.set(
-      backendId,
-      setTimeout(async () => {
-        textDebounceTimers.delete(backendId)
-        const title = extractTitleFromText(rawText, backendId)
-        try {
-          await nodesStore.update(backendId, { title })
-        } catch (e) {
-          console.error('[sync] text update failed:', e)
-        }
-      }, 400)
-    )
+    const existing = textDebounceTimers.get(backendId)
+    if (existing) clearTimeout(existing.timer)
+    // flush 函数闭包捕获最新 rawText，确保 flush 时用的是最后一次修改的值
+    const flush = async () => {
+      textDebounceTimers.delete(backendId)
+      const title = extractTitleFromText(rawText, backendId)
+      try {
+        await nodesStore.update(backendId, { title })
+      } catch (e) {
+        console.error('[sync] text update failed:', e)
+      }
+    }
+    textDebounceTimers.set(backendId, {
+      timer: setTimeout(flush, 400),
+      flush
+    })
   }
 
   /** 折叠更新调度（debounce 250ms，key = backendId） */
   function scheduleCollapseUpdate(backendId: string, isCollapsed: boolean) {
-    const t = collapseDebounceTimers.get(backendId)
-    if (t) clearTimeout(t)
-    collapseDebounceTimers.set(
-      backendId,
-      setTimeout(async () => {
-        collapseDebounceTimers.delete(backendId)
-        try {
-          await nodesStore.update(backendId, { isCollapsed })
-        } catch (e) {
-          console.error('[sync] collapse update failed:', e)
-        }
-      }, 250)
-    )
+    const existing = collapseDebounceTimers.get(backendId)
+    if (existing) clearTimeout(existing.timer)
+    const flush = async () => {
+      collapseDebounceTimers.delete(backendId)
+      try {
+        await nodesStore.update(backendId, { isCollapsed })
+      } catch (e) {
+        console.error('[sync] collapse update failed:', e)
+      }
+    }
+    collapseDebounceTimers.set(backendId, {
+      timer: setTimeout(flush, 250),
+      flush
+    })
   }
 
   /** 备注更新调度（debounce 600ms，key = backendId）
    *  备注是富文本 HTML，内容较长且编辑频繁，用较长 debounce 减少请求次数。
    *  note 为空字符串时也要同步（清空操作），后端 Note is not null 判断会接受空串。 */
   function scheduleNoteUpdate(backendId: string, note: string) {
-    const t = noteDebounceTimers.get(backendId)
-    if (t) clearTimeout(t)
-    noteDebounceTimers.set(
-      backendId,
-      setTimeout(async () => {
-        noteDebounceTimers.delete(backendId)
-        try {
-          await nodesStore.update(backendId, { note })
-        } catch (e) {
-          console.error('[sync] note update failed:', e)
-        }
-      }, 600)
-    )
+    const existing = noteDebounceTimers.get(backendId)
+    if (existing) clearTimeout(existing.timer)
+    const flush = async () => {
+      noteDebounceTimers.delete(backendId)
+      try {
+        await nodesStore.update(backendId, { note })
+      } catch (e) {
+        console.error('[sync] note update failed:', e)
+      }
+    }
+    noteDebounceTimers.set(backendId, {
+      timer: setTimeout(flush, 600),
+      flush
+    })
   }
 
   /** 关联线数据更新调度（debounce 500ms，key = backendId）
    *  将 associativeLine* 系列字段序列化为 JSON 存入 Node.ExtraData。
    *  连线操作（创建/删除/改样式/改文字）都会触发，用 debounce 合并连续操作。 */
   function scheduleExtraDataUpdate(backendId: string, extraData: string) {
-    const t = extraDataDebounceTimers.get(backendId)
-    if (t) clearTimeout(t)
-    extraDataDebounceTimers.set(
-      backendId,
-      setTimeout(async () => {
-        extraDataDebounceTimers.delete(backendId)
-        try {
-          await nodesStore.update(backendId, { extraData })
-        } catch (e) {
-          console.error('[sync] extraData update failed:', e)
-        }
-      }, 500)
-    )
+    const existing = extraDataDebounceTimers.get(backendId)
+    if (existing) clearTimeout(existing.timer)
+    const flush = async () => {
+      extraDataDebounceTimers.delete(backendId)
+      try {
+        await nodesStore.update(backendId, { extraData })
+      } catch (e) {
+        console.error('[sync] extraData update failed:', e)
+      }
+    }
+    extraDataDebounceTimers.set(backendId, {
+      timer: setTimeout(flush, 500),
+      flush
+    })
   }
 
   /**
@@ -989,6 +1000,43 @@ export function useMindMapSync(opts: {
   }
 
   /** ============================================================
+   *  Flush：立即触发所有 pending 的 debounce 定时器，返回所有 flush Promise
+   *  在路由离开 / 页面刷新 / 返回前调用，防止防抖窗口内修改丢失。
+   *  ============================================================ */
+  function flushPendingUpdates(): Promise<void>[] {
+    const promises: Promise<void>[] = []
+    const flushMap = (map: Map<string, DebounceEntry>) => {
+      map.forEach((entry, key) => {
+        clearTimeout(entry.timer)
+        map.delete(key)
+        promises.push(entry.flush())
+      })
+    }
+    flushMap(textDebounceTimers)
+    flushMap(collapseDebounceTimers)
+    flushMap(noteDebounceTimers)
+    flushMap(extraDataDebounceTimers)
+    return promises
+  }
+
+  /** ============================================================
+   *  等待所有 pending 操作完成（debounce flush + opQueue + pendingCreates）
+   *  返回一个 Promise，resolve 后所有挂起的 API 请求都已飞出。
+   *  ============================================================ */
+  async function waitForPendingOps(): Promise<void> {
+    // 1. 立即触发所有 pending debounce 定时器（不等 400/250/600/500ms 了）
+    const flushPromises = flushPendingUpdates()
+
+    // 2. 等待结构操作队列完成
+    const queuePromise = opQueue.catch(() => {})
+
+    // 3. 等待所有 pending create 完成
+    const createPromises = Array.from(pendingCreates.values())
+
+    await Promise.allSettled([...flushPromises, queuePromise, ...createPromises])
+  }
+
+  /** ============================================================
    *  所有事件绑定入口（由 MindMapEditorView.vue 调用）
    *  ============================================================ */
   function bindIncrementalSyncHandlers() {
@@ -1010,6 +1058,8 @@ export function useMindMapSync(opts: {
     handleDragEnd,
     normalizeRootChildDirections,
     bindIncrementalSyncHandlers,
+    flushPendingUpdates,
+    waitForPendingOps,
     // 暴露给外部调试
     _debugIdMap: uidToBackendId
   }
