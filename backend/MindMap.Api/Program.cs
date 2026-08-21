@@ -1,10 +1,13 @@
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using MindMap.Api.Application.Services;
+using MindMap.Api.Common.Converters;
 using MindMap.Api.Common.Filters;
 using MindMap.Api.Common.Helpers;
 using MindMap.Api.Common.Options;
@@ -91,7 +94,14 @@ builder.Services.AddScoped<ITemplateService, TemplateService>();
 
 // ---- Controllers + 全局异常 ----
 builder.Services.AddControllers(options => options.Filters.Add<GlobalExceptionFilter>())
-    .ConfigureApiBehaviorOptions(o => o.SuppressModelStateInvalidFilter = true);
+    .ConfigureApiBehaviorOptions(o => o.SuppressModelStateInvalidFilter = true)
+    .AddJsonOptions(options =>
+    {
+        // DateTime(Unspecified) → 输出 UTC ISO 8601 带 "Z" 后缀
+        // 解决 MySQL 读出的 DateTime 缺少时区信息导致前端解析为本地时间的问题
+        options.JsonSerializerOptions.Converters.Add(new JsonConverterDateTime());
+        options.JsonSerializerOptions.Converters.Add(new JsonConverterNullableDateTime());
+    });
 
 // ---- Swagger/OpenAPI ----
 builder.Services.AddEndpointsApiExplorer();
