@@ -33,6 +33,11 @@ declare module 'simple-mind-map/src/plugins/TouchEvent.js' {
   export default TouchEvent
 }
 
+declare module 'simple-mind-map/src/plugins/AssociativeLine.js' {
+  const AssociativeLine: { instanceName: string; prototype: any }
+  export default AssociativeLine
+}
+
 declare module 'simple-mind-map' {
   export default class MindMap {
     static readonly TREE: string

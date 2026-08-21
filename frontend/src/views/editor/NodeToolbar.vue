@@ -14,6 +14,7 @@ const emit = defineEmits<{
   (e: 'copy'): void
   (e: 'paste'): void
   (e: 'open-note'): void
+  (e: 'create-line'): void
 }>()
 
 const localNode = ref<Partial<NodeDto>>({})
@@ -150,6 +151,10 @@ function selectEdgeStyle(style: EdgeStyle) {
       <button class="tool-btn" :class="{ 'has-note': !!localNode.note }" @click="emit('open-note')" title="编辑备注">
         <span class="icon">📝</span>
         <span class="label">备注</span>
+      </button>
+      <button class="tool-btn" @click="emit('create-line')" title="连接到其他节点">
+        <span class="icon">🔗</span>
+        <span class="label">连线</span>
       </button>
     </div>
 

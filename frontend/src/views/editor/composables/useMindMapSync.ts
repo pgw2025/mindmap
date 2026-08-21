@@ -166,6 +166,8 @@ export function useMindMapSync(opts: {
   const collapseDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>()
   /** 节点级备注 debounce 定时器（key = backendId） */
   const noteDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  /** 节点级 extraData debounce 定时器（key = backendId，关联线数据同步用） */
+  const extraDataDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
   function clearPerNodeTimers(uid: string, backendId?: string | null) {
     // 清除 uid → backendId 对应的 timer（可能只知道其中一个）
@@ -180,6 +182,9 @@ export function useMindMapSync(opts: {
       const n = noteDebounceTimers.get(bid)
       if (n) clearTimeout(n)
       noteDebounceTimers.delete(bid)
+      const e = extraDataDebounceTimers.get(bid)
+      if (e) clearTimeout(e)
+      extraDataDebounceTimers.delete(bid)
     }
   }
 
@@ -249,6 +254,29 @@ export function useMindMapSync(opts: {
       if (n.edgeColor) data.lineColor = n.edgeColor
       if (n.edgeStyle != null && n.edgeStyle in edgeStyleMap) data.lineDasharray = edgeStyleMap[n.edgeStyle]
       if (n.note) data.note = n.note
+      // 从 ExtraData 还原关联线数据（associativeLine* 系列字段）
+      if (n.extraData) {
+        try {
+          const extra = JSON.parse(n.extraData)
+          if (Array.isArray(extra.associativeLineTargets) && extra.associativeLineTargets.length > 0) {
+            data.associativeLineTargets = extra.associativeLineTargets
+          }
+          if (Array.isArray(extra.associativeLinePoint)) {
+            data.associativeLinePoint = extra.associativeLinePoint
+          }
+          if (Array.isArray(extra.associativeLineTargetControlOffsets)) {
+            data.associativeLineTargetControlOffsets = extra.associativeLineTargetControlOffsets
+          }
+          if (extra.associativeLineText && typeof extra.associativeLineText === 'object') {
+            data.associativeLineText = extra.associativeLineText
+          }
+          if (extra.associativeLineStyle && typeof extra.associativeLineStyle === 'object') {
+            data.associativeLineStyle = extra.associativeLineStyle
+          }
+        } catch {
+          // extraData 不是合法 JSON，忽略
+        }
+      }
       // 仅根节点的直接子节点设置明确的 dir，非根直接子节点不显式设置 dir，交由 simple-mind-map 向上继承分支方向
       if (n.parentId && n.parentId === nodesStore.rootNode?.id) {
         if (n.direction === 0) data.dir = 'left'
@@ -474,6 +502,32 @@ export function useMindMapSync(opts: {
       scheduleNoteUpdate(backendId, newNote)
     }
 
+    // ---------- 2.6 关联线数据变化（associativeLine* 系列字段，debounced） ----------
+    // 这些字段由 AssociativeLine 插件通过 SET_NODE_DATA 写入，触发 data_change_detail。
+    // 比较序列化后的 JSON 即可判断是否变化，变化时打包所有 associativeLine* 字段同步到 extraData。
+    const assocFields = ['associativeLineTargets', 'associativeLinePoint',
+      'associativeLineTargetControlOffsets', 'associativeLineText', 'associativeLineStyle'] as const
+    let assocChanged = false
+    for (const f of assocFields) {
+      const oldVal = JSON.stringify((oldData.data as any)[f] ?? null)
+      const newVal = JSON.stringify((data.data as any)[f] ?? null)
+      if (oldVal !== newVal) {
+        assocChanged = true
+        break
+      }
+    }
+    if (assocChanged) {
+      // 收集当前节点所有 associativeLine* 字段，打包成 JSON 同步
+      const extraObj: Record<string, unknown> = {}
+      for (const f of assocFields) {
+        const v = (data.data as any)[f]
+        if (v !== undefined && v !== null) {
+          extraObj[f] = v
+        }
+      }
+      scheduleExtraDataUpdate(backendId, JSON.stringify(extraObj))
+    }
+
     // ---------- 3. direction 变化（如果是根节点直接子节点则同步到后端） ----------
     const oldDir = (oldData.data.dir as string | undefined) ?? ''
     const newDir = (data.data.dir as string | undefined) ?? ''
@@ -554,6 +608,25 @@ export function useMindMapSync(opts: {
           console.error('[sync] note update failed:', e)
         }
       }, 600)
+    )
+  }
+
+  /** 关联线数据更新调度（debounce 500ms，key = backendId）
+   *  将 associativeLine* 系列字段序列化为 JSON 存入 Node.ExtraData。
+   *  连线操作（创建/删除/改样式/改文字）都会触发，用 debounce 合并连续操作。 */
+  function scheduleExtraDataUpdate(backendId: string, extraData: string) {
+    const t = extraDataDebounceTimers.get(backendId)
+    if (t) clearTimeout(t)
+    extraDataDebounceTimers.set(
+      backendId,
+      setTimeout(async () => {
+        extraDataDebounceTimers.delete(backendId)
+        try {
+          await nodesStore.update(backendId, { extraData })
+        } catch (e) {
+          console.error('[sync] extraData update failed:', e)
+        }
+      }, 500)
     )
   }
 

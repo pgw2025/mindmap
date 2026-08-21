@@ -10,6 +10,7 @@ import ExportXMind from 'simple-mind-map/src/plugins/ExportXMind.js'
 import Drag from 'simple-mind-map/src/plugins/Drag.js'
 import Select from 'simple-mind-map/src/plugins/Select.js'
 import TouchEvent from 'simple-mind-map/src/plugins/TouchEvent.js'
+import AssociativeLine from 'simple-mind-map/src/plugins/AssociativeLine.js'
 
 // 1. 增强 Drag 插件：修复松手后画布漂移 bug，并在松手时即时同步执行重叠检测，防止 300ms 节流导致落位判定失效
 if (Drag && (Drag as any).prototype) {
@@ -208,6 +209,7 @@ MindMap.usePlugin(ExportXMind)
 MindMap.usePlugin(Drag)
 MindMap.usePlugin(Select)
 MindMap.usePlugin(TouchEvent)
+MindMap.usePlugin(AssociativeLine)
 
 import type { NodeDto, NodeCreatePayload, NodeUpdatePayload } from '@/api/nodes'
 import type { MindMapDetail } from '@/api/mindmaps'
@@ -559,6 +561,13 @@ function openContentEditor() {
 function openNotePanel() {
   if (!selectedNodeId.value) return
   notePanelVisible.value = true
+}
+
+/** 从当前选中节点开始创建关联线：进入连线模式后点击目标节点即可 */
+function createAssociativeLine() {
+  const inst = mindMapInstance
+  if (!inst || !inst.associativeLine) return
+  ;(inst.associativeLine as any).createLineFromActiveNode()
 }
 
 /** 备注面板内容变化：写入 simple-mind-map 节点 data.note，触发 data_change_detail 增量同步到后端 */
@@ -1127,7 +1136,7 @@ watch(() => route.params.id, () => {
       <!-- 浮动工具栏（挂载在画布主容器内，随主容器定位） -->
       <NodeToolbar v-if="showToolbar && selectedNodeId" :node="nodesStore.findNode(selectedNodeId)"
         @add-child="handleAddChild" @add-sibling="handleAddSibling" @delete="handleDelete" @update="handleUpdateStyle"
-        @copy="handleCopy" @paste="handlePaste" @open-note="openNotePanel" />
+        @copy="handleCopy" @paste="handlePaste" @open-note="openNotePanel" @create-line="createAssociativeLine" />
     </main>
 
     <!-- 版本历史抽屉（含新建版本弹窗） -->
