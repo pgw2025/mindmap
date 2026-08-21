@@ -14,6 +14,10 @@ import {
   NPagination,
   NCollapse,
   NCollapseItem,
+  NTabs,
+  NTabPane,
+  NRadioGroup,
+  NRadioButton,
   useMessage,
   type DataTableColumns
 } from 'naive-ui'
@@ -80,6 +84,10 @@ const formEnabled = ref(true)
 // 样式配置（完整 MindMapThemeConfig）
 const formConfig = ref<MindMapThemeConfig | null>(null)
 
+// 编辑弹窗 Tab 组织
+const activeTab = ref<'basic' | 'nodeStyles' | 'canvasAndLine'>('basic')
+const activeLevel = ref<LevelKey>('root')
+
 // 当前选中预设（用于"从预设加载"）
 const presetId = ref<string>('classic')
 
@@ -91,6 +99,7 @@ const deleteSubmitting = ref(false)
 // ---------- 预览实例 ----------
 const previewRef = ref<HTMLDivElement | null>(null)
 let previewInstance: MindMap | null = null
+let previewResizeObserver: ResizeObserver | null = null
 const editStructureMode = ref(false)
 const selectedNodeId = ref<string | null>(null)
 
@@ -166,10 +175,23 @@ function openCreate(): void {
   formSortOrder.value = 0
   formEnabled.value = true
   presetId.value = 'classic'
+  activeTab.value = 'basic'
+  activeLevel.value = 'root'
   // 默认加载 classic 预设作为初始样式
   formConfig.value = JSON.parse(JSON.stringify(THEMES[0].config)) as MindMapThemeConfig
   editVisible.value = true
-  nextTick(() => initPreview())
+  nextTick(() => {
+    requestAnimationFrame(() => {
+      initPreview()
+        ;[100, 250, 400].forEach((delay) => {
+          setTimeout(() => {
+            if (editVisible.value) {
+              recenterPreview()
+            }
+          }, delay)
+        })
+    })
+  })
 }
 
 async function openEdit(row: AdminTemplateListItem): Promise<void> {
@@ -180,6 +202,8 @@ async function openEdit(row: AdminTemplateListItem): Promise<void> {
     formDescription.value = detail.description ?? ''
     formSortOrder.value = detail.sortOrder
     formEnabled.value = detail.isEnabled
+    activeTab.value = 'basic'
+    activeLevel.value = 'root'
     try {
       formConfig.value = JSON.parse(detail.configJson) as MindMapThemeConfig
     } catch {
@@ -187,7 +211,18 @@ async function openEdit(row: AdminTemplateListItem): Promise<void> {
     }
     // 初始结构预览数据：用模板自带结构，否则用默认样本
     editVisible.value = true
-    nextTick(() => initPreview(detail.initialStructureJson))
+    nextTick(() => {
+      requestAnimationFrame(() => {
+        initPreview(detail.initialStructureJson)
+          ;[100, 250, 400].forEach((delay) => {
+            setTimeout(() => {
+              if (editVisible.value) {
+                recenterPreview()
+              }
+            }, delay)
+          })
+      })
+    })
   } catch (e) {
     message.error((e as Error).message)
   }
@@ -200,6 +235,10 @@ function closeEdit(): void {
 }
 
 function destroyPreview(): void {
+  if (previewResizeObserver) {
+    previewResizeObserver.disconnect()
+    previewResizeObserver = null
+  }
   if (previewInstance) {
     try {
       previewInstance.destroy?.()
@@ -210,6 +249,24 @@ function destroyPreview(): void {
   }
   selectedNodeId.value = null
   editStructureMode.value = false
+}
+
+function recenterPreview(): void {
+  if (!previewInstance || !previewRef.value) return
+  const rect = previewRef.value.getBoundingClientRect()
+  if (rect.width <= 0 || rect.height <= 0) return
+
+  previewInstance.resize()
+  const root = previewInstance.renderer?.root
+  if (root && typeof (previewInstance.renderer as any)?.moveNodeToCenter === 'function') {
+    try {
+      ; (previewInstance.renderer as any).moveNodeToCenter(root)
+    } catch {
+      previewInstance.view?.reset?.()
+    }
+  } else if (previewInstance.view?.reset) {
+    previewInstance.view.reset()
+  }
 }
 
 function initPreview(initialStructureJson?: string): void {
@@ -232,7 +289,7 @@ function initPreview(initialStructureJson?: string): void {
     data: initData as never,
     theme: 'classic',
     layout: 'mindMap',
-    draggable: false,
+    draggable: true,
     contextMenu: false,
     toolBar: false,
     enableFreeDrag: false,
@@ -241,18 +298,26 @@ function initPreview(initialStructureJson?: string): void {
     maxScale: 2
   })
 
-  // 首次渲染后应用样式配置 + 居中
-  const onFirstRender = () => {
-    previewInstance?.off('node_tree_render_end', onFirstRender)
-    if (formConfig.value) {
-      previewInstance?.setThemeConfig(formConfig.value, false)
-    }
-    const root = previewInstance?.renderer?.root
-    if (root) {
-      ;(previewInstance?.renderer as any)?.moveNodeToCenter(root)
-    }
+  // 每次节点树渲染结束（初始化、切换样式、修改配置）自动居中
+  const onRenderEnd = () => {
+    recenterPreview()
   }
-  previewInstance.on('node_tree_render_end', onFirstRender)
+  previewInstance.on('node_tree_render_end', onRenderEnd)
+
+  if (formConfig.value) {
+    previewInstance.setThemeConfig(formConfig.value, false)
+  }
+
+  // 监听容器尺寸变动（窗口缩放、弹窗动画展开、侧边栏折叠等），自动触发画布 resize 并保持居中
+  if (previewRef.value && typeof ResizeObserver !== 'undefined') {
+    previewResizeObserver?.disconnect()
+    previewResizeObserver = new ResizeObserver(() => {
+      if (previewInstance) {
+        recenterPreview()
+      }
+    })
+    previewResizeObserver.observe(previewRef.value)
+  }
 
   // 选中节点追踪（用于结构编辑模式的增删）
   previewInstance.on('node_active', (...args: unknown[]) => {
@@ -286,6 +351,9 @@ function loadFromPreset(): void {
   const preset = THEMES.find((t) => t.id === presetId.value) ?? THEMES[0]
   formConfig.value = JSON.parse(JSON.stringify(preset.config)) as MindMapThemeConfig
   message.success(`已加载预设「${preset.name}」，可在此基础上微调`)
+  nextTick(() => {
+    recenterPreview()
+  })
 }
 
 // ---------- 结构编辑模式：增删节点 ----------
@@ -305,7 +373,7 @@ function addChildNode(): void {
     message.warning('请先选中一个节点')
     return
   }
-  ;(previewInstance as any).execCommand?.('INSERT_CHILD')
+  ; (previewInstance as any).execCommand?.('INSERT_CHILD')
   exportStructure()
 }
 
@@ -322,7 +390,7 @@ function addSiblingNode(): void {
     message.warning('根节点没有同级')
     return
   }
-  ;(previewInstance as any).execCommand?.('INSERT_SIBLING')
+  ; (previewInstance as any).execCommand?.('INSERT_SIBLING')
   exportStructure()
 }
 
@@ -338,7 +406,7 @@ function deleteNode(): void {
     message.warning('不能删除根节点')
     return
   }
-  ;(previewInstance as any).execCommand?.('REMOVE_NODE')
+  ; (previewInstance as any).execCommand?.('REMOVE_NODE')
   exportStructure()
 }
 
@@ -455,8 +523,10 @@ function renderSwatch(row: AdminTemplateListItem) {
 
 const columns = computed<DataTableColumns<AdminTemplateListItem>>(() => [
   { title: '名称', key: 'name', minWidth: 140, ellipsis: { tooltip: true } },
-  { title: '描述', key: 'description', minWidth: 180, ellipsis: { tooltip: true },
-    render: (row) => row.description || '—' },
+  {
+    title: '描述', key: 'description', minWidth: 180, ellipsis: { tooltip: true },
+    render: (row) => row.description || '—'
+  },
   { title: '色板', key: 'swatch', width: 90, render: (row) => renderSwatch(row) },
   { title: '排序', key: 'sortOrder', width: 70, align: 'center' },
   {
@@ -514,7 +584,7 @@ onBeforeUnmount(() => {
 
     <!-- 编辑弹窗 -->
     <NModal v-model:show="editVisible" :mask-closible="false" :close-on-esc="false" display-directive="if"
-      @after-leave="closeEdit" class="edit-modal">
+      @after-enter="recenterPreview" @after-leave="closeEdit" class="edit-modal">
       <div class="edit-shell">
         <div class="edit-header">
           <span class="edit-title">{{ editingId ? '编辑模板' : '新建模板' }}</span>
@@ -522,121 +592,148 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="edit-body">
-          <!-- 左侧：表单 -->
+          <!-- 左侧：Tab 分页表单 -->
           <div class="edit-left">
-            <NCollapse :default-expanded-names="['basic', 'preset', 'level1', 'level2', 'level3', 'level4', 'line', 'bg']">
-              <NCollapseItem title="基本信息" name="basic">
-                <div class="form-row">
-                  <label>模板名称</label>
-                  <NInput v-model:value="formName" size="small" placeholder="如：商务蓝" maxlength="64" />
-                </div>
-                <div class="form-row">
-                  <label>描述</label>
-                  <NInput v-model:value="formDescription" type="textarea" size="small" :rows="2" placeholder="模板用途说明"
-                    maxlength="512" />
-                </div>
-                <div class="form-row inline">
-                  <label>排序值</label>
-                  <NInputNumber v-model:value="formSortOrder" size="small" :min="0" style="width: 120px" />
-                </div>
-                <div class="form-row inline">
-                  <label>启用</label>
-                  <NSwitch v-model:value="formEnabled" size="small" />
-                </div>
-              </NCollapseItem>
+            <NTabs v-model:value="activeTab" type="segment" size="small" animated class="left-tabs">
+              <!-- Tab 1: 基本与预设 -->
+              <NTabPane name="basic" tab="基本与预设">
+                <div class="tab-pane-content">
+                  <div class="section-card">
+                    <div class="section-header">模板信息</div>
+                    <div class="form-row">
+                      <label>模板名称</label>
+                      <NInput v-model:value="formName" size="small" placeholder="如：商务蓝" maxlength="64" />
+                    </div>
+                    <div class="form-row">
+                      <label>描述</label>
+                      <NInput v-model:value="formDescription" type="textarea" size="small" :rows="2"
+                        placeholder="模板用途说明" maxlength="512" />
+                    </div>
+                    <div class="form-row inline">
+                      <label>排序值</label>
+                      <NInputNumber v-model:value="formSortOrder" size="small" :min="0" style="width: 120px" />
+                    </div>
+                    <div class="form-row inline">
+                      <label>启用</label>
+                      <NSwitch v-model:value="formEnabled" size="small" />
+                    </div>
+                  </div>
 
-              <NCollapseItem title="从预设加载（起点）" name="preset">
-                <div class="form-row inline">
-                  <NSelect v-model:value="presetId" :options="presetOptions" size="small" style="width: 180px" />
-                  <NButton size="small" type="primary" @click="loadFromPreset">加载</NButton>
+                  <div class="section-card">
+                    <div class="section-header">从预设加载（起点）</div>
+                    <div class="form-row inline">
+                      <NSelect v-model:value="presetId" :options="presetOptions" size="small" style="width: 170px" />
+                      <NButton size="small" type="primary" @click="loadFromPreset">应用预设</NButton>
+                    </div>
+                    <p class="tip">选择一个内置主题作为起点，再切换到「节点样式」或「连线与背景」逐项微调。</p>
+                  </div>
                 </div>
-                <p class="tip">选择一个内置主题作为起点，再在下方逐项微调。</p>
-              </NCollapseItem>
+              </NTabPane>
 
-              <NCollapseItem v-for="(lk, idx) in levelKeys" :key="lk"
-                :title="`${idx + 1}.${levelLabels[lk]}`" :name="`level${idx + 1}`">
-                <div v-if="formConfig" class="level-form">
-                  <div class="form-row inline">
-                    <label>形状</label>
-                    <NSelect v-model:value="(formConfig[lk] as NodeLevelStyle).shape" :options="shapeOptions"
-                      size="small" style="width: 160px" />
+              <!-- Tab 2: 节点样式（分层配置） -->
+              <NTabPane name="nodeStyles" tab="节点样式">
+                <div class="tab-pane-content">
+                  <div class="level-selector-wrap">
+                    <NRadioGroup v-model:value="activeLevel" size="small" class="level-radio-group">
+                      <NRadioButton v-for="lk in levelKeys" :key="lk" :value="lk">
+                        {{ levelLabels[lk].replace(/（.*?）/g, '') }}
+                      </NRadioButton>
+                    </NRadioGroup>
                   </div>
-                  <div class="form-row inline">
-                    <label>填充色</label>
-                    <NColorPicker v-model:value="(formConfig[lk] as NodeLevelStyle).fillColor" size="small"
-                      :modes="['hex']" />
-                  </div>
-                  <div class="form-row inline">
-                    <label>文字色</label>
-                    <NColorPicker v-model:value="(formConfig[lk] as NodeLevelStyle).color" size="small"
-                      :modes="['hex']" />
-                  </div>
-                  <div class="form-row inline">
-                    <label>边框色</label>
-                    <NColorPicker v-model:value="(formConfig[lk] as NodeLevelStyle).borderColor" size="small"
-                      :modes="['hex']" />
-                  </div>
-                  <div class="form-row inline">
-                    <label>边框宽</label>
-                    <NInputNumber v-model:value="(formConfig[lk] as NodeLevelStyle).borderWidth" size="small"
-                      :min="0" :max="10" style="width: 120px" />
-                  </div>
-                  <div class="form-row inline">
-                    <label>边框样式</label>
-                    <NSelect v-model:value="(formConfig[lk] as NodeLevelStyle).borderDasharray"
-                      :options="borderDashOptions" size="small" style="width: 160px" />
-                  </div>
-                  <div class="form-row inline">
-                    <label>圆角</label>
-                    <NInputNumber v-model:value="(formConfig[lk] as NodeLevelStyle).borderRadius" size="small"
-                      :min="0" :max="50" style="width: 120px" />
-                  </div>
-                  <div class="form-row inline">
-                    <label>字号</label>
-                    <NInputNumber v-model:value="(formConfig[lk] as NodeLevelStyle).fontSize" size="small" :min="8"
-                      :max="48" style="width: 120px" />
-                  </div>
-                  <div class="form-row inline">
-                    <label>字重</label>
-                    <NSelect v-model:value="(formConfig[lk] as NodeLevelStyle).fontWeight"
-                      :options="fontWeightOptions" size="small" style="width: 160px" />
-                  </div>
-                </div>
-              </NCollapseItem>
 
-              <NCollapseItem title="连线样式" name="line">
-                <div v-if="formConfig" class="level-form">
-                  <div class="form-row inline">
-                    <label>线色</label>
-                    <NColorPicker v-model:value="formConfig.lineColor" size="small" :modes="['hex']" />
-                  </div>
-                  <div class="form-row inline">
-                    <label>线宽</label>
-                    <NInputNumber v-model:value="formConfig.lineWidth" size="small" :min="0.5" :max="10" :step="0.5"
-                      style="width: 120px" />
-                  </div>
-                  <div class="form-row inline">
-                    <label>线型</label>
-                    <NSelect v-model:value="formConfig.lineStyle" :options="lineStyleOptions" size="small"
-                      style="width: 160px" />
-                  </div>
-                  <div class="form-row inline">
-                    <label>线虚线</label>
-                    <NSelect v-model:value="formConfig.lineDasharray" :options="borderDashOptions" size="small"
-                      style="width: 160px" />
+                  <div v-if="formConfig" class="section-card">
+                    <div class="section-header">{{ levelLabels[activeLevel] }} 样式</div>
+                    <div class="level-form">
+                      <div class="form-row inline">
+                        <label>形状</label>
+                        <NSelect v-model:value="(formConfig[activeLevel] as NodeLevelStyle).shape"
+                          :options="shapeOptions" size="small" style="width: 160px" />
+                      </div>
+                      <div class="form-row inline">
+                        <label>填充色</label>
+                        <NColorPicker v-model:value="(formConfig[activeLevel] as NodeLevelStyle).fillColor" size="small"
+                          :modes="['hex']" />
+                      </div>
+                      <div class="form-row inline">
+                        <label>文字色</label>
+                        <NColorPicker v-model:value="(formConfig[activeLevel] as NodeLevelStyle).color" size="small"
+                          :modes="['hex']" />
+                      </div>
+                      <div class="form-row inline">
+                        <label>边框色</label>
+                        <NColorPicker v-model:value="(formConfig[activeLevel] as NodeLevelStyle).borderColor"
+                          size="small" :modes="['hex']" />
+                      </div>
+                      <div class="form-row inline">
+                        <label>边框宽</label>
+                        <NInputNumber v-model:value="(formConfig[activeLevel] as NodeLevelStyle).borderWidth"
+                          size="small" :min="0" :max="10" style="width: 120px" />
+                      </div>
+                      <div class="form-row inline">
+                        <label>边框样式</label>
+                        <NSelect v-model:value="(formConfig[activeLevel] as NodeLevelStyle).borderDasharray"
+                          :options="borderDashOptions" size="small" style="width: 160px" />
+                      </div>
+                      <div class="form-row inline">
+                        <label>圆角</label>
+                        <NInputNumber v-model:value="(formConfig[activeLevel] as NodeLevelStyle).borderRadius"
+                          size="small" :min="0" :max="50" style="width: 120px" />
+                      </div>
+                      <div class="form-row inline">
+                        <label>字号</label>
+                        <NInputNumber v-model:value="(formConfig[activeLevel] as NodeLevelStyle).fontSize" size="small"
+                          :min="8" :max="48" style="width: 120px" />
+                      </div>
+                      <div class="form-row inline">
+                        <label>字重</label>
+                        <NSelect v-model:value="(formConfig[activeLevel] as NodeLevelStyle).fontWeight"
+                          :options="fontWeightOptions" size="small" style="width: 160px" />
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </NCollapseItem>
+              </NTabPane>
 
-              <NCollapseItem title="背景" name="bg">
-                <div v-if="formConfig" class="level-form">
-                  <div class="form-row inline">
-                    <label>背景色</label>
-                    <NColorPicker v-model:value="formConfig.backgroundColor" size="small" :modes="['hex']" />
+              <!-- Tab 3: 连线与背景 -->
+              <NTabPane name="canvasAndLine" tab="连线与背景">
+                <div class="tab-pane-content">
+                  <div class="section-card">
+                    <div class="section-header">画布背景</div>
+                    <div v-if="formConfig" class="level-form">
+                      <div class="form-row inline">
+                        <label>背景色</label>
+                        <NColorPicker v-model:value="formConfig.backgroundColor" size="small" :modes="['hex']" />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="section-card">
+                    <div class="section-header">分支连线</div>
+                    <div v-if="formConfig" class="level-form">
+                      <div class="form-row inline">
+                        <label>线色</label>
+                        <NColorPicker v-model:value="formConfig.lineColor" size="small" :modes="['hex']" />
+                      </div>
+                      <div class="form-row inline">
+                        <label>线宽</label>
+                        <NInputNumber v-model:value="formConfig.lineWidth" size="small" :min="0.5" :max="10" :step="0.5"
+                          style="width: 120px" />
+                      </div>
+                      <div class="form-row inline">
+                        <label>线型</label>
+                        <NSelect v-model:value="formConfig.lineStyle" :options="lineStyleOptions" size="small"
+                          style="width: 160px" />
+                      </div>
+                      <div class="form-row inline">
+                        <label>线虚线</label>
+                        <NSelect v-model:value="formConfig.lineDasharray" :options="borderDashOptions" size="small"
+                          style="width: 160px" />
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </NCollapseItem>
-            </NCollapse>
+              </NTabPane>
+            </NTabs>
           </div>
 
           <!-- 右侧：实时预览 + 结构编辑 -->
@@ -645,12 +742,13 @@ onBeforeUnmount(() => {
               <NButton size="tiny" :type="editStructureMode ? 'primary' : 'default'" @click="toggleStructureMode">
                 {{ editStructureMode ? '退出结构编辑' : '编辑初始结构' }}
               </NButton>
+              <NButton size="tiny" quaternary @click="recenterPreview">居中</NButton>
               <template v-if="editStructureMode">
                 <NButton size="tiny" quaternary type="primary" @click="addChildNode">+ 子节点</NButton>
                 <NButton size="tiny" quaternary type="primary" @click="addSiblingNode">+ 同级</NButton>
                 <NButton size="tiny" quaternary type="error" @click="deleteNode">删除</NButton>
               </template>
-              <span class="tip-inline">双击节点可编辑文字</span>
+              <span class="tip-inline">可拖动画布 / 双击节点编辑文字</span>
             </div>
             <div ref="previewRef" class="preview-canvas"></div>
           </div>
@@ -664,14 +762,8 @@ onBeforeUnmount(() => {
     </NModal>
 
     <!-- 删除确认 -->
-    <NModal
-      v-model:show="deleteModalVisible"
-      preset="card"
-      title="删除模板"
-      style="max-width: 460px"
-      :bordered="false"
-      size="medium"
-    >
+    <NModal v-model:show="deleteModalVisible" preset="card" title="删除模板" style="max-width: 460px" :bordered="false"
+      size="medium">
       <p style="margin: 0; color: #334155; line-height: 1.6;">
         确认删除模板「<b>{{ deleteTarget?.name }}</b>」？已使用该模板的导图不受影响，但用户将不再能选择此模板。
       </p>
@@ -728,13 +820,15 @@ onBeforeUnmount(() => {
 .edit-modal {
   width: 92vw;
   max-width: 1280px;
-  height: 88vh;
+  height: 86vh;
+  max-height: 86vh;
 }
 
 .edit-shell {
   display: flex;
   flex-direction: column;
   height: 100%;
+  max-height: 100%;
   background: var(--app-card-bg);
   border-radius: 8px;
   overflow: hidden;
@@ -760,23 +854,84 @@ onBeforeUnmount(() => {
   gap: 12px;
   padding: 12px;
   overflow: hidden;
+  min-height: 0;
 }
 
 .edit-left {
-  width: 380px;
+  width: 390px;
   flex-shrink: 0;
-  overflow-y: auto;
-  padding-right: 4px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+
+  .left-tabs {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+
+    :deep(.n-tabs-pane-wrapper) {
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    :deep(.n-tab-pane) {
+      height: 100%;
+      padding: 0;
+    }
+  }
+
+  .tab-pane-content {
+    height: 100%;
+    overflow-y: auto;
+    padding-right: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .section-card {
+    background: #ffffff;
+    border: 1px solid var(--app-border);
+    border-radius: 6px;
+    padding: 12px;
+
+    .section-header {
+      font-size: 13px;
+      font-weight: 600;
+      color: #1e293b;
+      margin-bottom: 10px;
+      padding-bottom: 6px;
+      border-bottom: 1px dashed var(--app-border);
+    }
+  }
+
+  .level-selector-wrap {
+    margin-bottom: 2px;
+
+    .level-radio-group {
+      width: 100%;
+      display: flex;
+
+      :deep(.n-radio-button) {
+        flex: 1;
+        text-align: center;
+      }
+    }
+  }
 }
 
 .edit-right {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   border: 1px solid var(--app-border);
   border-radius: 6px;
   overflow: hidden;
   background: #fafafa;
+  position: relative;
 }
 
 .preview-toolbar {
@@ -797,8 +952,17 @@ onBeforeUnmount(() => {
 
 .preview-canvas {
   flex: 1;
+  width: 100%;
+  height: 100%;
   min-height: 0;
   position: relative;
+  overflow: hidden;
+
+  :deep(svg) {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
 }
 
 .edit-footer {
