@@ -25,7 +25,8 @@ import {
   TrashOutline,
   GlobeOutline,
   CreateOutline,
-  FlagOutline
+  FlagOutline,
+  CloseOutline
 } from '@vicons/ionicons5'
 import { useMindMapsStore } from '@/stores/mindmaps'
 import { useTagsStore } from '@/stores/tags'
@@ -35,7 +36,6 @@ import { useTemplatesStore } from '@/stores/templates'
 import { parseSwatch } from '@/api/templates'
 import { reportMindMap } from '@/api/admin'
 import { THEMES } from '@/themes/presets'
-import SidebarView from './home/SidebarView.vue'
 
 const router = useRouter()
 const message = useMessage()
@@ -128,10 +128,7 @@ const titleText = computed(() =>
   mapsStore.scope === 'mine' ? '我的思维导图' : '公开广场'
 )
 
-const showFolderFilter = computed(
-  () => mapsStore.scope === 'mine' && mapsStore.folderId
-)
-
+// 当前选中的文件夹名
 const currentFolderName = computed(() => {
   if (!mapsStore.folderId) return null
   function find(nodes: typeof foldersStore.tree): string | null {
@@ -144,6 +141,15 @@ const currentFolderName = computed(() => {
   }
   return find(foldersStore.tree)
 })
+
+// 当前选中的标签
+const currentTag = computed(() => {
+  if (!mapsStore.tagId) return null
+  return tagsStore.items.find(t => t.id === mapsStore.tagId) ?? null
+})
+
+// 是否显示筛选提示条
+const showFilterBar = computed(() => mapsStore.folderId || mapsStore.tagId)
 
 async function onSearch() {
   await mapsStore.setKeyword(keywordInput.value)
@@ -419,12 +425,6 @@ async function submitTags(): Promise<void> {
 }
 
 onMounted(async () => {
-  if (mapsStore.scope === 'mine') {
-    await Promise.all([
-      tagsStore.load().catch(() => {}),
-      foldersStore.load().catch(() => {})
-    ])
-  }
   if (!mapsStore.items.length && !mapsStore.loading) {
     await mapsStore.load().catch(() => {})
   }
@@ -433,571 +433,572 @@ onMounted(async () => {
 
 <template>
   <div class="home">
-    <!-- 侧边栏（仅「我的导图」时显示） -->
-    <SidebarView v-if="mapsStore.scope === 'mine'" class="home-sidebar" />
-
     <!-- 主内容区 -->
     <div class="home-content">
-    <div class="home-header">
-      <div class="title-row">
-        <h1 class="title">{{ titleText }}</h1>
-        <NSpace v-if="mapsStore.scope === 'mine'" size="small" :wrap="false">
-          <NButton
-            type="primary"
-            size="small"
-            @click="openCreateModal"
-          >
-            <template #icon><NIcon><AddOutline /></NIcon></template>
-            新建导图
-          </NButton>
-          <NButton
-            size="small"
-            @click="openImportModal"
-          >
-            <template #icon><NIcon><CloudUploadOutline /></NIcon></template>
-            导入导图
-          </NButton>
-        </NSpace>
-      </div>
-      <p v-if="showFolderFilter" class="folder-filter">
-        <span>文件夹：</span>
-        <NTag size="small" type="info" closable @close="mapsStore.setFolderFilter(null)">
-          {{ currentFolderName }}
-        </NTag>
-      </p>
-    </div>
-
-    <div class="search-bar">
-      <NInput
-        v-model:value="keywordInput"
-        placeholder="搜索导图标题或描述"
-        clearable
-        @keyup.enter="onSearch"
-        @clear="onSearch"
-      >
-        <template #prefix>
-          <NIcon><SearchOutline /></NIcon>
-        </template>
-      </NInput>
-      <NButton @click="onSearch">搜索</NButton>
-    </div>
-
-    <NSpin :show="mapsStore.loading">
-      <div v-if="mapsStore.items.length === 0 && !mapsStore.loading" class="empty-wrap">
-        <NEmpty description="暂无思维导图">
-          <template v-if="mapsStore.scope === 'mine'" #extra>
-            <NButton size="small" type="primary" @click="openCreateModal">
-              立即创建
+      <div class="home-header">
+        <div class="title-row">
+          <h1 class="title">{{ titleText }}</h1>
+          <NSpace v-if="mapsStore.scope === 'mine'" size="small" :wrap="false">
+            <NButton
+              type="primary"
+              size="small"
+              @click="openCreateModal"
+            >
+              <template #icon><NIcon><AddOutline /></NIcon></template>
+              新建导图
             </NButton>
-          </template>
-        </NEmpty>
-      </div>
-
-      <div v-else class="grid">
-        <NCard
-          v-for="map in mapsStore.items"
-          :key="map.id"
-          class="map-card map-card-clickable"
-          :title="map.title"
-          size="small"
-          hoverable
-          @click="onCardClick(map.id)"
-        >
-          <template #header-extra>
-            <NIcon v-if="map.isPublic" size="14" color="#18a058">
-              <GlobeOutline />
-            </NIcon>
-            <NIcon v-else size="14" color="#999">
-              <LockClosedOutline />
-            </NIcon>
-          </template>
-
-          <div class="card-body">
-            <p v-if="map.description" class="desc">{{ map.description }}</p>
-            <p v-else class="desc muted">（无描述）</p>
-
-            <div class="meta-row">
-              <span class="meta-item">
-                <NIcon size="12"><DocumentTextOutline /></NIcon>
-                {{ map.nodeCount }} 节点
-              </span>
-              <span class="meta-item">{{ map.ownerName }}</span>
-              <span class="meta-item muted">{{ formatTime(map.lastEditedAt) }}</span>
-            </div>
-
-            <div v-if="map.tags.length > 0" class="tag-row">
-              <NTag
-                v-for="t in map.tags"
-                :key="t.id"
-                size="tiny"
-                :color="{ color: t.color, textColor: '#fff', borderColor: t.color }"
-              >
-                {{ t.name }}
-              </NTag>
-            </div>
-            <div v-else-if="map.folderName" class="meta-row">
-              <NTag size="tiny">{{ map.folderName }}</NTag>
-            </div>
-          </div>
-
-          <template #action>
-            <NSpace size="small" justify="end" align="center" :wrap="true">
-              <NButton
-                text
-                size="small"
-                type="primary"
-                @click.stop="onEdit(map.id)"
-              >
-                <template #icon><NIcon><CreateOutline /></NIcon></template>
-                编辑
-              </NButton>
-              <NButton
-                v-if="mapsStore.scope === 'mine'"
-                text
-                size="small"
-                @click.stop="onTogglePublic(map.id, map.isPublic)"
-              >
-                {{ map.isPublic ? '设私有' : '设公开' }}
-              </NButton>
-              <NButton
-                v-if="mapsStore.scope === 'mine'"
-                text
-                size="small"
-                @click.stop="openMoveModal(map.id, map.title, map.folderId ?? null)"
-              >
-                移动
-              </NButton>
-              <NButton
-                v-if="mapsStore.scope === 'mine'"
-                text
-                size="small"
-                @click.stop="openTagsModal(map.id, map.title, map.tags)"
-              >
-                标签
-              </NButton>
-              <NButton
-                v-if="mapsStore.scope === 'mine'"
-                text
-                size="small"
-                @click.stop="onCopy(map.id)"
-              >
-                <template #icon><NIcon><CopyOutline /></NIcon></template>
-                复制
-              </NButton>
-              <NButton
-                v-if="mapsStore.scope === 'mine'"
-                text
-                size="small"
-                type="error"
-                @click.stop="onRemove(map.id, map.title)"
-              >
-                <template #icon><NIcon><TrashOutline /></NIcon></template>
-                删除
-              </NButton>
-              <NButton
-                v-if="mapsStore.scope === 'public' && !authStore.isAdmin"
-                text
-                size="small"
-                type="warning"
-                @click.stop="openReportModal(map.id, map.title)"
-              >
-                <template #icon><NIcon><FlagOutline /></NIcon></template>
-                举报
-              </NButton>
-            </NSpace>
-          </template>
-        </NCard>
-      </div>
-    </NSpin>
-
-    <div v-if="mapsStore.totalPages > 1" class="pager">
-      <NPagination
-        :page="mapsStore.page"
-        :page-count="mapsStore.totalPages"
-        :page-size="mapsStore.pageSize"
-        :item-count="mapsStore.total"
-        show-quick-jumper
-        @update:page="mapsStore.gotoPage"
-      />
-    </div>
-
-    <!-- 新建导图 Modal -->
-    <NModal
-      v-model:show="createModalVisible"
-      preset="card"
-      title="新建思维导图"
-      display-directive="if"
-      style="max-width: 520px"
-    >
-      <div class="create-form">
-        <div class="create-field">
-          <label class="create-label">标题</label>
-          <NInput
-            v-model:value="createTitleInput"
-            placeholder="请输入导图标题"
-            maxlength="128"
-            :autofocus="true"
-            @keyup.enter="submitCreate"
-          />
-        </div>
-        <div v-if="templatesStore.enabledList.length > 0" class="create-field">
-          <label class="create-label">
-            选择模板（含初始结构 + 样式，优先于主题）
-            <span
-              v-if="createTemplateId"
-              class="clear-template"
-              @click="createTemplateId = null"
-            >不使用模板</span>
-          </label>
-          <div class="theme-grid">
-            <div
-              v-for="tpl in templatesStore.enabledList"
-              :key="tpl.id"
-              class="theme-card"
-              :class="{ 'is-active': createTemplateId === tpl.id }"
-              @click="createTemplateId = tpl.id"
+            <NButton
+              size="small"
+              @click="openImportModal"
             >
-              <div
-                class="theme-preview"
-                :style="{ background: (parseSwatch(tpl.swatchJson)?.bg ?? '#fafafa') }"
-              >
-                <div
-                  class="preview-root"
-                  :style="{
-                    background: parseSwatch(tpl.swatchJson)?.rootFill ?? '#549688',
-                    borderColor: parseSwatch(tpl.swatchJson)?.rootFill ?? '#549688'
-                  }"
-                ></div>
-                <div
-                  class="preview-line"
-                  :style="{ background: parseSwatch(tpl.swatchJson)?.lineColor ?? '#549688' }"
-                ></div>
-                <div
-                  class="preview-second"
-                  :style="{
-                    background: parseSwatch(tpl.swatchJson)?.secondFill ?? '#fff',
-                    borderColor: parseSwatch(tpl.swatchJson)?.lineColor ?? '#549688'
-                  }"
-                ></div>
-              </div>
-              <div class="theme-name">{{ tpl.name }}</div>
-            </div>
-          </div>
+              <template #icon><NIcon><CloudUploadOutline /></NIcon></template>
+              导入导图
+            </NButton>
+          </NSpace>
         </div>
-        <div class="create-field" :class="{ 'is-dimmed': !!createTemplateId }">
-          <label class="create-label">
-            选择主题
-            <span v-if="createTemplateId" class="theme-hint">（已使用模板，主题被覆盖）</span>
-          </label>
-          <div class="theme-grid">
-            <div
-              v-for="t in THEMES"
-              :key="t.id"
-              class="theme-card"
-              :class="{ 'is-active': !createTemplateId && createThemeId === t.id }"
-              @click="createTemplateId = null; createThemeId = t.id"
-            >
-              <div class="theme-preview" :style="{ background: t.swatch.bg }">
-                <div class="preview-root" :style="{ background: t.swatch.rootFill, borderColor: t.swatch.rootFill }"></div>
-                <div class="preview-line" :style="{ background: t.swatch.lineColor }"></div>
-                <div class="preview-second" :style="{ background: t.swatch.secondFill, borderColor: t.swatch.lineColor }"></div>
-              </div>
-              <div class="theme-name">{{ t.name }}</div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <template #footer>
-        <NSpace justify="end">
-          <NButton @click="createModalVisible = false">取消</NButton>
-          <NButton
-            type="primary"
-            :loading="createSubmitting"
-            :disabled="!createTitleInput.trim()"
-            @click="submitCreate"
+
+        <!-- 筛选状态提示 -->
+        <div v-if="showFilterBar" class="filter-bar">
+          <span class="filter-label">当前筛选：</span>
+          <NTag v-if="currentFolderName" size="small" type="info" closable @close="mapsStore.setFolderFilter(null)">
+            📁 {{ currentFolderName }}
+          </NTag>
+          <NTag
+            v-if="currentTag"
+            size="small"
+            closable
+            :color="{ color: currentTag.color, textColor: '#fff', borderColor: currentTag.color }"
+            @close="mapsStore.setTagFilter(null)"
           >
-            创建
+            🏷️ {{ currentTag.name }}
+          </NTag>
+          <NButton text size="tiny" class="clear-all-btn" v-if="mapsStore.folderId || mapsStore.tagId"
+            @click="mapsStore.setFolderFilter(null); mapsStore.setTagFilter(null)">
+            <template #icon><NIcon size="12"><CloseOutline /></NIcon></template>
+            清除全部
           </NButton>
-        </NSpace>
-      </template>
-    </NModal>
+        </div>
+      </div>
 
-    <!-- 导入导图 Modal -->
-    <NModal
-      v-model:show="importModalVisible"
-      preset="card"
-      title="导入思维导图"
-      display-directive="if"
-      style="max-width: 560px"
-    >
-      <div class="create-form">
-        <!-- 文件拖放区域 -->
-        <div class="create-field">
-          <label class="create-label">选择文件</label>
-          <div
-            class="import-dropzone"
-            :class="{ 'is-dragover': importFileDragOver, 'is-filled': !!importFile }"
-            @dragover.prevent="importFileDragOver = true"
-            @dragleave="importFileDragOver = false"
-            @drop="handleImportDrop"
-            @click="importFileInputEl?.click()"
-          >
-            <input
-              ref="importFileInputEl"
-              type="file"
-              accept=".mm,.json,.smm,.md,.markdown,.xmind"
-              style="display: none"
-              @change="handleImportFileInputChange"
-            />
-            <template v-if="!importFile">
-              <div class="dropzone-icon">📥</div>
-              <div class="dropzone-text">
-                <div class="dropzone-title">点击选择文件，或拖拽文件到此处</div>
-                <div class="dropzone-hint">
-                  支持：FreeMind (.mm)、simple-mind-map (.json/.smm)、Markdown (.md)、XMind (.xmind)，单文件 ≤ 5MB
-                </div>
-              </div>
+      <div class="search-bar">
+        <NInput
+          v-model:value="keywordInput"
+          placeholder="搜索导图标题或描述"
+          clearable
+          @keyup.enter="onSearch"
+          @clear="onSearch"
+        >
+          <template #prefix>
+            <NIcon><SearchOutline /></NIcon>
+          </template>
+        </NInput>
+        <NButton @click="onSearch">搜索</NButton>
+      </div>
+
+      <NSpin :show="mapsStore.loading">
+        <div v-if="mapsStore.items.length === 0 && !mapsStore.loading" class="empty-wrap">
+          <NEmpty description="暂无思维导图">
+            <template v-if="mapsStore.scope === 'mine'" #extra>
+              <NButton size="small" type="primary" @click="openCreateModal">
+                立即创建
+              </NButton>
             </template>
-            <template v-else>
-              <div class="dropzone-filled">
-                <div class="file-info">
-                  <div class="file-icon">📄</div>
-                  <div class="file-meta">
-                    <div class="file-name">{{ importFile.name }}</div>
-                    <div class="file-size">{{ formatFileSize(importFile.size) }}</div>
-                  </div>
-                </div>
+          </NEmpty>
+        </div>
+
+        <div v-else class="grid">
+          <NCard
+            v-for="map in mapsStore.items"
+            :key="map.id"
+            class="map-card map-card-clickable"
+            :title="map.title"
+            size="small"
+            hoverable
+            @click="onCardClick(map.id)"
+          >
+            <template #header-extra>
+              <NIcon v-if="map.isPublic" size="14" color="#18a058">
+                <GlobeOutline />
+              </NIcon>
+              <NIcon v-else size="14" color="#999">
+                <LockClosedOutline />
+              </NIcon>
+            </template>
+
+            <div class="card-body">
+              <p v-if="map.description" class="desc">{{ map.description }}</p>
+              <p v-else class="desc muted">（无描述）</p>
+
+              <div class="meta-row">
+                <span class="meta-item">
+                  <NIcon size="12"><DocumentTextOutline /></NIcon>
+                  {{ map.nodeCount }} 节点
+                </span>
+                <span class="meta-item">{{ map.ownerName }}</span>
+                <span class="meta-item muted">{{ formatTime(map.lastEditedAt) }}</span>
+              </div>
+
+              <div v-if="map.tags.length > 0" class="tag-row">
+                <NTag
+                  v-for="t in map.tags"
+                  :key="t.id"
+                  size="tiny"
+                  :color="{ color: t.color, textColor: '#fff', borderColor: t.color }"
+                >
+                  {{ t.name }}
+                </NTag>
+              </div>
+              <div v-else-if="map.folderName" class="meta-row">
+                <NTag size="tiny">{{ map.folderName }}</NTag>
+              </div>
+            </div>
+
+            <template #action>
+              <NSpace size="small" justify="end" align="center" :wrap="true">
                 <NButton
                   text
                   size="small"
-                  type="error"
-                  @click.stop="removeImportFile"
+                  type="primary"
+                  @click.stop="onEdit(map.id)"
                 >
-                  移除
+                  <template #icon><NIcon><CreateOutline /></NIcon></template>
+                  编辑
                 </NButton>
-              </div>
+                <NButton
+                  v-if="mapsStore.scope === 'mine'"
+                  text
+                  size="small"
+                  @click.stop="onTogglePublic(map.id, map.isPublic)"
+                >
+                  {{ map.isPublic ? '设私有' : '设公开' }}
+                </NButton>
+                <NButton
+                  v-if="mapsStore.scope === 'mine'"
+                  text
+                  size="small"
+                  @click.stop="openMoveModal(map.id, map.title, map.folderId ?? null)"
+                >
+                  移动
+                </NButton>
+                <NButton
+                  v-if="mapsStore.scope === 'mine'"
+                  text
+                  size="small"
+                  @click.stop="openTagsModal(map.id, map.title, map.tags)"
+                >
+                  标签
+                </NButton>
+                <NButton
+                  v-if="mapsStore.scope === 'mine'"
+                  text
+                  size="small"
+                  @click.stop="onCopy(map.id)"
+                >
+                  <template #icon><NIcon><CopyOutline /></NIcon></template>
+                  复制
+                </NButton>
+                <NButton
+                  v-if="mapsStore.scope === 'mine'"
+                  text
+                  size="small"
+                  type="error"
+                  @click.stop="onRemove(map.id, map.title)"
+                >
+                  <template #icon><NIcon><TrashOutline /></NIcon></template>
+                  删除
+                </NButton>
+                <NButton
+                  v-if="mapsStore.scope === 'public' && !authStore.isAdmin"
+                  text
+                  size="small"
+                  type="warning"
+                  @click.stop="openReportModal(map.id, map.title)"
+                >
+                  <template #icon><NIcon><FlagOutline /></NIcon></template>
+                  举报
+                </NButton>
+              </NSpace>
             </template>
+          </NCard>
+        </div>
+      </NSpin>
+
+      <div v-if="mapsStore.totalPages > 1" class="pager">
+        <NPagination
+          :page="mapsStore.page"
+          :page-count="mapsStore.totalPages"
+          :page-size="mapsStore.pageSize"
+          :item-count="mapsStore.total"
+          show-quick-jumper
+          @update:page="mapsStore.gotoPage"
+        />
+      </div>
+
+      <!-- 新建导图 Modal -->
+      <NModal
+        v-model:show="createModalVisible"
+        preset="card"
+        title="新建思维导图"
+        display-directive="if"
+        style="max-width: 520px"
+      >
+        <div class="create-form">
+          <div class="create-field">
+            <label class="create-label">标题</label>
+            <NInput
+              v-model:value="createTitleInput"
+              placeholder="请输入导图标题"
+              maxlength="128"
+              :autofocus="true"
+              @keyup.enter="submitCreate"
+            />
           </div>
-        </div>
-
-        <!-- 标题 -->
-        <div class="create-field">
-          <label class="create-label">导图标题</label>
-          <NInput
-            v-model:value="importTitleInput"
-            placeholder="请输入导图标题（默认取文件名）"
-            maxlength="128"
-            :autofocus="!!importFile"
-            @keyup.enter="submitImport"
-          />
-        </div>
-
-        <!-- 文件夹 -->
-        <div class="create-field">
-          <label class="create-label">保存到文件夹</label>
-          <NSelect
-            v-model:value="importFolderId"
-            :options="folderOptions"
-            placeholder="选择目标文件夹（可选）"
-            style="width: 100%"
-            clearable
-            :loading="foldersStore.loading"
-          />
-        </div>
-
-        <!-- 主题 -->
-        <div class="create-field">
-          <label class="create-label">选择主题</label>
-          <div class="theme-grid">
-            <div
-              v-for="t in THEMES"
-              :key="t.id"
-              class="theme-card"
-              :class="{ 'is-active': importThemeId === t.id }"
-              @click="importThemeId = t.id"
-            >
-              <div class="theme-preview" :style="{ background: t.swatch.bg }">
-                <div class="preview-root" :style="{ background: t.swatch.rootFill, borderColor: t.swatch.rootFill }"></div>
-                <div class="preview-line" :style="{ background: t.swatch.lineColor }"></div>
-                <div class="preview-second" :style="{ background: t.swatch.secondFill, borderColor: t.swatch.lineColor }"></div>
+          <div v-if="templatesStore.enabledList.length > 0" class="create-field">
+            <label class="create-label">
+              选择模板（含初始结构 + 样式，优先于主题）
+              <span
+                v-if="createTemplateId"
+                class="clear-template"
+                @click="createTemplateId = null"
+              >不使用模板</span>
+            </label>
+            <div class="theme-grid">
+              <div
+                v-for="tpl in templatesStore.enabledList"
+                :key="tpl.id"
+                class="theme-card"
+                :class="{ 'is-active': createTemplateId === tpl.id }"
+                @click="createTemplateId = tpl.id"
+              >
+                <div
+                  class="theme-preview"
+                  :style="{ background: (parseSwatch(tpl.swatchJson)?.bg ?? '#fafafa') }"
+                >
+                  <div
+                    class="preview-root"
+                    :style="{
+                      background: parseSwatch(tpl.swatchJson)?.rootFill ?? '#549688',
+                      borderColor: parseSwatch(tpl.swatchJson)?.rootFill ?? '#549688'
+                    }"
+                  ></div>
+                  <div
+                    class="preview-line"
+                    :style="{ background: parseSwatch(tpl.swatchJson)?.lineColor ?? '#549688' }"
+                  ></div>
+                  <div
+                    class="preview-second"
+                    :style="{
+                      background: parseSwatch(tpl.swatchJson)?.secondFill ?? '#fff',
+                      borderColor: parseSwatch(tpl.swatchJson)?.lineColor ?? '#549688'
+                    }"
+                  ></div>
+                </div>
+                <div class="theme-name">{{ tpl.name }}</div>
               </div>
-              <div class="theme-name">{{ t.name }}</div>
+            </div>
+          </div>
+          <div class="create-field" :class="{ 'is-dimmed': !!createTemplateId }">
+            <label class="create-label">
+              选择主题
+              <span v-if="createTemplateId" class="theme-hint">（已使用模板，主题被覆盖）</span>
+            </label>
+            <div class="theme-grid">
+              <div
+                v-for="t in THEMES"
+                :key="t.id"
+                class="theme-card"
+                :class="{ 'is-active': !createTemplateId && createThemeId === t.id }"
+                @click="createTemplateId = null; createThemeId = t.id"
+              >
+                <div class="theme-preview" :style="{ background: t.swatch.bg }">
+                  <div class="preview-root" :style="{ background: t.swatch.rootFill, borderColor: t.swatch.rootFill }"></div>
+                  <div class="preview-line" :style="{ background: t.swatch.lineColor }"></div>
+                  <div class="preview-second" :style="{ background: t.swatch.secondFill, borderColor: t.swatch.lineColor }"></div>
+                </div>
+                <div class="theme-name">{{ t.name }}</div>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-      <template #footer>
-        <NSpace justify="end">
-          <NButton @click="importModalVisible = false">取消</NButton>
-          <NButton
-            type="primary"
-            :loading="importSubmitting"
-            :disabled="!importFile || !importTitleInput.trim()"
-            @click="submitImport"
-          >
-            <template #icon><NIcon><CloudUploadOutline /></NIcon></template>
-            开始导入
-          </NButton>
-        </NSpace>
-      </template>
-    </NModal>
+        <template #footer>
+          <NSpace justify="end">
+            <NButton @click="createModalVisible = false">取消</NButton>
+            <NButton
+              type="primary"
+              :loading="createSubmitting"
+              :disabled="!createTitleInput.trim()"
+              @click="submitCreate"
+            >
+              创建
+            </NButton>
+          </NSpace>
+        </template>
+      </NModal>
 
-    <!-- 举报 Modal -->
-    <NModal
-      v-model:show="reportModalVisible"
-      preset="card"
-      title="举报导图"
-      display-directive="if"
-      style="max-width: 460px"
-    >
-      <p class="report-tip">举报导图「{{ reportTargetTitle }}」？请填写理由，管理员将审核处理。</p>
-      <NInput
-        v-model:value="reportReason"
-        type="textarea"
-        placeholder="请填写举报理由（如违规内容、侵权、广告等）"
-        :rows="4"
-        maxlength="512"
-      />
-      <template #footer>
-        <NSpace justify="end">
-          <NButton @click="reportModalVisible = false">取消</NButton>
-          <NButton
-            type="warning"
-            :loading="reportSubmitting"
-            :disabled="!reportReason.trim()"
-            @click="submitReport"
-          >
-            提交举报
-          </NButton>
-        </NSpace>
-      </template>
-    </NModal>
+      <!-- 导入导图 Modal -->
+      <NModal
+        v-model:show="importModalVisible"
+        preset="card"
+        title="导入思维导图"
+        display-directive="if"
+        style="max-width: 560px"
+      >
+        <div class="create-form">
+          <!-- 文件拖放区域 -->
+          <div class="create-field">
+            <label class="create-label">选择文件</label>
+            <div
+              class="import-dropzone"
+              :class="{ 'is-dragover': importFileDragOver, 'is-filled': !!importFile }"
+              @dragover.prevent="importFileDragOver = true"
+              @dragleave="importFileDragOver = false"
+              @drop="handleImportDrop"
+              @click="importFileInputEl?.click()"
+            >
+              <input
+                ref="importFileInputEl"
+                type="file"
+                accept=".mm,.json,.smm,.md,.markdown,.xmind"
+                style="display: none"
+                @change="handleImportFileInputChange"
+              />
+              <template v-if="!importFile">
+                <div class="dropzone-icon">📥</div>
+                <div class="dropzone-text">
+                  <div class="dropzone-title">点击选择文件，或拖拽文件到此处</div>
+                  <div class="dropzone-hint">
+                    支持：FreeMind (.mm)、simple-mind-map (.json/.smm)、Markdown (.md)、XMind (.xmind)，单文件 ≤ 5MB
+                  </div>
+                </div>
+              </template>
+              <template v-else>
+                <div class="dropzone-filled">
+                  <div class="file-info">
+                    <div class="file-icon">📄</div>
+                    <div class="file-meta">
+                      <div class="file-name">{{ importFile.name }}</div>
+                      <div class="file-size">{{ formatFileSize(importFile.size) }}</div>
+                    </div>
+                  </div>
+                  <NButton
+                    text
+                    size="small"
+                    type="error"
+                    @click.stop="removeImportFile"
+                  >
+                    移除
+                  </NButton>
+                </div>
+              </template>
+            </div>
+          </div>
 
-    <!-- 编辑标签 Modal -->
-    <NModal
-      v-model:show="tagsModalVisible"
-      preset="card"
-      title="编辑标签"
-      display-directive="if"
-      style="max-width: 460px"
-    >
-      <p class="tags-tip">为「{{ tagsTargetTitle }}」选择标签（可多选）：</p>
-      <NSelect
-        v-model:value="tagsSelectedIds"
-        :options="tagSelectOptions"
-        multiple
-        placeholder="选择已有标签"
-        style="width: 100%"
-        :loading="tagsStore.loading"
-      />
-      <div class="tags-create-row">
+          <!-- 标题 -->
+          <div class="create-field">
+            <label class="create-label">导图标题</label>
+            <NInput
+              v-model:value="importTitleInput"
+              placeholder="请输入导图标题（默认取文件名）"
+              maxlength="128"
+              :autofocus="!!importFile"
+              @keyup.enter="submitImport"
+            />
+          </div>
+
+          <!-- 文件夹 -->
+          <div class="create-field">
+            <label class="create-label">保存到文件夹</label>
+            <NSelect
+              v-model:value="importFolderId"
+              :options="folderOptions"
+              placeholder="选择目标文件夹（可选）"
+              style="width: 100%"
+              clearable
+              :loading="foldersStore.loading"
+            />
+          </div>
+
+          <!-- 主题 -->
+          <div class="create-field">
+            <label class="create-label">选择主题</label>
+            <div class="theme-grid">
+              <div
+                v-for="t in THEMES"
+                :key="t.id"
+                class="theme-card"
+                :class="{ 'is-active': importThemeId === t.id }"
+                @click="importThemeId = t.id"
+              >
+                <div class="theme-preview" :style="{ background: t.swatch.bg }">
+                  <div class="preview-root" :style="{ background: t.swatch.rootFill, borderColor: t.swatch.rootFill }"></div>
+                  <div class="preview-line" :style="{ background: t.swatch.lineColor }"></div>
+                  <div class="preview-second" :style="{ background: t.swatch.secondFill, borderColor: t.swatch.lineColor }"></div>
+                </div>
+                <div class="theme-name">{{ t.name }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <template #footer>
+          <NSpace justify="end">
+            <NButton @click="importModalVisible = false">取消</NButton>
+            <NButton
+              type="primary"
+              :loading="importSubmitting"
+              :disabled="!importFile || !importTitleInput.trim()"
+              @click="submitImport"
+            >
+              <template #icon><NIcon><CloudUploadOutline /></NIcon></template>
+              开始导入
+            </NButton>
+          </NSpace>
+        </template>
+      </NModal>
+
+      <!-- 举报 Modal -->
+      <NModal
+        v-model:show="reportModalVisible"
+        preset="card"
+        title="举报导图"
+        display-directive="if"
+        style="max-width: 460px"
+      >
+        <p class="report-tip">举报导图「{{ reportTargetTitle }}」？请填写理由，管理员将审核处理。</p>
         <NInput
-          v-model:value="newTagName"
-          placeholder="新建标签名称"
-          maxlength="20"
+          v-model:value="reportReason"
+          type="textarea"
+          placeholder="请填写举报理由（如违规内容、侵权、广告等）"
+          :rows="4"
+          maxlength="512"
         />
-        <NButton
-          type="primary"
-          size="small"
-          :loading="creatingTag"
-          :disabled="!newTagName.trim()"
-          @click="handleCreateNewTag"
-        >
-          + 新建
-        </NButton>
-      </div>
-      <template #footer>
-        <NSpace justify="end">
-          <NButton @click="tagsModalVisible = false">取消</NButton>
+        <template #footer>
+          <NSpace justify="end">
+            <NButton @click="reportModalVisible = false">取消</NButton>
+            <NButton
+              type="warning"
+              :loading="reportSubmitting"
+              :disabled="!reportReason.trim()"
+              @click="submitReport"
+            >
+              提交举报
+            </NButton>
+          </NSpace>
+        </template>
+      </NModal>
+
+      <!-- 编辑标签 Modal -->
+      <NModal
+        v-model:show="tagsModalVisible"
+        preset="card"
+        title="编辑标签"
+        display-directive="if"
+        style="max-width: 460px"
+      >
+        <p class="tags-tip">为「{{ tagsTargetTitle }}」选择标签（可多选）：</p>
+        <NSelect
+          v-model:value="tagsSelectedIds"
+          :options="tagSelectOptions"
+          multiple
+          placeholder="选择已有标签"
+          style="width: 100%"
+          :loading="tagsStore.loading"
+        />
+        <div class="tags-create-row">
+          <NInput
+            v-model:value="newTagName"
+            placeholder="新建标签名称"
+            maxlength="20"
+          />
           <NButton
             type="primary"
-            :loading="tagsSubmitting"
-            @click="submitTags"
+            size="small"
+            :loading="creatingTag"
+            :disabled="!newTagName.trim()"
+            @click="handleCreateNewTag"
           >
-            确认
-          </NButton>
-        </NSpace>
-      </template>
-    </NModal>
-
-    <!-- 移动到文件夹 Modal -->
-    <NModal
-      v-model:show="moveModalVisible"
-      preset="card"
-      title="移动到文件夹"
-      display-directive="if"
-      style="max-width: 420px"
-    >
-      <p class="move-tip">将「{{ moveTargetTitle }}」移动到：</p>
-      <NSelect
-        v-model:value="moveTargetFolderId"
-        :options="folderOptions"
-        placeholder="请选择目标文件夹"
-        style="width: 100%"
-        :loading="foldersStore.loading"
-      />
-      <template #footer>
-        <NSpace justify="end">
-          <NButton @click="moveModalVisible = false">取消</NButton>
-          <NButton
-            type="primary"
-            :loading="moveSubmitting"
-            @click="submitMove"
-          >
-            确认移动
-          </NButton>
-        </NSpace>
-      </template>
-    </NModal>
-
-    <!-- 删除导图确认弹窗 -->
-    <NModal
-      v-model:show="removeModalVisible"
-      preset="card"
-      title="确认删除"
-      style="max-width: 420px"
-      :bordered="false"
-      size="medium"
-    >
-      <div style="font-size: 14px; color: #334155; line-height: 1.6;">
-        删除「<b>{{ removeTargetTitle }}</b>」？该操作不可恢复。
-      </div>
-      <template #footer>
-        <div style="display: flex; justify-content: flex-end; gap: 10px;">
-          <NButton size="small" @click="removeModalVisible = false">
-            取消
-          </NButton>
-          <NButton type="error" size="small" :loading="removeSubmitting" @click="submitRemove">
-            删除
+            + 新建
           </NButton>
         </div>
-      </template>
-    </NModal>
+        <template #footer>
+          <NSpace justify="end">
+            <NButton @click="tagsModalVisible = false">取消</NButton>
+            <NButton
+              type="primary"
+              :loading="tagsSubmitting"
+              @click="submitTags"
+            >
+              确认
+            </NButton>
+          </NSpace>
+        </template>
+      </NModal>
+
+      <!-- 移动到文件夹 Modal -->
+      <NModal
+        v-model:show="moveModalVisible"
+        preset="card"
+        title="移动到文件夹"
+        display-directive="if"
+        style="max-width: 420px"
+      >
+        <p class="move-tip">将「{{ moveTargetTitle }}」移动到：</p>
+        <NSelect
+          v-model:value="moveTargetFolderId"
+          :options="folderOptions"
+          placeholder="请选择目标文件夹"
+          style="width: 100%"
+          :loading="foldersStore.loading"
+        />
+        <template #footer>
+          <NSpace justify="end">
+            <NButton @click="moveModalVisible = false">取消</NButton>
+            <NButton
+              type="primary"
+              :loading="moveSubmitting"
+              @click="submitMove"
+            >
+              确认移动
+            </NButton>
+          </NSpace>
+        </template>
+      </NModal>
+
+      <!-- 删除导图确认弹窗 -->
+      <NModal
+        v-model:show="removeModalVisible"
+        preset="card"
+        title="确认删除"
+        style="max-width: 420px"
+        :bordered="false"
+        size="medium"
+      >
+        <div style="font-size: 14px; color: #334155; line-height: 1.6;">
+          删除「<b>{{ removeTargetTitle }}</b>」？该操作不可恢复。
+        </div>
+        <template #footer>
+          <div style="display: flex; justify-content: flex-end; gap: 10px;">
+            <NButton size="small" @click="removeModalVisible = false">
+              取消
+            </NButton>
+            <NButton type="error" size="small" :loading="removeSubmitting" @click="submitRemove">
+              删除
+            </NButton>
+          </div>
+        </template>
+      </NModal>
     </div>
   </div>
 </template>
 
 <style scoped lang="scss">
 .home {
-  display: flex;
   padding: 16px;
-  gap: 16px;
   max-width: 1400px;
   margin: 0 auto;
 }
 
-.home-sidebar {
-  width: 240px;
-  flex-shrink: 0;
-  background: var(--app-card-bg, #fff);
-  border-radius: 8px;
-  border: 1px solid var(--app-border, #e0e0e6);
-  overflow: hidden;
-}
-
 .home-content {
-  flex: 1;
-  min-width: 0;
+  width: 100%;
 }
 
 .home-header {
@@ -1017,13 +1018,27 @@ onMounted(async () => {
   margin: 0;
 }
 
-.folder-filter {
+.filter-bar {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 12px;
+  background: var(--app-card-bg, #fff);
+  border: 1px solid var(--app-border, #e0e0e6);
+  border-radius: 8px;
+  flex-wrap: wrap;
+}
+
+.filter-label {
   font-size: 12px;
-  color: var(--app-text-secondary);
-  margin-top: 6px;
+  color: var(--app-text-secondary, #666);
+  font-weight: 500;
+}
+
+.clear-all-btn {
+  margin-left: auto;
+  color: var(--app-text-secondary, #999);
 }
 
 .search-bar {
@@ -1129,13 +1144,7 @@ onMounted(async () => {
 
 @media (max-width: 767px) {
   .home {
-    flex-direction: column;
     padding: 10px;
-    gap: 10px;
-  }
-  .home-sidebar {
-    width: 100%;
-    max-height: 200px;
   }
   .grid {
     grid-template-columns: 1fr;
