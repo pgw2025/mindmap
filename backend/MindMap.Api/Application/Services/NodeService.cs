@@ -153,10 +153,10 @@ public class NodeService : INodeService
             if (map is not null && map.RootNodeId is null)
             {
                 map.RootNodeId = node.Id;
-                map.UpdatedAt = DateTime.UtcNow;
             }
         }
 
+        await UpdateMindMapStatsAsync(mindMapId, nodeCountDelta: 1, ct);
         await _db.SaveChangesAsync(ct);
         return ToDto(node);
     }
@@ -189,7 +189,7 @@ public class NodeService : INodeService
 
         node.UpdatedAt = DateTime.UtcNow;
 
-        await UpdateMindMapTimestamp(node.MindMapId);
+        await UpdateMindMapStatsAsync(node.MindMapId, nodeCountDelta: 0, ct);
         await _db.SaveChangesAsync(ct);
 
         return ToDto(node);
@@ -220,7 +220,7 @@ public class NodeService : INodeService
         node.SortOrder = req.SortOrder ?? await GetNextSortOrderAsync(node.MindMapId, req.ParentId, ct);
         node.UpdatedAt = DateTime.UtcNow;
 
-        await UpdateMindMapTimestamp(node.MindMapId);
+        await UpdateMindMapStatsAsync(node.MindMapId, nodeCountDelta: 0, ct);
         await _db.SaveChangesAsync(ct);
 
         return ToDto(node);
@@ -251,7 +251,7 @@ public class NodeService : INodeService
             node.UpdatedAt = DateTime.UtcNow;
         }
 
-        await UpdateMindMapTimestamp(mindMapId);
+        await UpdateMindMapStatsAsync(mindMapId, nodeCountDelta: 0, ct);
         await _db.SaveChangesAsync(ct);
     }
 
@@ -275,10 +275,9 @@ public class NodeService : INodeService
         if (map is not null && map.RootNodeId == id)
         {
             map.RootNodeId = null;
-            map.UpdatedAt = DateTime.UtcNow;
         }
 
-        await UpdateMindMapTimestamp(mindMapId);
+        await UpdateMindMapStatsAsync(mindMapId, nodeCountDelta: -toDelete.Count, ct);
         await _db.SaveChangesAsync(ct);
     }
 
@@ -354,11 +353,25 @@ public class NodeService : INodeService
         }
     }
 
-    private async Task UpdateMindMapTimestamp(Guid mindMapId)
+    private async Task UpdateMindMapStatsAsync(Guid mindMapId, int nodeCountDelta, CancellationToken ct)
     {
-        var map = await _db.MindMaps.FirstOrDefaultAsync(m => m.Id == mindMapId);
+        var map = await _db.MindMaps.FirstOrDefaultAsync(m => m.Id == mindMapId, ct);
         if (map is not null)
         {
+            if (nodeCountDelta != 0)
+            {
+                // 增量更新，确保不为负；若当前为 0（如历史遗留数据），则从数据库重新统计
+                if (map.NodeCount == 0)
+                {
+                    map.NodeCount = await _db.Nodes
+                        .Where(n => n.MindMapId == mindMapId)
+                        .CountAsync(ct);
+                }
+                else
+                {
+                    map.NodeCount = Math.Max(0, map.NodeCount + nodeCountDelta);
+                }
+            }
             map.UpdatedAt = DateTime.UtcNow;
             map.LastEditedAt = DateTime.UtcNow;
         }

@@ -747,6 +747,23 @@ async function handleTitleBlur() {
   }
 }
 
+async function handleDescriptionBlur() {
+  if (mapDetail.value) {
+    try {
+      const desc = (mapDetail.value.description ?? '').trim()
+      mapDetail.value.description = desc || null
+      await mapsStore.update(mindMapId.value, { description: desc })
+      message.success('描述已更新')
+    } catch (e) {
+      message.error((e as Error).message)
+    }
+  }
+}
+
+function handleRootDeleteTipClose() {
+  rootDeleteTipVisible.value = false
+}
+
 /** 分享设为公开后同步父组件状态 */
 function handleSharePublicChange(isPublic: boolean) {
   if (mapDetail.value) {
@@ -863,6 +880,16 @@ watch(() => route.params.id, () => {
       <div class="editor-title" v-if="mapDetail">
         <NInput v-if="!readonly" v-model:value="mapDetail.title" class="title-input" @blur="handleTitleBlur" />
         <span v-else class="title-text">{{ mapDetail.title }}</span>
+        <div v-if="!readonly" class="desc-row">
+          <NInput
+            v-model:value="mapDetail.description"
+            class="desc-input"
+            placeholder="添加导图描述（可选）"
+            clearable
+            @blur="handleDescriptionBlur"
+          />
+        </div>
+        <p v-else-if="mapDetail.description" class="desc-text">{{ mapDetail.description }}</p>
       </div>
 
       <div class="editor-actions">
@@ -963,7 +990,7 @@ watch(() => route.params.id, () => {
 
     <!-- 根节点不能删除提示 -->
     <NModal v-model:show="rootDeleteTipVisible" preset="dialog" type="warning" title="无法删除" positive-text="我知道了"
-      display-directive="if" style="max-width: 420px">
+      display-directive="if" style="max-width: 420px" @positive-click="handleRootDeleteTipClose">
       根节点不能删除。你可以清空内容但不能删除中心主题。
     </NModal>
 
