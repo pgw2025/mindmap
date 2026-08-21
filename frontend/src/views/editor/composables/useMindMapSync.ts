@@ -1,9 +1,12 @@
-import { ref, type ComputedRef } from 'vue'
+import { ref, shallowRef, type ComputedRef } from 'vue'
 import type MindMap from 'simple-mind-map'
 import type { NodeDto, NodeBatchItem } from '@/api/nodes'
 import { useNodesStore } from '@/stores/nodes'
 
 type NodesStore = ReturnType<typeof useNodesStore>
+
+/** 同步状态类型 */
+export type SyncStatus = 'idle' | 'syncing' | 'saved' | 'error'
 
 /** 后端 NodeShape 数字 → simple-mind-map 形状字符串 */
 const shapeMap: Record<number, string> = {
@@ -58,6 +61,43 @@ export function useMindMapSync(opts: {
 
   /** 防止 setData 触发 data_change 循环 */
   const isSettingData = ref(false)
+
+  /** ============================================================
+   *  同步状态（供 UI 实时展示保存进度）
+   *  ============================================================ */
+  const syncStatus = ref<SyncStatus>('idle')
+  /** pending 操作计数（debounce 定时器 + 结构队列 + pendingCreates） */
+  const pendingCount = ref(0)
+  /** 累计错误数（用于提示用户） */
+  const errorCount = ref(0)
+  /** 最后一次成功保存的时间 */
+  const lastSavedAt = shallowRef<Date | null>(null)
+
+  /** 标记开始一个同步操作 */
+  function markSyncing() {
+    pendingCount.value++
+    syncStatus.value = 'syncing'
+  }
+
+  /** 标记一个同步操作成功完成 */
+  function markSaved() {
+    pendingCount.value = Math.max(0, pendingCount.value - 1)
+    if (pendingCount.value === 0) {
+      syncStatus.value = 'saved'
+      lastSavedAt.value = new Date()
+      // 2 秒后回到 idle
+      setTimeout(() => {
+        if (syncStatus.value === 'saved') syncStatus.value = 'idle'
+      }, 2000)
+    }
+  }
+
+  /** 标记一个同步操作失败 */
+  function markError() {
+    pendingCount.value = Math.max(0, pendingCount.value - 1)
+    errorCount.value++
+    syncStatus.value = 'error'
+  }
 
   /** 记录最新鼠标屏幕坐标，供 beforeDragEnd 判定方向用 */
   let lastMouseClientX = 0
@@ -128,10 +168,17 @@ export function useMindMapSync(opts: {
   let opQueue: Promise<void> = Promise.resolve()
 
   function enqueueStructuralOp(fn: () => Promise<void>): Promise<void> {
+    markSyncing()
     opQueue = opQueue
       .catch(() => { })
       .then(async () => {
         await fn()
+      })
+      .then(() => {
+        markSaved()
+      })
+      .catch(() => {
+        markError()
       })
     return opQueue
   }
@@ -580,10 +627,13 @@ export function useMindMapSync(opts: {
     const flush = async () => {
       textDebounceTimers.delete(backendId)
       const title = extractTitleFromText(rawText, backendId)
+      markSyncing()
       try {
         await nodesStore.update(backendId, { title })
+        markSaved()
       } catch (e) {
         console.error('[sync] text update failed:', e)
+        markError()
       }
     }
     textDebounceTimers.set(backendId, {
@@ -598,10 +648,13 @@ export function useMindMapSync(opts: {
     if (existing) clearTimeout(existing.timer)
     const flush = async () => {
       collapseDebounceTimers.delete(backendId)
+      markSyncing()
       try {
         await nodesStore.update(backendId, { isCollapsed })
+        markSaved()
       } catch (e) {
         console.error('[sync] collapse update failed:', e)
+        markError()
       }
     }
     collapseDebounceTimers.set(backendId, {
@@ -618,10 +671,13 @@ export function useMindMapSync(opts: {
     if (existing) clearTimeout(existing.timer)
     const flush = async () => {
       noteDebounceTimers.delete(backendId)
+      markSyncing()
       try {
         await nodesStore.update(backendId, { note })
+        markSaved()
       } catch (e) {
         console.error('[sync] note update failed:', e)
+        markError()
       }
     }
     noteDebounceTimers.set(backendId, {
@@ -638,10 +694,13 @@ export function useMindMapSync(opts: {
     if (existing) clearTimeout(existing.timer)
     const flush = async () => {
       extraDataDebounceTimers.delete(backendId)
+      markSyncing()
       try {
         await nodesStore.update(backendId, { extraData })
+        markSaved()
       } catch (e) {
         console.error('[sync] extraData update failed:', e)
+        markError()
       }
     }
     extraDataDebounceTimers.set(backendId, {
@@ -1050,8 +1109,19 @@ export function useMindMapSync(opts: {
       ; (inst as any).on('node_text_edit_change', handleTextEditChange)
   }
 
+  /** 手动重试：清除错误状态 */
+  function clearError() {
+    errorCount.value = 0
+    if (syncStatus.value === 'error') syncStatus.value = 'idle'
+  }
+
   return {
     isSettingData,
+    syncStatus,
+    pendingCount,
+    errorCount,
+    lastSavedAt,
+    clearError,
     bindGlobalMouseTracker,
     convertToMindMapData,
     reloadMindMap,

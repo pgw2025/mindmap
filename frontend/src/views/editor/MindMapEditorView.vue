@@ -358,6 +358,11 @@ const searchCurrentIndex = ref(0)
 // —— 组合式函数：数据转换/同步/方向归一化/拖拽预判 ——
 const {
   isSettingData,
+  syncStatus,
+  pendingCount,
+  errorCount,
+  lastSavedAt,
+  clearError,
   bindGlobalMouseTracker,
   convertToMindMapData,
   reloadMindMap,
@@ -853,6 +858,49 @@ async function handleBack() {
   router.push({ name: 'home' })
 }
 
+// —— 同步状态 UI 计算 ——
+const syncStatusText = computed(() => {
+  switch (syncStatus.value) {
+    case 'syncing': return pendingCount.value > 0 ? `同步中(${pendingCount.value})` : '同步中…'
+    case 'saved': return '已保存'
+    case 'error': return errorCount.value > 0 ? `同步失败(${errorCount.value})` : '同步失败'
+    default: return '已保存'
+  }
+})
+
+const syncStatusTooltip = computed(() => {
+  switch (syncStatus.value) {
+    case 'syncing': return `正在同步 ${pendingCount.value} 个操作到服务器…`
+    case 'saved': return lastSavedAt.value ? `最后保存：${formatTime(lastSavedAt.value)}` : '更改已保存'
+    case 'error': return `同步失败${errorCount.value > 0 ? `（${errorCount.value} 个错误）` : ''}，点击重试`
+    default: return lastSavedAt.value ? `最后保存：${formatTime(lastSavedAt.value)}` : '所有更改已保存'
+  }
+})
+
+const lastSavedAtFormatted = computed(() => {
+  if (!lastSavedAt.value) return ''
+  const now = new Date()
+  const diff = now.getTime() - lastSavedAt.value.getTime()
+  if (diff < 60000) return '刚刚'
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`
+  return lastSavedAt.value.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+})
+
+function formatTime(d: Date): string {
+  return d.toLocaleString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
+/** 手动保存：flush 所有 pending 并等待完成 */
+async function handleManualSave() {
+  try {
+    clearError()
+    await waitForPendingOps()
+    message.success('已保存')
+  } catch {
+    message.error('保存失败，请检查网络后重试')
+  }
+}
+
 /** 导图内搜索 */
 function handleSearch() {
   if (!mindMapInstance?.search) return
@@ -1185,8 +1233,16 @@ watch(() => route.params.id, () => {
             <input v-if="!readonly" v-model="mapDetail.title" class="inline-title-input" placeholder="未命名思维导图"
               @blur="handleTitleBlur" />
             <span v-else class="inline-title-text">{{ mapDetail.title }}</span>
-            <span class="save-status-badge" title="更改已实时自动保存">
-              <span class="status-dot"></span>已保存
+            <span
+              v-if="!readonly"
+              class="save-status-badge"
+              :class="'status-' + syncStatus"
+              :title="syncStatusTooltip"
+              @click="syncStatus === 'error' ? handleManualSave() : undefined"
+            >
+              <span class="status-dot" :class="'dot-' + syncStatus"></span>
+              <span class="status-text">{{ syncStatusText }}</span>
+              <span v-if="lastSavedAtFormatted" class="status-time">{{ lastSavedAtFormatted }}</span>
             </span>
           </div>
           <div class="doc-desc-row">
@@ -1227,6 +1283,18 @@ watch(() => route.params.id, () => {
             </button>
           </div>
         </template>
+
+        <!-- 手动保存按钮 (仅编辑模式) -->
+        <button
+          v-if="!readonly"
+          class="btn-tool-pill btn-save-sync"
+          :class="{ 'is-syncing': syncStatus === 'syncing' }"
+          :disabled="syncStatus === 'syncing' && pendingCount === 0"
+          @click="handleManualSave"
+          :title="syncStatus === 'syncing' ? '同步中…' : '手动保存 (立即同步到服务器)'"
+        >
+          <span class="pill-icon">{{ syncStatus === 'syncing' ? '⏳' : '💾' }}</span>
+        </button>
 
         <!-- 视图缩放胶囊组 -->
         <div class="btn-group-pill zoom-group">
@@ -1302,6 +1370,12 @@ watch(() => route.params.id, () => {
               ←
             </button>
             <span class="zen-pill-title">{{ mapDetail?.title || '思维导图' }}</span>
+            <span
+              v-if="!readonly"
+              class="zen-pill-sync"
+              :class="'sync-' + syncStatus"
+              :title="syncStatusText + (lastSavedAtFormatted ? ' · ' + lastSavedAtFormatted : '')"
+            ></span>
             <button class="zen-pill-expand" @click.stop="toggleMobileHeader" title="展开顶栏" aria-label="展开顶栏">
               ▾
             </button>

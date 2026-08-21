@@ -128,20 +128,107 @@
   align-items: center;
   gap: 4px;
   font-size: 11px;
-  color: var(--app-text-secondary, #6b7280);
   font-weight: 500;
   white-space: nowrap;
   flex-shrink: 0;
   padding: 2px 7px;
   border-radius: 10px;
   background: rgba(0, 0, 0, 0.03);
+  transition: all 0.2s ease;
+  cursor: default;
 
   .status-dot {
     width: 6px;
     height: 6px;
     border-radius: 50%;
+    flex-shrink: 0;
+    transition: all 0.2s ease;
+  }
+
+  .status-text {
+    line-height: 1.4;
+  }
+
+  .status-time {
+    color: var(--app-text-tertiary, #9ca3af);
+    font-size: 10px;
+  }
+
+  /* idle / saved → 绿色 */
+  &.status-idle, &.status-saved {
+    color: var(--app-text-secondary, #6b7280);
+
+    .dot-idle, .dot-saved {
+      background: var(--app-primary, #18a058);
+      box-shadow: 0 0 0 2px rgba(24, 160, 88, 0.2);
+    }
+  }
+
+  /* syncing → 蓝色 + 闪烁动画 */
+  &.status-syncing {
+    color: #2080f0;
+    background: rgba(32, 128, 240, 0.08);
+
+    .dot-syncing {
+      background: #2080f0;
+      box-shadow: 0 0 0 2px rgba(32, 128, 240, 0.2);
+      animation: sync-pulse 1s ease-in-out infinite;
+    }
+  }
+
+  /* error → 红色 + 可点击重试 */
+  &.status-error {
+    color: #d03050;
+    background: rgba(208, 48, 80, 0.08);
+    cursor: pointer;
+
+    &:hover {
+      background: rgba(208, 48, 80, 0.15);
+    }
+
+    .dot-error {
+      background: #d03050;
+      box-shadow: 0 0 0 2px rgba(208, 48, 80, 0.2);
+    }
+  }
+}
+
+@keyframes sync-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.8); }
+}
+
+/* 手动保存按钮 */
+.btn-save-sync {
+  &.is-syncing {
+    .pill-icon {
+      animation: sync-pulse 1s ease-in-out infinite;
+    }
+  }
+}
+
+/* 移动端沉浸模式同步状态小圆点 */
+.zen-pill-sync {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+
+  &.sync-idle, &.sync-saved {
     background: var(--app-primary, #18a058);
     box-shadow: 0 0 0 2px rgba(24, 160, 88, 0.2);
+  }
+
+  &.sync-syncing {
+    background: #2080f0;
+    box-shadow: 0 0 0 2px rgba(32, 128, 240, 0.2);
+    animation: sync-pulse 1s ease-in-out infinite;
+  }
+
+  &.sync-error {
+    background: #d03050;
+    box-shadow: 0 0 0 2px rgba(208, 48, 80, 0.2);
   }
 }
 
