@@ -202,6 +202,82 @@ if (MindMap && (MindMap as any).prototype) {
   }
 }
 
+// 4. 增强 AssociativeLine 插件：修正连线端点方向为"后方"
+//    连线端点固定指向节点远离根节点的一侧（后方），不指向节点的前方/上方/下方
+//    左侧布局节点（centerX < rootCenterX）→ 后方=left；右侧布局节点 → 后方=right
+if (AssociativeLine && (AssociativeLine as any).prototype) {
+  const alProto = (AssociativeLine as any).prototype
+  const originalUpdateAllLinesPos = alProto.updateAllLinesPos
+
+  alProto.updateAllLinesPos = function (this: any, node: any, toNode: any, associativeLinePoint: any) {
+    const [startPoint, endPoint] = originalUpdateAllLinesPos.call(this, node, toNode, associativeLinePoint)
+    const root = this.mindMap?.renderer?.root
+    if (!root || !node || !toNode) return [startPoint, endPoint]
+    const rootCenterX = root.left + root.width / 2
+    let sp = startPoint
+    let ep = endPoint
+    // 修正起点方向为"后方"（远离根节点的一侧）
+    if (!node.isRoot) {
+      const dir = (node.left + node.width / 2) < rootCenterX ? 'left' : 'right'
+      const range = startPoint.range || 0
+      const { left, top, width, height } = node
+      sp = dir === 'left'
+        ? { x: left, y: top + height / 2 - range, dir, range }
+        : { x: left + width, y: top + height / 2 - range, dir, range }
+    }
+    // 修正终点方向为"后方"
+    if (!toNode.isRoot) {
+      const dir = (toNode.left + toNode.width / 2) < rootCenterX ? 'left' : 'right'
+      const range = endPoint.range || 0
+      const { left, top, width, height } = toNode
+      ep = dir === 'left'
+        ? { x: left, y: top + height / 2 - range, dir, range }
+        : { x: left + width, y: top + height / 2 - range, dir, range }
+    }
+    return [sp, ep]
+  }
+
+  // 增强 drawLine：根据端点方向设置朝外的控制点偏移，使弧度朝向节点外侧
+  // 左侧布局（dir=left）→ 控制点向左偏移，弧度朝左（朝外）
+  // 右侧布局（dir=right）→ 控制点向右偏移，弧度朝右（朝外）
+  const originalDrawLine = alProto.drawLine
+  alProto.drawLine = function (this: any, startPoint: any, endPoint: any, node: any, toNode: any) {
+    const nodeData = node?.nodeData?.data
+    const savedOffsets = nodeData?.associativeLineTargetControlOffsets
+    if (nodeData) {
+      const targets = nodeData.associativeLineTargets || []
+      const toUid = toNode?.getData?.('uid') || toNode?.nodeData?.data?.uid
+      const targetIndex = targets.findIndex((t: string) => t === toUid)
+      const spDir = startPoint.dir
+      const epDir = endPoint.dir
+      const yDiff = endPoint.y - startPoint.y
+      // 朝外的 x 偏移量，保证曲线明显朝外
+      const xOut = Math.max(50, Math.abs(yDiff) / 2 + 50)
+      const tempOffsets = Array.isArray(savedOffsets) ? [...savedOffsets] : []
+      if (targetIndex >= 0) {
+        tempOffsets[targetIndex] = [
+          {
+            x: spDir === 'left' ? -xOut : (spDir === 'right' ? xOut : 0),
+            y: yDiff / 2
+          },
+          {
+            x: epDir === 'left' ? -xOut : (epDir === 'right' ? xOut : 0),
+            y: -yDiff / 2
+          }
+        ]
+        nodeData.associativeLineTargetControlOffsets = tempOffsets
+      } else {
+        nodeData.associativeLineTargetControlOffsets = null
+      }
+    }
+    const result = originalDrawLine.call(this, startPoint, endPoint, node, toNode)
+    if (nodeData) {
+      nodeData.associativeLineTargetControlOffsets = savedOffsets
+    }
+    return result
+  }
+}
+
 // 注册插件
 MindMap.usePlugin(Search)
 MindMap.usePlugin(Export)
