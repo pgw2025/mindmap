@@ -13,6 +13,7 @@ const emit = defineEmits<{
   (e: 'update', payload: NodeUpdatePayload): void
   (e: 'copy'): void
   (e: 'paste'): void
+  (e: 'open-note'): void
 }>()
 
 const localNode = ref<Partial<NodeDto>>({})
@@ -145,6 +146,10 @@ function selectEdgeStyle(style: EdgeStyle) {
       <button class="tool-btn" @click="toggleCollapse" title="折叠/展开">
         <span class="icon">{{ localNode.isCollapsed ? '▶' : '▼' }}</span>
         <span class="label">{{ localNode.isCollapsed ? '展开' : '折叠' }}</span>
+      </button>
+      <button class="tool-btn" :class="{ 'has-note': !!localNode.note }" @click="emit('open-note')" title="编辑备注">
+        <span class="icon">📝</span>
+        <span class="label">备注</span>
       </button>
     </div>
 
@@ -308,6 +313,12 @@ function selectEdgeStyle(style: EdgeStyle) {
       border-color: #d03050;
       color: #d03050;
     }
+  }
+
+  &.has-note {
+    background: rgba(24, 160, 88, 0.1);
+    border-color: var(--app-primary, #18a058);
+    color: var(--app-primary, #18a058);
   }
 
   .icon {

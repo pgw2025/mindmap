@@ -12,8 +12,6 @@ import {
   NSwitch,
   NTag,
   NPagination,
-  NCollapse,
-  NCollapseItem,
   NTabs,
   NTabPane,
   NRadioGroup,

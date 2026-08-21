@@ -35,6 +35,7 @@ interface DetailNode {
     id?: string
     backendId?: string
     dir?: string
+    note?: string
   }
   children: DetailNode[]
 }
@@ -163,6 +164,8 @@ export function useMindMapSync(opts: {
   const textDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>()
   /** 节点级折叠 debounce 定时器（key = backendId） */
   const collapseDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  /** 节点级备注 debounce 定时器（key = backendId） */
+  const noteDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
   function clearPerNodeTimers(uid: string, backendId?: string | null) {
     // 清除 uid → backendId 对应的 timer（可能只知道其中一个）
@@ -174,6 +177,9 @@ export function useMindMapSync(opts: {
       const c = collapseDebounceTimers.get(bid)
       if (c) clearTimeout(c)
       collapseDebounceTimers.delete(bid)
+      const n = noteDebounceTimers.get(bid)
+      if (n) clearTimeout(n)
+      noteDebounceTimers.delete(bid)
     }
   }
 
@@ -460,6 +466,14 @@ export function useMindMapSync(opts: {
       scheduleCollapseUpdate(backendId, !newExpand)
     }
 
+    // ---------- 2.5 备注变化（debounced，key=backendId） ----------
+    // note 可能为空字符串（清空备注），用 ?? '' 归一化比较
+    const oldNote = (oldData.data.note as string | undefined) ?? ''
+    const newNote = (data.data.note as string | undefined) ?? ''
+    if (oldNote !== newNote) {
+      scheduleNoteUpdate(backendId, newNote)
+    }
+
     // ---------- 3. direction 变化（如果是根节点直接子节点则同步到后端） ----------
     const oldDir = (oldData.data.dir as string | undefined) ?? ''
     const newDir = (data.data.dir as string | undefined) ?? ''
@@ -521,6 +535,25 @@ export function useMindMapSync(opts: {
           console.error('[sync] collapse update failed:', e)
         }
       }, 250)
+    )
+  }
+
+  /** 备注更新调度（debounce 600ms，key = backendId）
+   *  备注是富文本 HTML，内容较长且编辑频繁，用较长 debounce 减少请求次数。
+   *  note 为空字符串时也要同步（清空操作），后端 Note is not null 判断会接受空串。 */
+  function scheduleNoteUpdate(backendId: string, note: string) {
+    const t = noteDebounceTimers.get(backendId)
+    if (t) clearTimeout(t)
+    noteDebounceTimers.set(
+      backendId,
+      setTimeout(async () => {
+        noteDebounceTimers.delete(backendId)
+        try {
+          await nodesStore.update(backendId, { note })
+        } catch (e) {
+          console.error('[sync] note update failed:', e)
+        }
+      }, 600)
     )
   }
 

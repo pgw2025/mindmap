@@ -17,7 +17,6 @@ const emit = defineEmits<{
 const message = useMessage()
 const editingNodeTitle = ref('')
 const editingNodeContent = ref('')
-const editingNodeNote = ref('')
 const savingContent = ref(false)
 
 /** 弹窗打开时载入选中节点的字段 */
@@ -25,7 +24,6 @@ watch(() => props.show, (v) => {
   if (v && props.node) {
     editingNodeTitle.value = props.node.title
     editingNodeContent.value = props.node.content || ''
-    editingNodeNote.value = props.node.note || ''
   }
 })
 
@@ -35,8 +33,7 @@ async function saveNodeContent() {
   try {
     const payload: NodeUpdatePayload = {
       title: editingNodeTitle.value,
-      content: editingNodeContent.value || undefined,
-      note: editingNodeNote.value || undefined
+      content: editingNodeContent.value || undefined
     }
     emit('save', payload)
     emit('update:show', false)
@@ -60,11 +57,6 @@ async function saveNodeContent() {
       <div class="field-group">
         <label class="field-label">正文内容</label>
         <RichTextEditor v-model="editingNodeContent" />
-      </div>
-      <div class="field-group">
-        <label class="field-label">备注</label>
-        <NInput v-model:value="editingNodeNote" type="textarea" placeholder="节点备注（可选）"
-          :autosize="{ minRows: 2, maxRows: 4 }" maxlength="2000" />
       </div>
     </div>
     <template #footer>

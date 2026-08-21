@@ -221,6 +221,7 @@ import NodeToolbar from './NodeToolbar.vue'
 import ShareDrawer from './components/ShareDrawer.vue'
 import VersionDrawer from './components/VersionDrawer.vue'
 import NodeContentModal from './components/NodeContentModal.vue'
+import NotePanel from './components/NotePanel.vue'
 import { useMindMapSync } from './composables/useMindMapSync'
 import { THEMES, getThemeConfig, getThemeIdOrDefault, type MindMapThemeConfig } from '@/themes/presets'
 
@@ -293,6 +294,7 @@ const versionDrawerRef = ref<InstanceType<typeof VersionDrawer> | null>(null)
 const shareDrawerVisible = ref(false)
 const versionsDrawerVisible = ref(false)
 const contentModalVisible = ref(false)
+const notePanelVisible = ref(false)
 
 /** 当前选中节点（供 NodeContentModal 使用） */
 const selectedNodeForContent = computed<NodeDto | null>(() => {
@@ -551,6 +553,40 @@ async function handleVersionRollback() {
 function openContentEditor() {
   if (!selectedNodeId.value) return
   contentModalVisible.value = true
+}
+
+/** 打开节点备注面板 */
+function openNotePanel() {
+  if (!selectedNodeId.value) return
+  notePanelVisible.value = true
+}
+
+/** 备注面板内容变化：写入 simple-mind-map 节点 data.note，触发 data_change_detail 增量同步到后端 */
+function handleNoteChange(note: string) {
+  if (!mindMapInstance || !selectedNodeId.value) return
+  const root = mindMapInstance.renderer?.root
+  if (!root) return
+  const uid = selectedNodeId.value
+  const walk = (node: any): boolean => {
+    if (node.getData?.('uid') === uid) {
+      // 写入 data.note；空串转为 undefined 以清空备注
+      node.setData({ note: note || undefined })
+      return true
+    }
+    if (node.children) {
+      for (const c of node.children) {
+        if (walk(c)) return true
+      }
+    }
+    return false
+  }
+  walk(root)
+
+  // 同步更新 nodesStore 中的 note（供 NodeToolbar has-note 标记和 NotePanel 重新打开时回显）
+  const storeNode = nodesStore.findNode(uid)
+  if (storeNode) {
+    storeNode.note = note || null
+  }
 }
 
 function handleZoomIn() {
@@ -1091,7 +1127,7 @@ watch(() => route.params.id, () => {
       <!-- 浮动工具栏（挂载在画布主容器内，随主容器定位） -->
       <NodeToolbar v-if="showToolbar && selectedNodeId" :node="nodesStore.findNode(selectedNodeId)"
         @add-child="handleAddChild" @add-sibling="handleAddSibling" @delete="handleDelete" @update="handleUpdateStyle"
-        @copy="handleCopy" @paste="handlePaste" />
+        @copy="handleCopy" @paste="handlePaste" @open-note="openNotePanel" />
     </main>
 
     <!-- 版本历史抽屉（含新建版本弹窗） -->
@@ -1104,6 +1140,10 @@ watch(() => route.params.id, () => {
 
     <!-- 富文本节点内容编辑弹窗 -->
     <NodeContentModal v-model:show="contentModalVisible" :node="selectedNodeForContent" @save="handleContentSave" />
+
+    <!-- 节点备注面板（富文本抽屉） -->
+    <NotePanel v-model:show="notePanelVisible" :node="selectedNodeForContent" :readonly="readonly"
+      @change="handleNoteChange" />
 
     <!-- 根节点不能删除提示 -->
     <NModal v-model:show="rootDeleteTipVisible" preset="card" title="无法删除" style="max-width: 420px" :bordered="false"
