@@ -126,45 +126,23 @@ function selectEdgeStyle(style: EdgeStyle) {
         <span class="icon">＋</span>
         <span class="label">子节点</span>
       </button>
-      <button
-        v-if="!isRoot"
-        class="tool-btn"
-        @click="emit('add-sibling')"
-        title="添加同级节点"
-      >
+      <button v-if="!isRoot" class="tool-btn" @click="emit('add-sibling')" title="添加同级节点">
         <span class="icon">∥</span>
         <span class="label">同级</span>
       </button>
-      <button
-        v-if="!isRoot"
-        class="tool-btn danger"
-        @click="emit('delete')"
-        title="删除节点"
-      >
+      <button v-if="!isRoot" class="tool-btn danger" @click="emit('delete')" title="删除节点">
         <span class="icon">🗑</span>
         <span class="label">删除</span>
       </button>
-      <button
-        class="tool-btn"
-        @click="emit('copy')"
-        title="复制 (Ctrl+C)"
-      >
+      <button class="tool-btn" @click="emit('copy')" title="复制 (Ctrl+C)">
         <span class="icon">⧉</span>
         <span class="label">复制</span>
       </button>
-      <button
-        class="tool-btn"
-        @click="emit('paste')"
-        title="粘贴 (Ctrl+V)"
-      >
+      <button class="tool-btn" @click="emit('paste')" title="粘贴 (Ctrl+V)">
         <span class="icon">📋</span>
         <span class="label">粘贴</span>
       </button>
-      <button
-        class="tool-btn"
-        @click="toggleCollapse"
-        title="折叠/展开"
-      >
+      <button class="tool-btn" @click="toggleCollapse" title="折叠/展开">
         <span class="icon">{{ localNode.isCollapsed ? '▶' : '▼' }}</span>
         <span class="label">{{ localNode.isCollapsed ? '展开' : '折叠' }}</span>
       </button>
@@ -179,121 +157,81 @@ function selectEdgeStyle(style: EdgeStyle) {
 
     <!-- 以下样式区域在移动端可折叠 -->
     <div class="style-panel" :class="{ 'mobile-collapsed': !mobileExpanded }">
-    <!-- 文字颜色 -->
-    <div class="toolbar-section">
-      <div class="section-title">文字颜色</div>
-      <div class="color-grid">
-        <button
-          v-for="color in presetColors"
-          :key="color"
-          class="color-swatch"
-          :style="{ background: color }"
-          :class="{ active: localNode.color === color }"
-          @click="selectColor(color)"
-        ></button>
-        <button
-          class="color-swatch transparent"
-          :class="{ active: !localNode.color }"
-          @click="selectColor('')"
-          title="清除颜色"
-        >
-          <span>✕</span>
-        </button>
+      <!-- 文字颜色 -->
+      <div class="toolbar-section">
+        <div class="section-title">文字颜色</div>
+        <div class="color-grid">
+          <button v-for="color in presetColors" :key="color" class="color-swatch" :style="{ background: color }"
+            :class="{ active: localNode.color === color }" @click="selectColor(color)"></button>
+          <button class="color-swatch transparent" :class="{ active: !localNode.color }" @click="selectColor('')"
+            title="清除颜色">
+            <span>✕</span>
+          </button>
+        </div>
       </div>
-    </div>
 
-    <!-- 背景颜色 -->
-    <div class="toolbar-section">
-      <div class="section-title">背景颜色</div>
-      <div class="color-grid">
-        <button
-          v-for="color in presetBgColors"
-          :key="color"
-          class="color-swatch"
-          :style="{ background: color }"
-          :class="{ active: localNode.backgroundColor === color }"
-          @click="selectBgColor(color)"
-        ></button>
-        <button
-          class="color-swatch transparent"
-          :class="{ active: !localNode.backgroundColor }"
-          @click="selectBgColor('')"
-          title="清除背景"
-        >
-          <span>✕</span>
-        </button>
+      <!-- 背景颜色 -->
+      <div class="toolbar-section">
+        <div class="section-title">背景颜色</div>
+        <div class="color-grid">
+          <button v-for="color in presetBgColors" :key="color" class="color-swatch" :style="{ background: color }"
+            :class="{ active: localNode.backgroundColor === color }" @click="selectBgColor(color)"></button>
+          <button class="color-swatch transparent" :class="{ active: !localNode.backgroundColor }"
+            @click="selectBgColor('')" title="清除背景">
+            <span>✕</span>
+          </button>
+        </div>
       </div>
-    </div>
 
-    <div class="divider"></div>
+      <div class="divider"></div>
 
-    <!-- 字号 -->
-    <div class="toolbar-section">
-      <div class="section-title">字号</div>
-      <div class="size-grid">
-        <button
-          v-for="size in presetFontSizes"
-          :key="size"
-          class="size-btn"
-          :class="{ active: localNode.fontSize === size }"
-          @click="selectFontSize(size)"
-        >
-          {{ size }}
-        </button>
+      <!-- 字号 -->
+      <div class="toolbar-section">
+        <div class="section-title">字号</div>
+        <div class="size-grid">
+          <button v-for="size in presetFontSizes" :key="size" class="size-btn"
+            :class="{ active: localNode.fontSize === size }" @click="selectFontSize(size)">
+            {{ size }}
+          </button>
+        </div>
       </div>
-    </div>
 
-    <!-- 形状 -->
-    <div class="toolbar-section">
-      <div class="section-title">形状</div>
-      <div class="shape-grid">
-        <button
-          v-for="shape in shapeOptions"
-          :key="shape.value"
-          class="shape-btn"
-          :class="{ active: localNode.shape === shape.value }"
-          @click="selectShape(shape.value)"
-        >
-          {{ shape.label }}
-        </button>
+      <!-- 形状 -->
+      <div class="toolbar-section">
+        <div class="section-title">形状</div>
+        <div class="shape-grid">
+          <button v-for="shape in shapeOptions" :key="shape.value" class="shape-btn"
+            :class="{ active: localNode.shape === shape.value }" @click="selectShape(shape.value)">
+            {{ shape.label }}
+          </button>
+        </div>
       </div>
-    </div>
 
-    <div class="divider"></div>
+      <div class="divider"></div>
 
-    <!-- 图标 -->
-    <div class="toolbar-section">
-      <div class="section-title">图标</div>
-      <div class="icon-grid">
-        <button
-          v-for="icon in iconOptions"
-          :key="icon"
-          class="icon-btn"
-          :class="{ active: localNode.icon === icon }"
-          @click="selectIcon(icon)"
-        >
-          {{ icon }}
-        </button>
+      <!-- 图标 -->
+      <div class="toolbar-section">
+        <div class="section-title">图标</div>
+        <div class="icon-grid">
+          <button v-for="icon in iconOptions" :key="icon" class="icon-btn" :class="{ active: localNode.icon === icon }"
+            @click="selectIcon(icon)">
+            {{ icon }}
+          </button>
+        </div>
       </div>
-    </div>
 
-    <div class="divider"></div>
+      <div class="divider"></div>
 
-    <!-- 连线样式 -->
-    <div class="toolbar-section">
-      <div class="section-title">连线样式</div>
-      <div class="edge-grid">
-        <button
-          v-for="style in edgeStyleOptions"
-          :key="style.value"
-          class="edge-btn"
-          :class="{ active: localNode.edgeStyle === style.value }"
-          @click="selectEdgeStyle(style.value)"
-        >
-          {{ style.label }}
-        </button>
+      <!-- 连线样式 -->
+      <div class="toolbar-section">
+        <div class="section-title">连线样式</div>
+        <div class="edge-grid">
+          <button v-for="style in edgeStyleOptions" :key="style.value" class="edge-btn"
+            :class="{ active: localNode.edgeStyle === style.value }" @click="selectEdgeStyle(style.value)">
+            {{ style.label }}
+          </button>
+        </div>
       </div>
-    </div>
     </div><!-- /.style-panel -->
   </div>
 </template>
@@ -306,6 +244,8 @@ function selectEdgeStyle(style: EdgeStyle) {
   width: 260px;
   max-height: calc(100vh - 100px);
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   background: var(--app-card-bg, #fff);
   border-radius: 12px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
@@ -535,17 +475,26 @@ function selectEdgeStyle(style: EdgeStyle) {
     left: 0;
     right: 0;
     width: 100%;
-    max-height: 60vh;
-    border-radius: 12px 12px 0 0;
-    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.12);
-    padding: 12px 12px calc(12px + env(safe-area-inset-bottom, 0px));
+    max-height: 70vh;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.16);
+    padding: 12px 14px calc(14px + env(safe-area-inset-bottom, 0px));
+    z-index: 1000;
   }
 
   .actions {
-    justify-content: center;
+    justify-content: flex-start;
     flex-wrap: nowrap;
     overflow-x: auto;
+    overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-x;
     padding-bottom: 4px;
 
     .tool-btn {
@@ -556,6 +505,13 @@ function selectEdgeStyle(style: EdgeStyle) {
   }
 
   /* 移动端折叠样式面板 */
+  .style-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+  }
+
   .style-panel.mobile-collapsed {
     display: none;
   }

@@ -47,8 +47,31 @@ if (Drag && (Drag as any).prototype) {
 if (TouchEvent && (TouchEvent as any).prototype) {
   const proto = (TouchEvent as any).prototype
 
-  // 单指移动时调用 preventDefault，防止浏览器手势拦截/触发 touchcancel
+  // 单指移动时判断是否落在工具栏或输入控件内，如果在内部则允许原生滚动，不拦截；在画布上才 preventDefault
+  proto.onTouchstart = function (this: any, e: globalThis.TouchEvent) {
+    const target = e.target as HTMLElement | null
+    if (target && target.closest('.node-toolbar, .n-modal, .n-drawer, .search-bar, .editor-header, input, textarea, button, select')) {
+      // 允许工具栏和输入控件原生滚动与交互，不转化为画布 mousedown
+      this.touchesNum = 0
+      this.singleTouchstartEvent = null
+      return
+    }
+    this.touchesNum = e.touches.length
+    this.touchStartScaleView = null
+    if (this.touchesNum === 1) {
+      const touch = e.touches[0]
+      this.singleTouchstartEvent = touch
+      this.dispatchMouseEvent('mousedown', touch.target, touch)
+    }
+  }
+
+  // 单指移动时：如果触摸目标在工具栏/弹窗内，不阻止默认滚动；否则调用 preventDefault 驱动画布拖动
   proto.onTouchmove = function (this: any, e: globalThis.TouchEvent) {
+    const target = e.target as HTMLElement | null
+    if (target && target.closest('.node-toolbar, .n-modal, .n-drawer, .search-bar, .editor-header, input, textarea, button, select')) {
+      return
+    }
+
     const len = e.touches.length
     if (len === 1) {
       const touch = e.touches[0]
