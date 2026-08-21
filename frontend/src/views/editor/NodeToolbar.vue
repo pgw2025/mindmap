@@ -15,6 +15,7 @@ const emit = defineEmits<{
   (e: 'paste'): void
   (e: 'open-note'): void
   (e: 'create-line'): void
+  (e: 'add-generalization'): void
 }>()
 
 const localNode = ref<Partial<NodeDto>>({})
@@ -155,6 +156,10 @@ function selectEdgeStyle(style: EdgeStyle) {
       <button class="tool-btn" @click="emit('create-line')" title="连接到其他节点">
         <span class="icon">🔗</span>
         <span class="label">连线</span>
+      </button>
+      <button class="tool-btn" @click="emit('add-generalization')" title="添加摘要">
+        <span class="icon">📌</span>
+        <span class="label">摘要</span>
       </button>
     </div>
 

@@ -570,6 +570,13 @@ function createAssociativeLine() {
   ;(inst.associativeLine as any).createLineFromActiveNode()
 }
 
+/** 给当前选中节点添加摘要：调用核心库 ADD_GENERALIZATION 命令，会自动进入摘要文字编辑状态 */
+function addGeneralization() {
+  const inst = mindMapInstance
+  if (!inst) return
+  inst.execCommand('ADD_GENERALIZATION')
+}
+
 /** 备注面板内容变化：写入 simple-mind-map 节点 data.note，触发 data_change_detail 增量同步到后端 */
 function handleNoteChange(note: string) {
   if (!mindMapInstance || !selectedNodeId.value) return
@@ -1136,7 +1143,8 @@ watch(() => route.params.id, () => {
       <!-- 浮动工具栏（挂载在画布主容器内，随主容器定位） -->
       <NodeToolbar v-if="showToolbar && selectedNodeId" :node="nodesStore.findNode(selectedNodeId)"
         @add-child="handleAddChild" @add-sibling="handleAddSibling" @delete="handleDelete" @update="handleUpdateStyle"
-        @copy="handleCopy" @paste="handlePaste" @open-note="openNotePanel" @create-line="createAssociativeLine" />
+        @copy="handleCopy" @paste="handlePaste" @open-note="openNotePanel" @create-line="createAssociativeLine"
+        @add-generalization="addGeneralization" />
     </main>
 
     <!-- 版本历史抽屉（含新建版本弹窗） -->

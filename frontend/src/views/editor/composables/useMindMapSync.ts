@@ -273,6 +273,10 @@ export function useMindMapSync(opts: {
           if (extra.associativeLineStyle && typeof extra.associativeLineStyle === 'object') {
             data.associativeLineStyle = extra.associativeLineStyle
           }
+          // 摘要数据（单节点摘要，数组结构）
+          if (Array.isArray(extra.generalization) && extra.generalization.length > 0) {
+            data.generalization = extra.generalization
+          }
         } catch {
           // extraData 不是合法 JSON，忽略
         }
@@ -502,24 +506,25 @@ export function useMindMapSync(opts: {
       scheduleNoteUpdate(backendId, newNote)
     }
 
-    // ---------- 2.6 关联线数据变化（associativeLine* 系列字段，debounced） ----------
-    // 这些字段由 AssociativeLine 插件通过 SET_NODE_DATA 写入，触发 data_change_detail。
-    // 比较序列化后的 JSON 即可判断是否变化，变化时打包所有 associativeLine* 字段同步到 extraData。
-    const assocFields = ['associativeLineTargets', 'associativeLinePoint',
-      'associativeLineTargetControlOffsets', 'associativeLineText', 'associativeLineStyle'] as const
-    let assocChanged = false
-    for (const f of assocFields) {
+    // ---------- 2.6 关联线 + 摘要数据变化（associativeLine* / generalization，debounced） ----------
+    // 这些字段由 AssociativeLine 插件 / 核心库通过 SET_NODE_DATA 写入，触发 data_change_detail。
+    // 比较序列化后的 JSON 即可判断是否变化，变化时打包所有 extraData 相关字段同步到后端。
+    const extraFields = ['associativeLineTargets', 'associativeLinePoint',
+      'associativeLineTargetControlOffsets', 'associativeLineText', 'associativeLineStyle',
+      'generalization'] as const
+    let extraChanged = false
+    for (const f of extraFields) {
       const oldVal = JSON.stringify((oldData.data as any)[f] ?? null)
       const newVal = JSON.stringify((data.data as any)[f] ?? null)
       if (oldVal !== newVal) {
-        assocChanged = true
+        extraChanged = true
         break
       }
     }
-    if (assocChanged) {
-      // 收集当前节点所有 associativeLine* 字段，打包成 JSON 同步
+    if (extraChanged) {
+      // 收集当前节点所有 extraData 相关字段，打包成 JSON 同步
       const extraObj: Record<string, unknown> = {}
-      for (const f of assocFields) {
+      for (const f of extraFields) {
         const v = (data.data as any)[f]
         if (v !== undefined && v !== null) {
           extraObj[f] = v
