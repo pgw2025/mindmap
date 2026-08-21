@@ -18,6 +18,7 @@ const emit = defineEmits<{
   (e: 'open-note'): void
   (e: 'create-line'): void
   (e: 'add-generalization'): void
+  (e: 'add-outer-frame'): void
 }>()
 
 const localNode = ref<Partial<NodeDto>>({})
@@ -166,6 +167,11 @@ function selectEdgeStyle(style: EdgeStyle) {
         :title="isMultiSelect ? '为选中的多个节点添加区间摘要' : '添加摘要'">
         <span class="icon">📌</span>
         <span class="label">{{ isMultiSelect ? '多节点摘要' : '摘要' }}</span>
+      </button>
+      <button class="tool-btn" :class="{ 'multi-select': isMultiSelect }" @click="emit('add-outer-frame')"
+        :title="isMultiSelect ? '为选中的多个节点添加外框' : '添加外框'">
+        <span class="icon">🔲</span>
+        <span class="label">{{ isMultiSelect ? '多节点外框' : '外框' }}</span>
       </button>
     </div>
 

@@ -38,6 +38,11 @@ declare module 'simple-mind-map/src/plugins/AssociativeLine.js' {
   export default AssociativeLine
 }
 
+declare module 'simple-mind-map/src/plugins/OuterFrame.js' {
+  const OuterFrame: { instanceName: string; prototype: any }
+  export default OuterFrame
+}
+
 declare module 'simple-mind-map' {
   export default class MindMap {
     static readonly TREE: string

@@ -11,6 +11,7 @@ import Drag from 'simple-mind-map/src/plugins/Drag.js'
 import Select from 'simple-mind-map/src/plugins/Select.js'
 import TouchEvent from 'simple-mind-map/src/plugins/TouchEvent.js'
 import AssociativeLine from 'simple-mind-map/src/plugins/AssociativeLine.js'
+import OuterFrame from 'simple-mind-map/src/plugins/OuterFrame.js'
 
 // 1. 增强 Drag 插件：修复松手后画布漂移 bug，并在松手时即时同步执行重叠检测，防止 300ms 节流导致落位判定失效
 if (Drag && (Drag as any).prototype) {
@@ -210,6 +211,7 @@ MindMap.usePlugin(Drag)
 MindMap.usePlugin(Select)
 MindMap.usePlugin(TouchEvent)
 MindMap.usePlugin(AssociativeLine)
+MindMap.usePlugin(OuterFrame)
 
 import type { NodeDto, NodeCreatePayload, NodeUpdatePayload } from '@/api/nodes'
 import type { MindMapDetail } from '@/api/mindmaps'
@@ -224,6 +226,7 @@ import ShareDrawer from './components/ShareDrawer.vue'
 import VersionDrawer from './components/VersionDrawer.vue'
 import NodeContentModal from './components/NodeContentModal.vue'
 import NotePanel from './components/NotePanel.vue'
+import OuterFrameStylePanel from './components/OuterFrameStylePanel.vue'
 import { useMindMapSync } from './composables/useMindMapSync'
 import { THEMES, getThemeConfig, getThemeIdOrDefault, type MindMapThemeConfig } from '@/themes/presets'
 
@@ -299,6 +302,21 @@ const shareDrawerVisible = ref(false)
 const versionsDrawerVisible = ref(false)
 const contentModalVisible = ref(false)
 const notePanelVisible = ref(false)
+
+/** 外框样式面板状态：选中外框激活时显示，取消激活时隐藏 */
+const outerFramePanelVisible = ref(false)
+/** 当前激活外框的样式配置，传给 OuterFrameStylePanel */
+const outerFrameConfig = ref({
+  strokeColor: '#0984e3',
+  strokeWidth: 2,
+  strokeDasharray: '5,5',
+  radius: 5,
+  fill: 'rgba(9,132,227,0.05)',
+  text: '',
+  textFontSize: 14,
+  textColor: '#333',
+  textBgColor: 'rgba(9,132,227,0.05)'
+})
 
 /** 当前选中节点（供 NodeContentModal 使用） */
 const selectedNodeForContent = computed<NodeDto | null>(() => {
@@ -425,6 +443,41 @@ function initMindMap() {
       selectedNodeId.value = null
       showToolbar.value = false
     }
+  })
+
+  // 监听外框激活：从 activeOuterFrame 读取当前样式填充到面板
+  mindMapInstance.on('outer_frame_active', (...args: unknown[]) => {
+    const active = args[0] as { el?: { cacheStyle?: any }, node?: any, range?: [number, number] } | undefined
+    const inst = mindMapInstance
+    if (active && inst?.outerFrame) {
+      // 从激活外框关联的第一个节点读取 outerFrame 数据
+      const of = (inst.outerFrame as any)
+      const styleConfig = of.getStyle ? of.getStyle(active.node) : {}
+      // 合并默认值和实际样式
+      const nodeData = active.node?.nodeData?.data?.outerFrame || {}
+      outerFrameConfig.value = {
+        strokeColor: nodeData.strokeColor ?? styleConfig.strokeColor ?? '#0984e3',
+        strokeWidth: nodeData.strokeWidth ?? styleConfig.strokeWidth ?? 2,
+        strokeDasharray: nodeData.strokeDasharray ?? styleConfig.strokeDasharray ?? '5,5',
+        radius: nodeData.radius ?? styleConfig.radius ?? 5,
+        fill: nodeData.fill ?? styleConfig.fill ?? 'rgba(9,132,227,0.05)',
+        text: nodeData.text ?? '',
+        textFontSize: nodeData.textFontSize ?? styleConfig.textFontSize ?? 14,
+        textColor: nodeData.textColor ?? styleConfig.textColor ?? '#333',
+        textBgColor: nodeData.textBgColor ?? styleConfig.textBgColor ?? 'rgba(9,132,227,0.05)'
+      }
+      outerFramePanelVisible.value = true
+    }
+  })
+
+  // 监听外框取消激活：隐藏样式面板
+  mindMapInstance.on('outer_frame_deactivate', () => {
+    outerFramePanelVisible.value = false
+  })
+
+  // 监听外框删除：隐藏样式面板
+  mindMapInstance.on('outer_frame_delete', () => {
+    outerFramePanelVisible.value = false
   })
 
   // —— 增量同步事件绑定：替代旧的 data_change → syncToBackend 整树 diff 方案
@@ -579,6 +632,29 @@ function addGeneralization() {
   const inst = mindMapInstance
   if (!inst) return
   inst.execCommand('ADD_GENERALIZATION')
+}
+
+/** 给当前选中节点添加外框：调用 OuterFrame 插件 addOuterFrame，使用默认样式 */
+function addOuterFrame() {
+  const inst = mindMapInstance
+  if (!inst || !inst.outerFrame) return
+  ;(inst.outerFrame as any).addOuterFrame()
+}
+
+/** 外框样式面板更新回调：调用 updateActiveOuterFrame 写入配置到节点 data */
+function updateOuterFrameStyle(payload: Partial<typeof outerFrameConfig.value>) {
+  const inst = mindMapInstance
+  if (!inst || !inst.outerFrame) return
+  Object.assign(outerFrameConfig.value, payload)
+  ;(inst.outerFrame as any).updateActiveOuterFrame(payload)
+}
+
+/** 删除当前激活的外框 */
+function removeOuterFrame() {
+  const inst = mindMapInstance
+  if (!inst || !inst.outerFrame) return
+  ;(inst.outerFrame as any).removeActiveOuterFrame()
+  outerFramePanelVisible.value = false
 }
 
 /** 备注面板内容变化：写入 simple-mind-map 节点 data.note，触发 data_change_detail 增量同步到后端 */
@@ -1149,7 +1225,11 @@ watch(() => route.params.id, () => {
         :active-node-count="activeNodeCount"
         @add-child="handleAddChild" @add-sibling="handleAddSibling" @delete="handleDelete" @update="handleUpdateStyle"
         @copy="handleCopy" @paste="handlePaste" @open-note="openNotePanel" @create-line="createAssociativeLine"
-        @add-generalization="addGeneralization" />
+        @add-generalization="addGeneralization" @add-outer-frame="addOuterFrame" />
+
+      <!-- 外框样式面板：选中外框激活时显示 -->
+      <OuterFrameStylePanel :visible="outerFramePanelVisible" :config="outerFrameConfig"
+        @update="updateOuterFrameStyle" @remove="removeOuterFrame" @close="outerFramePanelVisible = false" />
     </main>
 
     <!-- 版本历史抽屉（含新建版本弹窗） -->

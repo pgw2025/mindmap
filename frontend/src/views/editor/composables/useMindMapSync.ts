@@ -277,6 +277,10 @@ export function useMindMapSync(opts: {
           if (Array.isArray(extra.generalization) && extra.generalization.length > 0) {
             data.generalization = extra.generalization
           }
+          // 外框数据（对象，包含 groupId/radius/strokeWidth/strokeColor/strokeDasharray/fill/text 等）
+          if (extra.outerFrame && typeof extra.outerFrame === 'object') {
+            data.outerFrame = extra.outerFrame
+          }
         } catch {
           // extraData 不是合法 JSON，忽略
         }
@@ -511,7 +515,7 @@ export function useMindMapSync(opts: {
     // 比较序列化后的 JSON 即可判断是否变化，变化时打包所有 extraData 相关字段同步到后端。
     const extraFields = ['associativeLineTargets', 'associativeLinePoint',
       'associativeLineTargetControlOffsets', 'associativeLineText', 'associativeLineStyle',
-      'generalization'] as const
+      'generalization', 'outerFrame'] as const
     let extraChanged = false
     for (const f of extraFields) {
       const oldVal = JSON.stringify((oldData.data as any)[f] ?? null)
