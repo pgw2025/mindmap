@@ -103,16 +103,18 @@ function confirmDelete(row: adminApi.AdminMindMapListItem): void {
   mapDeleteModalVisible.value = true
 }
 
-async function submitMapDelete(): Promise<void> {
-  if (!mapDeleteTarget.value) return
+async function submitMapDelete(): Promise<boolean> {
+  if (!mapDeleteTarget.value) return true
   mapDeleteSubmitting.value = true
   try {
     await adminApi.deleteAdminMindMap(mapDeleteTarget.value.id)
     message.success('导图已删除')
     mapDeleteModalVisible.value = false
     await load()
+    return true
   } catch (e) {
     message.error((e as Error).message)
+    return false
   } finally {
     mapDeleteSubmitting.value = false
   }
@@ -291,20 +293,26 @@ onMounted(load)
     <!-- 删除导图确认弹窗 -->
     <NModal
       v-model:show="mapDeleteModalVisible"
-      preset="dialog"
-      type="warning"
+      preset="card"
       title="删除导图"
-      positive-text="确认删除"
-      negative-text="取消"
-      :positive-button-props="{ type: 'error', loading: mapDeleteSubmitting }"
-      display-directive="if"
       style="max-width: 460px"
-      @positive-click="submitMapDelete"
+      :bordered="false"
+      size="medium"
     >
-      <p style="margin:0">
+      <p style="margin: 0; color: #334155; line-height: 1.6;">
         确认删除导图「<b>{{ mapDeleteTarget?.title }}</b>」？
         该操作将级联删除其所有节点、版本、分享与举报记录，且不可恢复。
       </p>
+      <template #footer>
+        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+          <NButton size="small" @click="mapDeleteModalVisible = false">
+            取消
+          </NButton>
+          <NButton type="error" size="small" :loading="mapDeleteSubmitting" @click="submitMapDelete">
+            确认删除
+          </NButton>
+        </div>
+      </template>
     </NModal>
   </div>
 </template>

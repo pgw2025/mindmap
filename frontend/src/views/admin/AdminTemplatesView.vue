@@ -420,15 +420,17 @@ function confirmDelete(row: AdminTemplateListItem): void {
   deleteModalVisible.value = true
 }
 
-async function submitDelete(): Promise<void> {
-  if (!deleteTarget.value) return
+async function submitDelete(): Promise<boolean> {
+  if (!deleteTarget.value) return true
   deleteSubmitting.value = true
   try {
     await store.remove(deleteTarget.value.id)
     message.success('已删除')
     deleteModalVisible.value = false
+    return true
   } catch (e) {
     message.error((e as Error).message)
+    return false
   } finally {
     deleteSubmitting.value = false
   }
@@ -662,12 +664,27 @@ onBeforeUnmount(() => {
     </NModal>
 
     <!-- 删除确认 -->
-    <NModal v-model:show="deleteModalVisible" preset="dialog" type="warning" title="删除模板" positive-text="确认删除"
-      negative-text="取消" :positive-button-props="{ type: 'error', loading: deleteSubmitting }"
-      display-directive="if" style="max-width: 460px" @positive-click="submitDelete">
-      <p style="margin:0">
+    <NModal
+      v-model:show="deleteModalVisible"
+      preset="card"
+      title="删除模板"
+      style="max-width: 460px"
+      :bordered="false"
+      size="medium"
+    >
+      <p style="margin: 0; color: #334155; line-height: 1.6;">
         确认删除模板「<b>{{ deleteTarget?.name }}</b>」？已使用该模板的导图不受影响，但用户将不再能选择此模板。
       </p>
+      <template #footer>
+        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+          <NButton size="small" @click="deleteModalVisible = false">
+            取消
+          </NButton>
+          <NButton type="error" size="small" :loading="deleteSubmitting" @click="submitDelete">
+            确认删除
+          </NButton>
+        </div>
+      </template>
     </NModal>
   </div>
 </template>

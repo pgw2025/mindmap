@@ -452,8 +452,8 @@ async function handleDelete() {
   nodeDeleteConfirmVisible.value = true
 }
 
-async function submitNodeDelete(): Promise<void> {
-  if (!selectedNodeId.value) return
+async function submitNodeDelete(): Promise<boolean> {
+  if (!selectedNodeId.value) return true
   nodeDeleteSubmitting.value = true
   try {
     await nodesStore.remove(selectedNodeId.value)
@@ -462,8 +462,10 @@ async function submitNodeDelete(): Promise<void> {
     reloadMindMap()
     message.success('已删除')
     nodeDeleteConfirmVisible.value = false
+    return true
   } catch (e) {
     message.error((e as Error).message)
+    return false
   } finally {
     nodeDeleteSubmitting.value = false
   }
@@ -762,6 +764,7 @@ async function handleDescriptionBlur() {
 
 function handleRootDeleteTipClose() {
   rootDeleteTipVisible.value = false
+  return true
 }
 
 /** 分享设为公开后同步父组件状态 */
@@ -989,16 +992,48 @@ watch(() => route.params.id, () => {
     <NodeContentModal v-model:show="contentModalVisible" :node="selectedNodeForContent" @save="handleContentSave" />
 
     <!-- 根节点不能删除提示 -->
-    <NModal v-model:show="rootDeleteTipVisible" preset="dialog" type="warning" title="无法删除" positive-text="我知道了"
-      display-directive="if" style="max-width: 420px" @positive-click="handleRootDeleteTipClose">
-      根节点不能删除。你可以清空内容但不能删除中心主题。
+    <NModal
+      v-model:show="rootDeleteTipVisible"
+      preset="card"
+      title="无法删除"
+      style="max-width: 420px"
+      :bordered="false"
+      size="medium"
+    >
+      <div style="font-size: 14px; color: #475569; line-height: 1.6;">
+        根节点不能删除。你可以清空内容但不能删除中心主题。
+      </div>
+      <template #footer>
+        <div style="display: flex; justify-content: flex-end;">
+          <NButton type="primary" size="small" @click="handleRootDeleteTipClose">
+            我知道了
+          </NButton>
+        </div>
+      </template>
     </NModal>
 
     <!-- 删除节点确认 -->
-    <NModal v-model:show="nodeDeleteConfirmVisible" preset="dialog" type="warning" title="确认删除" positive-text="删除"
-      negative-text="取消" :positive-button-props="{ type: 'error', loading: nodeDeleteSubmitting }"
-      display-directive="if" style="max-width: 420px" @positive-click="submitNodeDelete">
-      删除「{{ nodeDeleteTargetTitle }}」及其所有子节点？
+    <NModal
+      v-model:show="nodeDeleteConfirmVisible"
+      preset="card"
+      title="确认删除"
+      style="max-width: 420px"
+      :bordered="false"
+      size="medium"
+    >
+      <div style="font-size: 14px; color: #334155; line-height: 1.6;">
+        删除「<b>{{ nodeDeleteTargetTitle }}</b>」及其所有子节点？
+      </div>
+      <template #footer>
+        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+          <NButton size="small" @click="nodeDeleteConfirmVisible = false">
+            取消
+          </NButton>
+          <NButton type="error" size="small" :loading="nodeDeleteSubmitting" @click="submitNodeDelete">
+            删除
+          </NButton>
+        </div>
+      </template>
     </NModal>
   </div>
 </template>

@@ -93,16 +93,18 @@ function confirmDelete(row: adminApi.AdminUserListItem): void {
   userDeleteModalVisible.value = true
 }
 
-async function submitUserDelete(): Promise<void> {
-  if (!userDeleteTarget.value) return
+async function submitUserDelete(): Promise<boolean> {
+  if (!userDeleteTarget.value) return true
   userDeleteSubmitting.value = true
   try {
     await adminApi.deleteAdminUser(userDeleteTarget.value.id)
     message.success('用户已删除')
     userDeleteModalVisible.value = false
     await load()
+    return true
   } catch (e) {
     message.error((e as Error).message)
+    return false
   } finally {
     userDeleteSubmitting.value = false
   }
@@ -264,20 +266,26 @@ onMounted(load)
     <!-- 删除用户确认弹窗 -->
     <NModal
       v-model:show="userDeleteModalVisible"
-      preset="dialog"
-      type="warning"
+      preset="card"
       title="删除用户"
-      positive-text="确认删除"
-      negative-text="取消"
-      :positive-button-props="{ type: 'error', loading: userDeleteSubmitting }"
-      display-directive="if"
       style="max-width: 460px"
-      @positive-click="submitUserDelete"
+      :bordered="false"
+      size="medium"
     >
-      <p style="margin:0">
+      <p style="margin: 0; color: #334155; line-height: 1.6;">
         确认删除用户「<b>{{ userDeleteTarget?.username }}</b>」？
         该操作将级联删除其所有导图、节点、版本、分享与举报记录，且不可恢复。
       </p>
+      <template #footer>
+        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+          <NButton size="small" @click="userDeleteModalVisible = false">
+            取消
+          </NButton>
+          <NButton type="error" size="small" :loading="userDeleteSubmitting" @click="submitUserDelete">
+            确认删除
+          </NButton>
+        </div>
+      </template>
     </NModal>
   </div>
 </template>

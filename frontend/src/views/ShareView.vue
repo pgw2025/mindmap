@@ -283,16 +283,25 @@ onMounted(() => {
     <!-- 登录提示弹窗 -->
     <NModal
       v-model:show="loginPromptVisible"
-      preset="dialog"
-      type="warning"
+      preset="card"
       title="请先登录"
-      positive-text="去登录"
-      negative-text="取消"
-      display-directive="if"
       style="max-width: 420px"
-      @positive-click="goLogin"
+      :bordered="false"
+      size="medium"
     >
-      需要登录才能另存为副本到你的账户。
+      <div style="font-size: 14px; color: #334155; line-height: 1.6;">
+        需要登录才能另存为副本到你的账户。
+      </div>
+      <template #footer>
+        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+          <NButton size="small" @click="loginPromptVisible = false">
+            取消
+          </NButton>
+          <NButton type="primary" size="small" @click="goLogin">
+            去登录
+          </NButton>
+        </div>
+      </template>
     </NModal>
   </div>
 </template>

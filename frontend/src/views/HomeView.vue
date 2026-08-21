@@ -310,15 +310,17 @@ function onRemove(id: string, title: string) {
   removeModalVisible.value = true
 }
 
-async function submitRemove(): Promise<void> {
-  if (!removeTargetId.value) return
+async function submitRemove(): Promise<boolean> {
+  if (!removeTargetId.value) return true
   removeSubmitting.value = true
   try {
     await mapsStore.remove(removeTargetId.value)
     message.success('已删除')
     removeModalVisible.value = false
+    return true
   } catch (e) {
     message.error((e as Error).message)
+    return false
   } finally {
     removeSubmitting.value = false
   }
@@ -951,17 +953,25 @@ onMounted(async () => {
     <!-- 删除导图确认弹窗 -->
     <NModal
       v-model:show="removeModalVisible"
-      preset="dialog"
-      type="warning"
+      preset="card"
       title="确认删除"
-      positive-text="删除"
-      negative-text="取消"
-      :positive-button-props="{ type: 'error', loading: removeSubmitting }"
-      display-directive="if"
       style="max-width: 420px"
-      @positive-click="submitRemove"
+      :bordered="false"
+      size="medium"
     >
-      删除「{{ removeTargetTitle }}」？该操作不可恢复。
+      <div style="font-size: 14px; color: #334155; line-height: 1.6;">
+        删除「<b>{{ removeTargetTitle }}</b>」？该操作不可恢复。
+      </div>
+      <template #footer>
+        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+          <NButton size="small" @click="removeModalVisible = false">
+            取消
+          </NButton>
+          <NButton type="error" size="small" :loading="removeSubmitting" @click="submitRemove">
+            删除
+          </NButton>
+        </div>
+      </template>
     </NModal>
     </div>
   </div>
