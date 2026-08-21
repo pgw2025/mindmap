@@ -253,6 +253,8 @@ let mindMapInstance: MindMap | null = null
 
 // 选中的节点样式
 const selectedNodeId = ref<string | null>(null)
+/** 当前激活（选中）的节点数量，多选时 >1，用于切换「摘要」按钮为「多节点摘要」 */
+const activeNodeCount = ref(0)
 const showToolbar = ref(false)
 
 // 移动端顶部标题/描述/导航栏沉浸折叠状态（Zen 模式，默认开启沉浸式）
@@ -411,8 +413,10 @@ function initMindMap() {
   // 监听选中节点：node_active 回调参数为 (node, activeNodeList)
   mindMapInstance.on('node_active', (...args: unknown[]) => {
     const activeNodeList = args[1] as Array<{ nodeData?: { id?: string } }> | undefined
-    if (activeNodeList && activeNodeList.length > 0) {
-      const id = activeNodeList[0]?.nodeData?.id
+    const count = activeNodeList?.length ?? 0
+    activeNodeCount.value = count
+    if (count > 0) {
+      const id = activeNodeList![0]?.nodeData?.id
       if (id) {
         selectedNodeId.value = id
         showToolbar.value = true
@@ -1142,6 +1146,7 @@ watch(() => route.params.id, () => {
 
       <!-- 浮动工具栏（挂载在画布主容器内，随主容器定位） -->
       <NodeToolbar v-if="showToolbar && selectedNodeId" :node="nodesStore.findNode(selectedNodeId)"
+        :active-node-count="activeNodeCount"
         @add-child="handleAddChild" @add-sibling="handleAddSibling" @delete="handleDelete" @update="handleUpdateStyle"
         @copy="handleCopy" @paste="handlePaste" @open-note="openNotePanel" @create-line="createAssociativeLine"
         @add-generalization="addGeneralization" />

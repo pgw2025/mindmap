@@ -4,6 +4,8 @@ import type { NodeDto, NodeUpdatePayload, NodeShape, EdgeStyle } from '@/api/nod
 
 const props = defineProps<{
   node: NodeDto | undefined
+  /** 当前选中节点数量，>1 表示多选状态 */
+  activeNodeCount?: number
 }>()
 
 const emit = defineEmits<{
@@ -36,6 +38,9 @@ watch(
 )
 
 const isRoot = computed(() => props.node?.parentId == null)
+
+/** 是否多选状态（用于切换「摘要」→「多节点摘要」） */
+const isMultiSelect = computed(() => (props.activeNodeCount ?? 1) > 1)
 
 /** 预设颜色 */
 const presetColors = [
@@ -157,9 +162,10 @@ function selectEdgeStyle(style: EdgeStyle) {
         <span class="icon">🔗</span>
         <span class="label">连线</span>
       </button>
-      <button class="tool-btn" @click="emit('add-generalization')" title="添加摘要">
+      <button class="tool-btn" :class="{ 'multi-select': isMultiSelect }" @click="emit('add-generalization')"
+        :title="isMultiSelect ? '为选中的多个节点添加区间摘要' : '添加摘要'">
         <span class="icon">📌</span>
-        <span class="label">摘要</span>
+        <span class="label">{{ isMultiSelect ? '多节点摘要' : '摘要' }}</span>
       </button>
     </div>
 
@@ -329,6 +335,12 @@ function selectEdgeStyle(style: EdgeStyle) {
     background: rgba(24, 160, 88, 0.1);
     border-color: var(--app-primary, #18a058);
     color: var(--app-primary, #18a058);
+  }
+
+  &.multi-select {
+    background: rgba(32, 128, 240, 0.12);
+    border-color: #2080f0;
+    color: #2080f0;
   }
 
   .icon {
