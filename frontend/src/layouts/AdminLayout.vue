@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NIcon, NLayout, NLayoutContent, NLayoutHeader, NLayoutSider, NDrawer, NDrawerContent, useMessage } from 'naive-ui'
+import { NButton, NIcon, NLayout, NLayoutContent, NLayoutHeader, NLayoutSider, NDrawer, NDrawerContent, NDivider, NTooltip, useMessage } from 'naive-ui'
 import {
   GridOutline,
   PeopleOutline,
@@ -11,7 +11,8 @@ import {
   ArrowBackOutline,
   MoonOutline,
   SunnyOutline,
-  LayersOutline
+  LayersOutline,
+  LogOutOutline
 } from '@vicons/ionicons5'
 import { useThemeStore } from '@/stores/theme'
 import { useAuthStore } from '@/stores/auth'
@@ -88,48 +89,60 @@ onMounted(async () => {
     <NLayoutHeader bordered class="app-header">
       <div class="left">
         <NButton text class="menu-btn" @click="toggleSider">
-          <template #icon><NIcon size="22"><MenuOutline /></NIcon></template>
+          <template #icon>
+            <NIcon size="22">
+              <MenuOutline />
+            </NIcon>
+          </template>
         </NButton>
         <span class="brand">管理后台</span>
       </div>
       <div class="right">
         <span class="username">{{ username }}</span>
-        <NButton text @click="backToHome">
-          <template #icon><NIcon size="20"><ArrowBackOutline /></NIcon></template>
-          返回前台
-        </NButton>
-        <NButton text @click="logout">退出</NButton>
-        <NButton text @click="themeStore.toggle">
+        <NButton quaternary size="small" @click="backToHome">
           <template #icon>
-            <NIcon size="20">
-              <MoonOutline v-if="!themeStore.isDark" />
-              <SunnyOutline v-else />
+            <NIcon size="18">
+              <ArrowBackOutline />
             </NIcon>
           </template>
+          返回前台
+        </NButton>
+        <NDivider vertical class="header-divider" />
+        <NTooltip trigger="hover">
+          <template #trigger>
+            <NButton quaternary circle size="small" class="action-icon-btn" @click="themeStore.toggle">
+              <template #icon>
+                <NIcon size="18">
+                  <MoonOutline v-if="!themeStore.isDark" />
+                  <SunnyOutline v-else />
+                </NIcon>
+              </template>
+            </NButton>
+          </template>
+          {{ themeStore.isDark ? '切换为明亮模式' : '切换为暗黑模式' }}
+        </NTooltip>
+        <NButton quaternary size="small" class="logout-btn" @click="logout">
+          <template #icon>
+            <NIcon size="16">
+              <LogOutOutline />
+            </NIcon>
+          </template>
+          退出
         </NButton>
       </div>
     </NLayoutHeader>
 
     <NLayout has-sider position="absolute" class="app-body">
-      <NLayoutSider
-        bordered
-        :collapsed="collapsed"
-        :collapsed-width="0"
-        :width="220"
-        collapse-mode="width"
-        :native-scrollbar="true"
-        class="app-sider-desktop"
-      >
+      <NLayoutSider bordered :collapsed="collapsed" :collapsed-width="0" :width="220" collapse-mode="width"
+        :native-scrollbar="true" class="app-sider-desktop">
         <div class="sider-inner">
-          <NButton
-            v-for="item in navItems"
-            :key="item.name"
-            quaternary
-            block
-            :type="activeKey === item.name ? 'primary' : 'default'"
-            @click="go(item.name)"
-          >
-            <template #icon><NIcon><component :is="item.icon" /></NIcon></template>
+          <NButton v-for="item in navItems" :key="item.name" quaternary block
+            :type="activeKey === item.name ? 'primary' : 'default'" @click="go(item.name)">
+            <template #icon>
+              <NIcon>
+                <component :is="item.icon" />
+              </NIcon>
+            </template>
             {{ item.label }}
           </NButton>
         </div>
@@ -138,15 +151,13 @@ onMounted(async () => {
       <NDrawer v-if="drawerVisible" v-model:show="drawerVisible" :width="240" placement="left">
         <NDrawerContent title="管理后台">
           <div class="sider-inner">
-            <NButton
-              v-for="item in navItems"
-              :key="item.name"
-              quaternary
-              block
-              :type="activeKey === item.name ? 'primary' : 'default'"
-              @click="go(item.name)"
-            >
-              <template #icon><NIcon><component :is="item.icon" /></NIcon></template>
+            <NButton v-for="item in navItems" :key="item.name" quaternary block
+              :type="activeKey === item.name ? 'primary' : 'default'" @click="go(item.name)">
+              <template #icon>
+                <NIcon>
+                  <component :is="item.icon" />
+                </NIcon>
+              </template>
               {{ item.label }}
             </NButton>
           </div>
@@ -175,7 +186,31 @@ onMounted(async () => {
 .right {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+}
+
+.header-divider {
+  height: 16px;
+  margin: 0 2px;
+  background-color: var(--app-border, rgba(0, 0, 0, 0.08));
+}
+
+.action-icon-btn {
+  color: var(--app-text-secondary);
+  transition: all 0.2s ease;
+
+  &:hover {
+    color: var(--app-text);
+  }
+}
+
+.logout-btn {
+  color: var(--app-text-secondary);
+  transition: all 0.2s ease;
+
+  &:hover {
+    color: #e03131;
+  }
 }
 
 .brand {

@@ -496,9 +496,10 @@ function selectEdgeStyle(style: EdgeStyle) {
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
     touch-action: pan-y;
-    border-radius: 16px 16px 0 0;
-    box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.16);
-    padding: 12px 14px calc(14px + env(safe-area-inset-bottom, 0px));
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.12);
+    padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px));
+    gap: 6px;
     z-index: 1000;
   }
 
@@ -510,12 +511,25 @@ function selectEdgeStyle(style: EdgeStyle) {
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
     touch-action: pan-x;
-    padding-bottom: 4px;
+    gap: 5px;
+    padding-bottom: 2px;
 
     .tool-btn {
       flex: 0 0 auto;
-      min-width: 56px;
-      padding: 6px 8px;
+      min-width: 46px;
+      padding: 4px 6px;
+      border-radius: 6px;
+      gap: 1px;
+
+      .icon {
+        font-size: 13px;
+        line-height: 1.2;
+      }
+
+      .label {
+        font-size: 9.5px;
+        line-height: 1.1;
+      }
     }
   }
 
@@ -534,14 +548,14 @@ function selectEdgeStyle(style: EdgeStyle) {
   .mobile-toggle {
     width: 100%;
     text-align: center;
-    padding: 8px;
+    padding: 5px 8px;
     background: var(--app-bg, #f5f7fa);
     border: 1px solid var(--app-border, #e0e0e6);
-    border-radius: 8px;
-    font-size: 12px;
+    border-radius: 6px;
+    font-size: 11px;
     color: var(--app-text-secondary, #666);
     cursor: pointer;
-    margin-bottom: 4px;
+    margin-bottom: 2px;
   }
 
   /* 桌面端隐藏移动端专用元素 */

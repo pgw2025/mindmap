@@ -15,6 +15,8 @@ import {
   NModal,
   NSpin,
   NTree,
+  NDivider,
+  NTooltip,
   useMessage,
   type TreeOption
 } from 'naive-ui'
@@ -25,7 +27,8 @@ import {
   MoonOutline,
   SunnyOutline,
   CloudOutline,
-  ShieldCheckmarkOutline
+  ShieldCheckmarkOutline,
+  LogOutOutline
 } from '@vicons/ionicons5'
 import { useThemeStore } from '@/stores/theme'
 import { useAuthStore } from '@/stores/auth'
@@ -126,67 +129,73 @@ onMounted(async () => {
       <div class="left">
         <NButton text class="menu-btn" @click="toggleSider">
           <template #icon>
-            <NIcon size="22"><MenuOutline /></NIcon>
+            <NIcon size="22">
+              <MenuOutline />
+            </NIcon>
           </template>
         </NButton>
         <span class="brand">思维导图</span>
       </div>
       <div class="right">
         <span class="username">{{ username }}</span>
-        <NButton text @click="logout">退出</NButton>
-        <NButton text @click="themeStore.toggle">
+        <NDivider vertical class="header-divider" />
+        <NTooltip trigger="hover">
+          <template #trigger>
+            <NButton quaternary circle size="small" class="action-icon-btn" @click="themeStore.toggle">
+              <template #icon>
+                <NIcon size="18">
+                  <MoonOutline v-if="!themeStore.isDark" />
+                  <SunnyOutline v-else />
+                </NIcon>
+              </template>
+            </NButton>
+          </template>
+          {{ themeStore.isDark ? '切换为明亮模式' : '切换为暗黑模式' }}
+        </NTooltip>
+        <NButton quaternary size="small" class="logout-btn" @click="logout">
           <template #icon>
-            <NIcon size="20">
-              <MoonOutline v-if="!themeStore.isDark" />
-              <SunnyOutline v-else />
+            <NIcon size="16">
+              <LogOutOutline />
             </NIcon>
           </template>
+          退出
         </NButton>
       </div>
     </NLayoutHeader>
 
     <NLayout has-sider position="absolute" class="app-body">
       <!-- 桌面/平板侧边栏 -->
-      <NLayoutSider
-        bordered
-        :collapsed="collapsed"
-        :collapsed-width="0"
-        :width="240"
-        collapse-mode="width"
-        :native-scrollbar="true"
-        class="app-sider-desktop"
-      >
+      <NLayoutSider bordered :collapsed="collapsed" :collapsed-width="0" :width="240" collapse-mode="width"
+        :native-scrollbar="true" class="app-sider-desktop">
         <div class="sider-inner">
           <div class="sider-section">
             <div class="sider-title">
               <span>视图</span>
             </div>
-            <NButton
-              quaternary
-              block
-              :type="mapsStore.scope === 'mine' ? 'primary' : 'default'"
-              @click="mapsStore.setScope('mine')"
-            >
-              <template #icon><NIcon><FolderOpenOutline /></NIcon></template>
+            <NButton quaternary block :type="mapsStore.scope === 'mine' ? 'primary' : 'default'"
+              @click="mapsStore.setScope('mine')">
+              <template #icon>
+                <NIcon>
+                  <FolderOpenOutline />
+                </NIcon>
+              </template>
               我的导图
             </NButton>
-            <NButton
-              quaternary
-              block
-              :type="mapsStore.scope === 'public' ? 'primary' : 'default'"
-              @click="mapsStore.setScope('public')"
-            >
-              <template #icon><NIcon><CloudOutline /></NIcon></template>
+            <NButton quaternary block :type="mapsStore.scope === 'public' ? 'primary' : 'default'"
+              @click="mapsStore.setScope('public')">
+              <template #icon>
+                <NIcon>
+                  <CloudOutline />
+                </NIcon>
+              </template>
               公开广场
             </NButton>
-            <NButton
-              v-if="isAdmin"
-              quaternary
-              block
-              type="error"
-              @click="goAdmin"
-            >
-              <template #icon><NIcon><ShieldCheckmarkOutline /></NIcon></template>
+            <NButton v-if="isAdmin" quaternary block type="error" @click="goAdmin">
+              <template #icon>
+                <NIcon>
+                  <ShieldCheckmarkOutline />
+                </NIcon>
+              </template>
               管理后台
             </NButton>
           </div>
@@ -195,32 +204,20 @@ onMounted(async () => {
             <div class="sider-title">
               <span>文件夹</span>
               <NButton text size="tiny" @click="openCreateFolderModal">
-                <template #icon><NIcon><AddOutline /></NIcon></template>
+                <template #icon>
+                  <NIcon>
+                    <AddOutline />
+                  </NIcon>
+                </template>
               </NButton>
             </div>
             <NSpin :show="foldersStore.loading" size="small">
-              <NTree
-                v-if="folderTreeData.length > 0"
-                :data="folderTreeData"
-                block-line
-                expand-on-click
-                :selected-keys="mapsStore.folderId ? [mapsStore.folderId] : []"
-                @update:selected-keys="selectFolder"
-                class="folder-tree"
-              />
-              <NEmpty
-                v-else
-                description="暂无文件夹"
-                size="small"
-              />
+              <NTree v-if="folderTreeData.length > 0" :data="folderTreeData" block-line expand-on-click
+                :selected-keys="mapsStore.folderId ? [mapsStore.folderId] : []" @update:selected-keys="selectFolder"
+                class="folder-tree" />
+              <NEmpty v-else description="暂无文件夹" size="small" />
             </NSpin>
-            <NButton
-              v-if="mapsStore.folderId"
-              quaternary
-              block
-              size="small"
-              @click="mapsStore.setFolderFilter(null)"
-            >
+            <NButton v-if="mapsStore.folderId" quaternary block size="small" @click="mapsStore.setFolderFilter(null)">
               清除筛选
             </NButton>
           </div>
@@ -232,29 +229,15 @@ onMounted(async () => {
         <NDrawerContent :title="'侧边栏'" :native-scrollbar="true">
           <div class="sider-inner">
             <div class="sider-section">
-              <NButton
-                quaternary
-                block
-                :type="mapsStore.scope === 'mine' ? 'primary' : 'default'"
-                @click="mapsStore.setScope('mine'); drawerVisible = false"
-              >
+              <NButton quaternary block :type="mapsStore.scope === 'mine' ? 'primary' : 'default'"
+                @click="mapsStore.setScope('mine'); drawerVisible = false">
                 我的导图
               </NButton>
-              <NButton
-                quaternary
-                block
-                :type="mapsStore.scope === 'public' ? 'primary' : 'default'"
-                @click="mapsStore.setScope('public'); drawerVisible = false"
-              >
+              <NButton quaternary block :type="mapsStore.scope === 'public' ? 'primary' : 'default'"
+                @click="mapsStore.setScope('public'); drawerVisible = false">
                 公开广场
               </NButton>
-              <NButton
-                v-if="isAdmin"
-                quaternary
-                block
-                type="error"
-                @click="drawerVisible = false; goAdmin()"
-              >
+              <NButton v-if="isAdmin" quaternary block type="error" @click="drawerVisible = false; goAdmin()">
                 管理后台
               </NButton>
             </div>
@@ -262,19 +245,17 @@ onMounted(async () => {
               <div class="sider-title">
                 <span>文件夹</span>
                 <NButton text size="tiny" @click="openCreateFolderModal">
-                  <template #icon><NIcon><AddOutline /></NIcon></template>
+                  <template #icon>
+                    <NIcon>
+                      <AddOutline />
+                    </NIcon>
+                  </template>
                 </NButton>
               </div>
               <NSpin :show="foldersStore.loading" size="small">
-                <NTree
-                  v-if="folderTreeData.length > 0"
-                  :data="folderTreeData"
-                  block-line
-                  expand-on-click
-                  :selected-keys="mapsStore.folderId ? [mapsStore.folderId] : []"
-                  @update:selected-keys="selectFolder"
-                  class="folder-tree"
-                />
+                <NTree v-if="folderTreeData.length > 0" :data="folderTreeData" block-line expand-on-click
+                  :selected-keys="mapsStore.folderId ? [mapsStore.folderId] : []" @update:selected-keys="selectFolder"
+                  class="folder-tree" />
                 <NEmpty v-else description="暂无文件夹" size="small" />
               </NSpin>
             </div>
@@ -288,29 +269,15 @@ onMounted(async () => {
     </NLayout>
 
     <!-- 文件夹创建 Modal -->
-    <NModal
-      v-model:show="folderModalVisible"
-      preset="card"
-      title="新建文件夹"
-      display-directive="if"
-      style="max-width: 380px"
-    >
-      <NInput
-        v-model:value="folderNameInput"
-        placeholder="请输入文件夹名称"
-        maxlength="64"
-        :autofocus="true"
-        @keyup.enter="submitCreateFolder"
-      />
+    <NModal v-model:show="folderModalVisible" preset="card" title="新建文件夹" display-directive="if"
+      style="max-width: 380px">
+      <NInput v-model:value="folderNameInput" placeholder="请输入文件夹名称" maxlength="64" :autofocus="true"
+        @keyup.enter="submitCreateFolder" />
       <template #footer>
         <NSpace justify="end">
           <NButton @click="folderModalVisible = false">取消</NButton>
-          <NButton
-            type="primary"
-            :loading="folderCreating"
-            :disabled="!folderNameInput.trim()"
-            @click="submitCreateFolder"
-          >
+          <NButton type="primary" :loading="folderCreating" :disabled="!folderNameInput.trim()"
+            @click="submitCreateFolder">
             创建
           </NButton>
         </NSpace>
@@ -334,7 +301,31 @@ onMounted(async () => {
 .right {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
+}
+
+.header-divider {
+  height: 16px;
+  margin: 0 2px;
+  background-color: var(--app-border, rgba(0, 0, 0, 0.08));
+}
+
+.action-icon-btn {
+  color: var(--app-text-secondary);
+  transition: all 0.2s ease;
+
+  &:hover {
+    color: var(--app-text);
+  }
+}
+
+.logout-btn {
+  color: var(--app-text-secondary);
+  transition: all 0.2s ease;
+
+  &:hover {
+    color: #e03131;
+  }
 }
 
 .brand {
