@@ -83,6 +83,11 @@ export function useMindMapSync(opts: {
   function markSaved() {
     pendingCount.value = Math.max(0, pendingCount.value - 1)
     if (pendingCount.value === 0) {
+      // 存在历史失败时保持 error 状态，避免 UI 误报“已保存”
+      if (errorCount.value > 0) {
+        syncStatus.value = 'error'
+        return
+      }
       syncStatus.value = 'saved'
       lastSavedAt.value = new Date()
       // 2 秒后回到 idle
@@ -167,6 +172,19 @@ export function useMindMapSync(opts: {
    *  ============================================================ */
   let opQueue: Promise<void> = Promise.resolve()
 
+  /** 失败操作重试队列：保存可重放的 API 调用闭包，供主动保存/重试时重放。
+   *  失败不再直接丢弃，避免“点了保存但数据丢失”。 */
+  const failedOps = ref<Array<() => Promise<void>>>([])
+
+  /** 重放所有失败操作（逐个串行入队）；再次失败的会重新入队，等待下次重试 */
+  async function retryFailedOps(): Promise<void> {
+    const failed = failedOps.value.slice()
+    failedOps.value = []
+    if (failed.length === 0) return
+    const tasks = failed.map((fn) => enqueueStructuralOp(fn))
+    await Promise.allSettled(tasks)
+  }
+
   function enqueueStructuralOp(fn: () => Promise<void>): Promise<void> {
     markSyncing()
     opQueue = opQueue
@@ -178,6 +196,8 @@ export function useMindMapSync(opts: {
         markSaved()
       })
       .catch(() => {
+        // 失败不丢弃：加入重试队列，供主动保存/重试时重放
+        failedOps.value.push(fn)
         markError()
       })
     return opQueue
@@ -221,6 +241,18 @@ export function useMindMapSync(opts: {
   const noteDebounceTimers = new Map<string, DebounceEntry>()
   /** 节点级 extraData debounce（key = backendId，关联线数据同步用） */
   const extraDataDebounceTimers = new Map<string, DebounceEntry>()
+
+  /** 是否存在仍未完成写入的操作（防抖窗口中的修改 + 飞行中请求 + 待创建节点）。
+   *  用于 beforeunload 判断是否需要拦截刷新/关闭。 */
+  function hasPendingWriteOps(): boolean {
+    if (pendingCount.value > 0) return true
+    if (pendingCreates.size > 0) return true
+    if (textDebounceTimers.size > 0) return true
+    if (collapseDebounceTimers.size > 0) return true
+    if (noteDebounceTimers.size > 0) return true
+    if (extraDataDebounceTimers.size > 0) return true
+    return false
+  }
 
   function clearPerNodeTimers(uid: string, backendId?: string | null) {
     // 清除 uid → backendId 对应的 timer（可能只知道其中一个）
@@ -617,6 +649,12 @@ export function useMindMapSync(opts: {
     })
   }
 
+  /** 文本更新核心逻辑（不带同步状态标记，供 flush 与失败重试复用） */
+  async function runTextUpdate(backendId: string, rawText: string): Promise<void> {
+    const title = extractTitleFromText(rawText, backendId)
+    await nodesStore.update(backendId, { title })
+  }
+
   /** 文本更新调度（debounce 400ms，key = backendId）
    *  key 统一使用 backendId，保证 data_change_detail 和 node_text_edit_change
    *  对同一节点的连续文本触发最终只产生一次 API 请求。 */
@@ -626,13 +664,13 @@ export function useMindMapSync(opts: {
     // flush 函数闭包捕获最新 rawText，确保 flush 时用的是最后一次修改的值
     const flush = async () => {
       textDebounceTimers.delete(backendId)
-      const title = extractTitleFromText(rawText, backendId)
       markSyncing()
       try {
-        await nodesStore.update(backendId, { title })
+        await runTextUpdate(backendId, rawText)
         markSaved()
       } catch (e) {
         console.error('[sync] text update failed:', e)
+        failedOps.value.push(() => runTextUpdate(backendId, rawText))
         markError()
       }
     }
@@ -640,6 +678,11 @@ export function useMindMapSync(opts: {
       timer: setTimeout(flush, 400),
       flush
     })
+  }
+
+  /** 折叠更新核心逻辑（不带同步状态标记，供 flush 与失败重试复用） */
+  async function runCollapseUpdate(backendId: string, isCollapsed: boolean): Promise<void> {
+    await nodesStore.update(backendId, { isCollapsed })
   }
 
   /** 折叠更新调度（debounce 250ms，key = backendId） */
@@ -650,10 +693,11 @@ export function useMindMapSync(opts: {
       collapseDebounceTimers.delete(backendId)
       markSyncing()
       try {
-        await nodesStore.update(backendId, { isCollapsed })
+        await runCollapseUpdate(backendId, isCollapsed)
         markSaved()
       } catch (e) {
         console.error('[sync] collapse update failed:', e)
+        failedOps.value.push(() => runCollapseUpdate(backendId, isCollapsed))
         markError()
       }
     }
@@ -661,6 +705,11 @@ export function useMindMapSync(opts: {
       timer: setTimeout(flush, 250),
       flush
     })
+  }
+
+  /** 备注更新核心逻辑（不带同步状态标记，供 flush 与失败重试复用） */
+  async function runNoteUpdate(backendId: string, note: string): Promise<void> {
+    await nodesStore.update(backendId, { note })
   }
 
   /** 备注更新调度（debounce 600ms，key = backendId）
@@ -673,10 +722,11 @@ export function useMindMapSync(opts: {
       noteDebounceTimers.delete(backendId)
       markSyncing()
       try {
-        await nodesStore.update(backendId, { note })
+        await runNoteUpdate(backendId, note)
         markSaved()
       } catch (e) {
         console.error('[sync] note update failed:', e)
+        failedOps.value.push(() => runNoteUpdate(backendId, note))
         markError()
       }
     }
@@ -684,6 +734,11 @@ export function useMindMapSync(opts: {
       timer: setTimeout(flush, 600),
       flush
     })
+  }
+
+  /** 关联线数据更新核心逻辑（不带同步状态标记，供 flush 与失败重试复用） */
+  async function runExtraDataUpdate(backendId: string, extraData: string): Promise<void> {
+    await nodesStore.update(backendId, { extraData })
   }
 
   /** 关联线数据更新调度（debounce 500ms，key = backendId）
@@ -696,10 +751,11 @@ export function useMindMapSync(opts: {
       extraDataDebounceTimers.delete(backendId)
       markSyncing()
       try {
-        await nodesStore.update(backendId, { extraData })
+        await runExtraDataUpdate(backendId, extraData)
         markSaved()
       } catch (e) {
         console.error('[sync] extraData update failed:', e)
+        failedOps.value.push(() => runExtraDataUpdate(backendId, extraData))
         markError()
       }
     }
@@ -1130,6 +1186,8 @@ export function useMindMapSync(opts: {
     bindIncrementalSyncHandlers,
     flushPendingUpdates,
     waitForPendingOps,
+    retryFailedOps,
+    hasPendingWriteOps,
     // 暴露给外部调试
     _debugIdMap: uidToBackendId
   }

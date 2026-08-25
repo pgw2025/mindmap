@@ -370,7 +370,9 @@ const {
   normalizeRootChildDirections,
   bindIncrementalSyncHandlers,
   flushPendingUpdates,
-  waitForPendingOps
+  waitForPendingOps,
+  retryFailedOps,
+  hasPendingWriteOps
 } = useMindMapSync({
   getMindMapInstance: () => mindMapInstance,
   nodesStore,
@@ -891,14 +893,15 @@ function formatTime(d: Date): string {
   return d.toLocaleString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Shanghai' })
 }
 
-/** 手动保存：flush 所有 pending 并等待完成 */
+/** 手动保存：先重放失败操作，再等待所有 pending 完成 */
 async function handleManualSave() {
-  try {
-    clearError()
-    await waitForPendingOps()
+  clearError()
+  await retryFailedOps()
+  await waitForPendingOps()
+  if (errorCount.value > 0) {
+    message.error('仍有操作同步失败，请检查网络后重试')
+  } else {
     message.success('已保存')
-  } catch {
-    message.error('保存失败，请检查网络后重试')
   }
 }
 
@@ -1160,9 +1163,14 @@ onBeforeRouteLeave(async (_to, _from, next) => {
   next()
 })
 
-/** 页面刷新/关闭前 flush 所有 pending 防抖修改 */
-function handleBeforeUnload() {
+/** 页面刷新/关闭前 flush 所有 pending 防抖修改；
+ *  若仍有未同步完成的写入，弹出浏览器原生确认，避免误刷新导致数据丢失 */
+function handleBeforeUnload(e: BeforeUnloadEvent) {
   flushPendingUpdates()
+  if (hasPendingWriteOps()) {
+    e.preventDefault()
+    e.returnValue = ''
+  }
 }
 
 onMounted(() => {
