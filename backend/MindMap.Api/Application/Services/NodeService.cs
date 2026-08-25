@@ -200,6 +200,7 @@ public class NodeService : INodeService
     {
         ArgumentNullException.ThrowIfNull(req);
         var node = await GetOwnedNodeAsync(userId, id, ct);
+        var oldParentId = node.ParentId;
 
         // 验证新父节点
         if (req.ParentId.HasValue)
@@ -217,14 +218,68 @@ public class NodeService : INodeService
                 throw ApiException.Conflict("父节点不属于同一导图");
         }
 
-        node.ParentId = req.ParentId;
-        node.SortOrder = req.SortOrder ?? await GetNextSortOrderAsync(node.MindMapId, req.ParentId, ct);
+        var newParentId = req.ParentId;
+        var now = DateTime.UtcNow;
+
+        // 阶段1：把受影响父节点（旧/新）下的子节点整体平移到临时排序区间。
+        // nodes 表存在 (MindMapId, ParentId, SortOrder) 唯一索引，EF 逐行 UPDATE，
+        // 直接写入最终值会与兄弟节点的现有值冲突，必须分两阶段落库。
+        foreach (var pid in new[] { oldParentId, newParentId }.Distinct())
+        {
+            var siblings = await _db.Nodes
+                .Where(n => n.MindMapId == node.MindMapId && n.ParentId == pid && n.Id != id)
+                .OrderBy(n => n.SortOrder)
+                .ToListAsync(ct);
+            var temp = 1_000_000;
+            foreach (var s in siblings)
+            {
+                s.SortOrder = temp++;
+                s.UpdatedAt = now;
+            }
+        }
+        // 被移动节点也先挪到临时区间（此时仍挂在旧父节点下）
+        node.SortOrder = 2_000_000;
+        node.UpdatedAt = now;
+        await _db.SaveChangesAsync(ct);
+
+        // 阶段2：写入最终值
+        node.ParentId = newParentId;
         // 根节点直接子节点的方向随移动一起持久化，避免前端再发一次单独的方向更新
         if (req.Direction.HasValue)
         {
             node.Direction = req.Direction.Value;
         }
-        node.UpdatedAt = DateTime.UtcNow;
+
+        // 目标父节点其余子节点按原有相对顺序压缩为 0..n-1，并把节点插入到请求位置
+        var targetSiblings = await _db.Nodes
+            .Where(n => n.MindMapId == node.MindMapId && n.ParentId == newParentId && n.Id != id)
+            .OrderBy(n => n.SortOrder)
+            .ToListAsync(ct);
+        var index = Math.Clamp(req.SortOrder ?? targetSiblings.Count, 0, targetSiblings.Count);
+        node.SortOrder = index;
+        node.UpdatedAt = now;
+        var order = 0;
+        foreach (var s in targetSiblings)
+        {
+            if (order == index) order++;
+            s.SortOrder = order++;
+            s.UpdatedAt = now;
+        }
+
+        // 旧父节点剩余子节点压缩为 0..n-1（新旧父相同时上面已处理）
+        if (oldParentId != newParentId)
+        {
+            var oldSiblings = await _db.Nodes
+                .Where(n => n.MindMapId == node.MindMapId && n.ParentId == oldParentId && n.Id != id)
+                .OrderBy(n => n.SortOrder)
+                .ToListAsync(ct);
+            var i = 0;
+            foreach (var s in oldSiblings)
+            {
+                s.SortOrder = i++;
+                s.UpdatedAt = now;
+            }
+        }
 
         await UpdateMindMapStatsAsync(node.MindMapId, nodeCountDelta: 0, ct);
         await _db.SaveChangesAsync(ct);
@@ -245,6 +300,26 @@ public class NodeService : INodeService
             .ToListAsync(ct);
 
         var nodeMap = nodes.ToDictionary(n => n.Id);
+        var now = DateTime.UtcNow;
+
+        // 阶段1：带 SortOrder 的项先平移到临时排序区间，
+        // 避免 (MindMapId, ParentId, SortOrder) 唯一索引在同级排序交换时瞬时冲突。
+        var reorderItems = req.Nodes
+            .Where(x => x.SortOrder.HasValue && nodeMap.ContainsKey(x.Id))
+            .ToList();
+        if (reorderItems.Count > 0)
+        {
+            var temp = 1_000_000;
+            foreach (var item in reorderItems)
+            {
+                var node = nodeMap[item.Id];
+                node.SortOrder = temp++;
+                node.UpdatedAt = now;
+            }
+            await _db.SaveChangesAsync(ct);
+        }
+
+        // 阶段2：写入最终值
         foreach (var item in req.Nodes)
         {
             if (!nodeMap.TryGetValue(item.Id, out var node)) continue;
@@ -254,7 +329,7 @@ public class NodeService : INodeService
             if (item.X.HasValue) node.X = item.X;
             if (item.Y.HasValue) node.Y = item.Y;
             if (item.IsCollapsed.HasValue) node.IsCollapsed = item.IsCollapsed.Value;
-            node.UpdatedAt = DateTime.UtcNow;
+            node.UpdatedAt = now;
         }
 
         await UpdateMindMapStatsAsync(mindMapId, nodeCountDelta: 0, ct);

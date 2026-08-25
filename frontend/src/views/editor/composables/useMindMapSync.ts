@@ -104,6 +104,15 @@ export function useMindMapSync(opts: {
     syncStatus.value = 'error'
   }
 
+  /** 标记一个同步操作被跳过（目标节点已不存在，语义上视为已作废：
+   *  只回退计数，不计错误、不改 error/saved 状态；计数清零且无错误时回到 idle） */
+  function markSkipped() {
+    pendingCount.value = Math.max(0, pendingCount.value - 1)
+    if (pendingCount.value === 0 && errorCount.value === 0) {
+      syncStatus.value = 'idle'
+    }
+  }
+
   /** 记录最新鼠标屏幕坐标，供 beforeDragEnd 判定方向用 */
   let lastMouseClientX = 0
   let lastMouseClientY = 0
@@ -196,6 +205,12 @@ export function useMindMapSync(opts: {
     await Promise.allSettled(tasks)
   }
 
+  /** 判断错误是否为“目标资源不存在”（404）。这类失败重放永远 404，重试无意义。 */
+  function isNotFoundError(e: unknown): boolean {
+    return typeof e === 'object' && e !== null &&
+      'response' in e && (e as { response?: { status?: number } }).response?.status === 404
+  }
+
   function enqueueStructuralOp(
     fn: () => Promise<void>,
     key?: string | null
@@ -209,8 +224,16 @@ export function useMindMapSync(opts: {
       .then(() => {
         markSaved()
       })
-      .catch(() => {
-        // 失败不丢弃：加入重试队列，供主动保存/重试时重放。
+      .catch((e: unknown) => {
+        // 目标节点已被删除（404）→ 重放永远 404，语义上等同于操作已作废，
+        // 丢弃且不计错误，仅回退计数，避免永久霸占 errorCount。
+        if (isNotFoundError(e)) {
+          // 该 key 若还有失败项残留（首次失败入队前的旧值），一并作废，避免写回死节点
+          if (key != null) dropFailedOpsByKey(key)
+          markSkipped()
+          return
+        }
+        // 其余失败（网络错误等）不丢弃：加入重试队列，供主动保存/重试时重放。
         // 带 key 的操作（debounce 类）同 key 只保留最新一次，避免重放旧值覆盖新值。
         if (key != null) {
           failedOps.value = failedOps.value.filter((op) => op.key !== key)
@@ -290,6 +313,21 @@ export function useMindMapSync(opts: {
       if (e) clearTimeout(e.timer)
       extraDataDebounceTimers.delete(bid)
     }
+  }
+
+  /** 画布整体重建（undo/redo/版本恢复）前作废所有挂起的节点级写入：
+   *  debounce 定时器与失败队列里的闭包都捕获着 pre-reload 旧值，
+   *  画布已被后端状态覆盖，重放/延迟触发只会把旧数据写回去。 */
+  function invalidatePendingNodeWrites() {
+    const clearMap = (map: Map<string, DebounceEntry>) => {
+      map.forEach((entry) => clearTimeout(entry.timer))
+      map.clear()
+    }
+    clearMap(textDebounceTimers)
+    clearMap(collapseDebounceTimers)
+    clearMap(noteDebounceTimers)
+    clearMap(extraDataDebounceTimers)
+    failedOps.value = []
   }
 
   /** ============================================================
@@ -458,6 +496,8 @@ export function useMindMapSync(opts: {
   function reloadMindMap() {
     const inst = getMindMapInstance()
     if (!inst) return
+    // 画布即将被后端状态整体覆盖：作废所有携带旧值的挂起写入（debounce 定时器 + 失败队列）
+    invalidatePendingNodeWrites()
     isSettingData.value = true
     const mindMapData = convertToMindMapData(nodesStore.nodes)
     if (mindMapData) {
@@ -576,8 +616,8 @@ export function useMindMapSync(opts: {
    *    1. 文本变化 → debounced nodesStore.update(title)
    *    2. 展开/折叠变化 → debounced nodesStore.update(isCollapsed)
    *    3. direction 变化 → nodesStore.update(direction)
-   *    4. 父节点变化 → nodesStore.move(parentId, sortOrder)
-   *    5. 同级排序变化 → nodesStore.batchUpdate([{id, sortOrder}])
+   *  结构性变化（父节点/同级排序）由 handleStructuralChangesBatch 统一处理，
+   *  入口在 processDataChangeDetail（按整批 update diff 合并处理）。
    *  ============================================================ */
   async function handleUpdate(diff: DiffItem) {
     const { data, oldData } = diff
@@ -657,11 +697,6 @@ export function useMindMapSync(opts: {
         }
       }
     }
-
-    // ---------- 4. 结构性变化（父节点、排序）：并入串行队列 ----------
-    enqueueStructuralOp(async () => {
-      await handleStructuralChanges(diff)
-    })
   }
 
   /** 文本更新核心逻辑（不带同步状态标记，供 flush 与失败重试复用） */
@@ -759,72 +794,96 @@ export function useMindMapSync(opts: {
   }
 
   /**
-   * 结构性变化：父节点/同级排序
-   * 需要对比「完整的新树」和「完整的旧树」才能得到父节点和排序信息，
-   * 所以通过当前渲染树快照重建关系图进行比较。
+   * 结构性变化批量处理（父节点变更 / 同级排序），输入为一次 data_change_detail
+   * 事件中的全部 update diff。
+   *
+   * 【关键背景】simple-mind-map 的 diff 按 uid 对比节点对象（含 children 数组）。
+   * 拖拽移动节点时（moveNodeTo / insertTo），被移动节点自身的 data 不变，
+   * 它自己不会出现在 diff 里；diff 只会发给旧父节点和新父节点（children 变了）。
+   * 因此除了检查 diff 节点自身，还必须检查 children 数组发生变化的每个子节点，
+   * 否则普通节点之间的拖拽移动永远不会同步到后端（刷新后回到原位）。
    */
-  async function handleStructuralChanges(diff: DiffItem) {
+  async function handleStructuralChangesBatch(diffs: DiffItem[]) {
     const inst = getMindMapInstance()
     const renderRoot = inst?.renderer?.root
-    if (!renderRoot) return
-
-    const uid = diff.data.data.uid
-    // 理论上 handleUpdate 已经 await 过，但保险起见再次等待（父节点可能刚创建）
-    const backendId = await getBackendIdOrWait(uid)
-    if (!backendId) return
+    if (!inst || !renderRoot) return
 
     // 取当前整棵渲染树的 data 快照，构造关系图
     const currentSnapshot = inst.getData() as any
     if (!currentSnapshot) return
     const { parentOf, sortOrderOf } = buildRelationalMapsFromRaw(currentSnapshot)
 
-    const newParentUid = parentOf.get(uid) ?? null
-    const newSortOrder = sortOrderOf.get(uid) ?? 0
-    const newParentBackendId = newParentUid ? await getBackendIdOrWait(newParentUid) ?? null : null
-
-    const backendNode = nodesStore.findNode(backendId)
-    if (!backendNode) return
-
-    const parentChanged = newParentBackendId !== (backendNode.parentId ?? null)
-    const orderChanged = newSortOrder !== backendNode.sortOrder
-
-    const isNewParentRoot = newParentBackendId === nodesStore.rootNode?.id
-    let newDirection: 0 | 1 | undefined = undefined
-    if (isNewParentRoot) {
-      const { x: mouseCanvasX } = inst.toPos(lastMouseClientX, lastMouseClientY)
-      const { scaleX = 1, translateX = 0 } = inst.draw.transform()
-      const rootCanvasCenterX = (renderRoot.left + (renderRoot.width || 0) / 2) * scaleX + translateX
-      const targetDir = mouseCanvasX < rootCanvasCenterX ? 'left' : 'right'
-      newDirection = targetDir === 'left' ? 0 : 1
+    // 1. 收集需要结构检查的 uid：每个 diff 节点自身 + children 数组发生变化的全部新子节点
+    const targetUids = new Set<string>()
+    for (const diff of diffs) {
+      const uid = diff.data.data.uid
+      if (!uid) continue
+      targetUids.add(uid)
+      const oldUids = (diff.oldData?.children ?? []).map((c) => c.data.uid)
+      const newUids = (diff.data.children ?? []).map((c) => c.data.uid)
+      const childrenChanged =
+        oldUids.length !== newUids.length ||
+        newUids.some((u, i) => u !== oldUids[i])
+      if (childrenChanged) {
+        for (const cUid of newUids) targetUids.add(cUid)
+      }
     }
+    if (targetUids.size === 0) return
 
-    if (parentChanged) {
-      // 移动节点并同步更新 direction
+    // 2. 第一遍：父节点变化的节点执行 move。
+    //    必须先移动再做排序修正，否则旧父节点兄弟压缩排序时会与
+    //    尚未移走的节点发生 (MindMapId, ParentId, SortOrder) 唯一索引冲突。
+    for (const uid of targetUids) {
+      const backendId = await getBackendIdOrWait(uid)
+      if (!backendId) continue
+      const backendNode = nodesStore.findNode(backendId)
+      if (!backendNode) continue
+
+      const newParentUid = parentOf.get(uid) ?? null
+      const newParentBackendId = newParentUid
+        ? await getBackendIdOrWait(newParentUid) ?? null
+        : null
+      if (newParentBackendId === (backendNode.parentId ?? null)) continue
+
+      const newSortOrder = sortOrderOf.get(uid) ?? 0
+      const isNewParentRoot = newParentBackendId === nodesStore.rootNode?.id
+      let newDirection: 0 | 1 | undefined = undefined
+      if (isNewParentRoot) {
+        const { x: mouseCanvasX } = inst.toPos(lastMouseClientX, lastMouseClientY)
+        const { scaleX = 1, translateX = 0 } = inst.draw.transform()
+        const rootCanvasCenterX = (renderRoot.left + (renderRoot.width || 0) / 2) * scaleX + translateX
+        const targetDir = mouseCanvasX < rootCanvasCenterX ? 'left' : 'right'
+        newDirection = targetDir === 'left' ? 0 : 1
+      }
+
       await nodesStore.move(backendId, {
         parentId: newParentBackendId,
         sortOrder: newSortOrder,
         direction: newDirection
       })
-    } else if (orderChanged) {
-      // 仅排序变化：检查兄弟节点是否也都变了 → 如果是，批量 reorder
-      const siblingUids = collectSiblingUidsFromSnapshot(parentOf, sortOrderOf, newParentUid, uid)
-      if (siblingUids.length >= 2) {
-        const items: NodeBatchItem[] = []
-        for (const sibUid of siblingUids) {
-          const sibBackendId = await getBackendIdOrWait(sibUid)
-          if (!sibBackendId) continue
-          const sibBackend = nodesStore.findNode(sibBackendId)
-          const so = sortOrderOf.get(sibUid) ?? 0
-          if (!sibBackend || sibBackend.sortOrder !== so) {
-            items.push({ id: sibBackendId, sortOrder: so })
-          }
-        }
-        if (items.length > 0) {
-          await nodesStore.batchUpdate(items)
-        }
-      } else {
-        await nodesStore.update(backendId, { sortOrder: newSortOrder })
+    }
+
+    // 3. 第二遍：仍在原父节点下但排序变化的节点，合并为一次 batchUpdate。
+    //    move 之后 store 已刷新，被移动节点通常不再产生条目；
+    //    剩余条目来自同级排序调整（插入/移位导致的兄弟排序变化）。
+    const items: NodeBatchItem[] = []
+    for (const uid of targetUids) {
+      const backendId = await getBackendIdOrWait(uid)
+      if (!backendId) continue
+      const backendNode = nodesStore.findNode(backendId)
+      if (!backendNode) continue
+
+      const newParentUid = parentOf.get(uid) ?? null
+      const newParentBackendId = newParentUid ? getBackendId(newParentUid) : null
+      if ((newParentBackendId ?? null) !== (backendNode.parentId ?? null)) continue
+
+      const newSortOrder = sortOrderOf.get(uid) ?? 0
+      if (newSortOrder !== backendNode.sortOrder) {
+        items.push({ id: backendId, sortOrder: newSortOrder })
       }
+    }
+    if (items.length > 0) {
+      await nodesStore.batchUpdate(items)
     }
   }
 
@@ -843,22 +902,6 @@ export function useMindMapSync(opts: {
     }
     walk(root, null, 0)
     return { parentOf, sortOrderOf }
-  }
-
-  /** 收集兄弟节点 uid（按排序） */
-  function collectSiblingUidsFromSnapshot(
-    parentOf: Map<string, string | null>,
-    sortOrderOf: Map<string, number>,
-    parentUid: string | null,
-    selfUid: string
-  ): string[] {
-    const siblings: string[] = []
-    parentOf.forEach((p, uid) => {
-      if (p === parentUid) siblings.push(uid)
-    })
-    if (!siblings.includes(selfUid)) siblings.push(selfUid)
-    siblings.sort((a, b) => (sortOrderOf.get(a) ?? 0) - (sortOrderOf.get(b) ?? 0))
-    return siblings
   }
 
   /** 计算新增节点在 full tree 下的 sortOrder */
@@ -931,11 +974,20 @@ export function useMindMapSync(opts: {
       }
     })
 
-    // update 中纯文本/折叠变化是 debounced 的，不需要排队；结构性变化会自己 enqueue
+    // update 中纯文本/折叠变化是 debounced 的，不需要排队；
     // 注意：handleUpdate 是 async（内部 await getBackendIdOrWait），不 await 在这里
-    //       因为它的结果不影响后续批次；所有结构性副作用最终都流进 opQueue
+    //       因为它的结果不影响后续批次；所有副作用最终都流进 opQueue
     for (const u of updates) {
       handleUpdate(u).catch((e) => console.error('[sync] handleUpdate failed:', e))
+    }
+
+    // 结构性变化（拖拽移动 / 同级排序）：一次事件的所有 update diff 合并为
+    // 一个串行操作处理，保证 move 先于兄弟排序修正执行，
+    // 避免旧父节点兄弟压缩与尚未移动的节点发生 sortOrder 唯一索引冲突。
+    if (updates.length > 0) {
+      enqueueStructuralOp(async () => {
+        await handleStructuralChangesBatch(updates)
+      })
     }
   }
 
