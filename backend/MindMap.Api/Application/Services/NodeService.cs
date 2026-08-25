@@ -50,6 +50,7 @@ public class NodeService : INodeService
             .Where(n => n.MindMapId == mindMapId)
             .OrderBy(n => n.ParentId == null ? 0 : 1)
             .ThenBy(n => n.SortOrder)
+            .ThenBy(n => n.CreatedAt) // 稳定输出：杜绝同级 SortOrder 相同时顺序不稳定
             .Select(n => new NodeDto
             {
                 Id = n.Id,
@@ -218,6 +219,11 @@ public class NodeService : INodeService
 
         node.ParentId = req.ParentId;
         node.SortOrder = req.SortOrder ?? await GetNextSortOrderAsync(node.MindMapId, req.ParentId, ct);
+        // 根节点直接子节点的方向随移动一起持久化，避免前端再发一次单独的方向更新
+        if (req.Direction.HasValue)
+        {
+            node.Direction = req.Direction.Value;
+        }
         node.UpdatedAt = DateTime.UtcNow;
 
         await UpdateMindMapStatsAsync(node.MindMapId, nodeCountDelta: 0, ct);
@@ -409,12 +415,13 @@ public class NodeService : INodeService
     private static List<NodeTreeNodeDto> BuildTree(List<NodeDto> flat)
     {
         var lookup = flat.ToLookup(n => n.ParentId);
-        var roots = lookup[null].OrderBy(n => n.SortOrder).ToList();
+        var roots = lookup[null].OrderBy(n => n.SortOrder).ThenBy(n => n.CreatedAt).ToList();
 
         List<NodeTreeNodeDto> BuildChildren(NodeDto parent)
         {
             return lookup[parent.Id]
                 .OrderBy(n => n.SortOrder)
+                .ThenBy(n => n.CreatedAt)
                 .Select(child => new NodeTreeNodeDto
                 {
                     Id = child.Id,

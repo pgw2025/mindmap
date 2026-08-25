@@ -107,6 +107,9 @@ public class NodeMoveRequest
 
     /// <summary>目标同级排序位置；省略时追加到末尾。</summary>
     public int? SortOrder { get; set; }
+
+    /// <summary>根节点直接子节点的生长方向；null 表示前端默认朝右。</summary>
+    public Direction? Direction { get; set; }
 }
 
 /// <summary>

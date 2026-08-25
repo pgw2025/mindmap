@@ -41,8 +41,9 @@ public class NodeConfiguration : IEntityTypeConfiguration<Node>
         builder.Property(n => n.CreatedAt).HasColumnType("datetime(3)");
         builder.Property(n => n.UpdatedAt).HasColumnType("datetime(3)");
 
-        // 同一导图内按 SortOrder 排序
-        builder.HasIndex(n => new { n.MindMapId, n.ParentId, n.SortOrder });
+        // 同一导图内按 SortOrder 排序；同一父节点下 SortOrder 唯一，保证同级顺序确定。
+        // 注：MySQL 唯一索引允许 ParentId 为 NULL 的多行并存，单根导图的根节点不受影响。
+        builder.HasIndex(n => new { n.MindMapId, n.ParentId, n.SortOrder }).IsUnique();
         // 按导图查找所有节点
         builder.HasIndex(n => n.MindMapId);
 
