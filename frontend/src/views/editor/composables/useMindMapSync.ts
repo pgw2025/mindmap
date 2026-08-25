@@ -172,20 +172,34 @@ export function useMindMapSync(opts: {
    *  ============================================================ */
   let opQueue: Promise<void> = Promise.resolve()
 
+  /** 失败操作条目：key 用于同类操作去重（debounce 类=backendId；结构操作=null 不去重） */
+  interface FailedOp {
+    key: string | null
+    fn: () => Promise<void>
+  }
+
   /** 失败操作重试队列：保存可重放的 API 调用闭包，供主动保存/重试时重放。
    *  失败不再直接丢弃，避免“点了保存但数据丢失”。 */
-  const failedOps = ref<Array<() => Promise<void>>>([])
+  const failedOps = ref<Array<FailedOp>>([])
+
+  /** 淘汰某个 key 的失败项：调度到该节点的新修改时，旧失败值重放已无意义 */
+  function dropFailedOpsByKey(key: string) {
+    failedOps.value = failedOps.value.filter((op) => op.key !== key)
+  }
 
   /** 重放所有失败操作（逐个串行入队）；再次失败的会重新入队，等待下次重试 */
   async function retryFailedOps(): Promise<void> {
     const failed = failedOps.value.slice()
     failedOps.value = []
     if (failed.length === 0) return
-    const tasks = failed.map((fn) => enqueueStructuralOp(fn))
+    const tasks = failed.map((op) => enqueueStructuralOp(op.fn, op.key))
     await Promise.allSettled(tasks)
   }
 
-  function enqueueStructuralOp(fn: () => Promise<void>): Promise<void> {
+  function enqueueStructuralOp(
+    fn: () => Promise<void>,
+    key?: string | null
+  ): Promise<void> {
     markSyncing()
     opQueue = opQueue
       .catch(() => { })
@@ -196,8 +210,12 @@ export function useMindMapSync(opts: {
         markSaved()
       })
       .catch(() => {
-        // 失败不丢弃：加入重试队列，供主动保存/重试时重放
-        failedOps.value.push(fn)
+        // 失败不丢弃：加入重试队列，供主动保存/重试时重放。
+        // 带 key 的操作（debounce 类）同 key 只保留最新一次，避免重放旧值覆盖新值。
+        if (key != null) {
+          failedOps.value = failedOps.value.filter((op) => op.key !== key)
+        }
+        failedOps.value.push({ key: key ?? null, fn })
         markError()
       })
     return opQueue
@@ -247,6 +265,7 @@ export function useMindMapSync(opts: {
   function hasPendingWriteOps(): boolean {
     if (pendingCount.value > 0) return true
     if (pendingCreates.size > 0) return true
+    if (failedOps.value.length > 0) return true
     if (textDebounceTimers.size > 0) return true
     if (collapseDebounceTimers.size > 0) return true
     if (noteDebounceTimers.size > 0) return true
@@ -633,11 +652,7 @@ export function useMindMapSync(opts: {
         const currentBackend = nodesStore.findNode(backendId)?.direction
         if (currentBackend !== backendDir) {
           enqueueStructuralOp(async () => {
-            try {
-              await nodesStore.update(backendId, { direction: backendDir })
-            } catch (e) {
-              console.error('[sync] direction update failed:', e)
-            }
+            await nodesStore.update(backendId, { direction: backendDir })
           })
         }
       }
@@ -663,10 +678,12 @@ export function useMindMapSync(opts: {
   function scheduleTextUpdate(backendId: string, rawText: string) {
     const existing = textDebounceTimers.get(backendId)
     if (existing) clearTimeout(existing.timer)
+    // 该节点有新的文字修改待同步 → 淘汰该节点之前的文字失败项（前缀隔离字段类型）
+    dropFailedOpsByKey(`text:${backendId}`)
     // flush 函数闭包捕获最新 rawText，确保 flush 时用的是最后一次修改的值
     const flush = () => {
       textDebounceTimers.delete(backendId)
-      return enqueueStructuralOp(() => runTextUpdate(backendId, rawText))
+      return enqueueStructuralOp(() => runTextUpdate(backendId, rawText), `text:${backendId}`)
     }
     textDebounceTimers.set(backendId, {
       timer: setTimeout(flush, 400),
@@ -683,9 +700,11 @@ export function useMindMapSync(opts: {
   function scheduleCollapseUpdate(backendId: string, isCollapsed: boolean) {
     const existing = collapseDebounceTimers.get(backendId)
     if (existing) clearTimeout(existing.timer)
+    // 该节点有新的折叠修改待同步 → 淘汰该节点之前的折叠失败项（前缀隔离字段类型）
+    dropFailedOpsByKey(`collapse:${backendId}`)
     const flush = () => {
       collapseDebounceTimers.delete(backendId)
-      return enqueueStructuralOp(() => runCollapseUpdate(backendId, isCollapsed))
+      return enqueueStructuralOp(() => runCollapseUpdate(backendId, isCollapsed), `collapse:${backendId}`)
     }
     collapseDebounceTimers.set(backendId, {
       timer: setTimeout(flush, 250),
@@ -704,9 +723,11 @@ export function useMindMapSync(opts: {
   function scheduleNoteUpdate(backendId: string, note: string) {
     const existing = noteDebounceTimers.get(backendId)
     if (existing) clearTimeout(existing.timer)
+    // 该节点有新的备注修改待同步 → 淘汰该节点之前的备注失败项（前缀隔离字段类型）
+    dropFailedOpsByKey(`note:${backendId}`)
     const flush = () => {
       noteDebounceTimers.delete(backendId)
-      return enqueueStructuralOp(() => runNoteUpdate(backendId, note))
+      return enqueueStructuralOp(() => runNoteUpdate(backendId, note), `note:${backendId}`)
     }
     noteDebounceTimers.set(backendId, {
       timer: setTimeout(flush, 600),
@@ -725,9 +746,11 @@ export function useMindMapSync(opts: {
   function scheduleExtraDataUpdate(backendId: string, extraData: string) {
     const existing = extraDataDebounceTimers.get(backendId)
     if (existing) clearTimeout(existing.timer)
+    // 该节点有新的关联线/摘要修改待同步 → 淘汰该节点之前的 extraData 失败项（前缀隔离字段类型）
+    dropFailedOpsByKey(`extraData:${backendId}`)
     const flush = () => {
       extraDataDebounceTimers.delete(backendId)
-      return enqueueStructuralOp(() => runExtraDataUpdate(backendId, extraData))
+      return enqueueStructuralOp(() => runExtraDataUpdate(backendId, extraData), `extraData:${backendId}`)
     }
     extraDataDebounceTimers.set(backendId, {
       timer: setTimeout(flush, 500),
