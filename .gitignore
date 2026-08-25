@@ -68,3 +68,8 @@ scripts/.env.deploy
 scripts/artifacts/
 scripts/*.tar.gz
 
+# ======================
+# WorkBuddy 本地工作数据
+# ======================
+.workbuddy/
+
