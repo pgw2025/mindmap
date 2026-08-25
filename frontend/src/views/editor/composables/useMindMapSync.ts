@@ -657,22 +657,16 @@ export function useMindMapSync(opts: {
 
   /** 文本更新调度（debounce 400ms，key = backendId）
    *  key 统一使用 backendId，保证 data_change_detail 和 node_text_edit_change
-   *  对同一节点的连续文本触发最终只产生一次 API 请求。 */
+   *  对同一节点的连续文本触发最终只产生一次 API 请求。
+   *  实际执行并入 opQueue 串行队列，保证与结构变更（移动/排序）顺序一致，
+   *  失败重试与状态标记由 enqueueStructuralOp 统一处理。 */
   function scheduleTextUpdate(backendId: string, rawText: string) {
     const existing = textDebounceTimers.get(backendId)
     if (existing) clearTimeout(existing.timer)
     // flush 函数闭包捕获最新 rawText，确保 flush 时用的是最后一次修改的值
-    const flush = async () => {
+    const flush = () => {
       textDebounceTimers.delete(backendId)
-      markSyncing()
-      try {
-        await runTextUpdate(backendId, rawText)
-        markSaved()
-      } catch (e) {
-        console.error('[sync] text update failed:', e)
-        failedOps.value.push(() => runTextUpdate(backendId, rawText))
-        markError()
-      }
+      return enqueueStructuralOp(() => runTextUpdate(backendId, rawText))
     }
     textDebounceTimers.set(backendId, {
       timer: setTimeout(flush, 400),
@@ -689,17 +683,9 @@ export function useMindMapSync(opts: {
   function scheduleCollapseUpdate(backendId: string, isCollapsed: boolean) {
     const existing = collapseDebounceTimers.get(backendId)
     if (existing) clearTimeout(existing.timer)
-    const flush = async () => {
+    const flush = () => {
       collapseDebounceTimers.delete(backendId)
-      markSyncing()
-      try {
-        await runCollapseUpdate(backendId, isCollapsed)
-        markSaved()
-      } catch (e) {
-        console.error('[sync] collapse update failed:', e)
-        failedOps.value.push(() => runCollapseUpdate(backendId, isCollapsed))
-        markError()
-      }
+      return enqueueStructuralOp(() => runCollapseUpdate(backendId, isCollapsed))
     }
     collapseDebounceTimers.set(backendId, {
       timer: setTimeout(flush, 250),
@@ -718,17 +704,9 @@ export function useMindMapSync(opts: {
   function scheduleNoteUpdate(backendId: string, note: string) {
     const existing = noteDebounceTimers.get(backendId)
     if (existing) clearTimeout(existing.timer)
-    const flush = async () => {
+    const flush = () => {
       noteDebounceTimers.delete(backendId)
-      markSyncing()
-      try {
-        await runNoteUpdate(backendId, note)
-        markSaved()
-      } catch (e) {
-        console.error('[sync] note update failed:', e)
-        failedOps.value.push(() => runNoteUpdate(backendId, note))
-        markError()
-      }
+      return enqueueStructuralOp(() => runNoteUpdate(backendId, note))
     }
     noteDebounceTimers.set(backendId, {
       timer: setTimeout(flush, 600),
@@ -747,17 +725,9 @@ export function useMindMapSync(opts: {
   function scheduleExtraDataUpdate(backendId: string, extraData: string) {
     const existing = extraDataDebounceTimers.get(backendId)
     if (existing) clearTimeout(existing.timer)
-    const flush = async () => {
+    const flush = () => {
       extraDataDebounceTimers.delete(backendId)
-      markSyncing()
-      try {
-        await runExtraDataUpdate(backendId, extraData)
-        markSaved()
-      } catch (e) {
-        console.error('[sync] extraData update failed:', e)
-        failedOps.value.push(() => runExtraDataUpdate(backendId, extraData))
-        markError()
-      }
+      return enqueueStructuralOp(() => runExtraDataUpdate(backendId, extraData))
     }
     extraDataDebounceTimers.set(backendId, {
       timer: setTimeout(flush, 500),

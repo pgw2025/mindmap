@@ -26,6 +26,9 @@ export const useNodesStore = defineStore('nodes', () => {
   const loading = ref(false)
   const selectedNodeId = ref<string | null>(null)
 
+  /** reloadTree 版本号：响应乱序时只采用最新一次请求结果 */
+  let reloadVersion = 0
+
   /** 历史记录栈 */
   const undoStack = ref<HistoryCommand[]>([])
   const redoStack = ref<HistoryCommand[]>([])
@@ -72,10 +75,13 @@ export const useNodesStore = defineStore('nodes', () => {
 
   async function reloadTree() {
     if (!mindMapId.value) return
+    const version = ++reloadVersion
     const [flat, treeData] = await Promise.all([
       nodesApi.fetchNodes(mindMapId.value),
       nodesApi.fetchNodeTree(mindMapId.value)
     ])
+    // 响应乱序时只采用最新一次 reloadTree 的结果，丢弃过期响应，避免旧数据覆盖新数据
+    if (version !== reloadVersion) return
     nodes.value = flat
     tree.value = treeData
   }
