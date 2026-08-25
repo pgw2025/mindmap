@@ -292,6 +292,9 @@ MindMap.usePlugin(OuterFrame)
 import type { NodeDto, NodeCreatePayload, NodeUpdatePayload } from '@/api/nodes'
 import type { MindMapDetail } from '@/api/mindmaps'
 import { fetchMindMap, updateMindMap } from '@/api/mindmaps'
+import * as offlineDb from '@/offline/db'
+import { withFallback } from '@/offline/fallback'
+import { getOfflineStatus, offlineState, formatSyncTime } from '@/offline/sync'
 import { useNodesStore } from '@/stores/nodes'
 import { useMindMapsStore } from '@/stores/mindmaps'
 import { useAuthStore } from '@/stores/auth'
@@ -329,6 +332,13 @@ const mapDetail = ref<MindMapDetail | null>(null)
 const loading = ref(true)
 const mindMapRef = ref<HTMLDivElement | null>(null)
 let mindMapInstance: MindMap | null = null
+
+// —— 离线快照状态 ——
+/** 导图详情是否来自离线快照 */
+const isOfflineDetail = ref(false)
+/** 详情或节点任一来自离线快照 → 顶栏标注「离线数据」并禁用强依赖网络的按钮 */
+const isOfflineData = computed(() => isOfflineDetail.value || nodesStore.isOfflineSnapshot)
+const offlineLastSyncText = computed(() => formatSyncTime(offlineState.lastSync))
 
 // 选中的节点样式
 const selectedNodeId = ref<string | null>(null)
@@ -1102,15 +1112,31 @@ async function initEmptyMindMap() {
 }
 
 onMounted(async () => {
-  try {
-    // 加载导图详情
-    mapDetail.value = await fetchMindMap(mindMapId.value)
+  // 补齐全局离线状态（lastSync），供顶栏「离线数据 · 最后同步时间」展示
+  getOfflineStatus()
 
-    // 加载节点
+  try {
+    // 加载导图详情（网络优先，失败时读 IndexedDB 离线快照）
+    mapDetail.value = await withFallback(
+      () => fetchMindMap(mindMapId.value),
+      async () => (await offlineDb.getMap(mindMapId.value))?.detail ?? null,
+      {
+        onSuccess: (detail) => {
+          isOfflineDetail.value = false
+          // 增量回写：在线打开单图也保持快照新鲜
+          offlineDb.updateMapDetail(mindMapId.value, detail).catch(() => { /* ignore */ })
+        },
+        onFallback: () => {
+          isOfflineDetail.value = true
+        }
+      }
+    )
+
+    // 加载节点（nodesStore.load 内部同样带离线兜底）
     await nodesStore.load(mindMapId.value)
 
-    // 自动创建根节点（如果为空）
-    if (nodesStore.nodes.length === 0) {
+    // 自动创建根节点（如果为空）。离线快照下跳过：写操作会失败，保持只读展示
+    if (nodesStore.nodes.length === 0 && !isOfflineData.value) {
       await initEmptyMindMap()
     }
 
@@ -1259,6 +1285,10 @@ watch(() => route.params.id, () => {
               @blur="handleDescriptionBlur" />
             <span v-else-if="mapDetail.description" class="inline-desc-text">{{ mapDetail.description }}</span>
           </div>
+          <div v-if="isOfflineData" class="offline-data-badge" title="网络不可用，正在展示本地快照（只读）">
+            <span class="offline-badge-icon">⚡</span>
+            离线数据<span v-if="offlineLastSyncText"> · 最后同步 {{ offlineLastSyncText }}</span>
+          </div>
         </div>
       </div>
 
@@ -1345,14 +1375,16 @@ watch(() => route.params.id, () => {
 
         <!-- 协同、历史与保存 -->
         <div class="action-btn-group">
-          <button class="btn-action-ghost" @click="versionsDrawerVisible = true" title="查看版本历史">
+          <button class="btn-action-ghost" :disabled="isOfflineData" @click="versionsDrawerVisible = true"
+            :title="isOfflineData ? '离线模式暂不可用' : '查看版本历史'">
             <span class="btn-icon">🕘</span><span class="btn-label">历史</span>
           </button>
-          <button class="btn-action-ghost" v-if="!readonly" @click="versionDrawerRef?.openCreateVersion()"
-            title="保存当前快照">
+          <button class="btn-action-ghost" v-if="!readonly" :disabled="isOfflineData"
+            @click="versionDrawerRef?.openCreateVersion()" :title="isOfflineData ? '离线模式暂不可用' : '保存当前快照'">
             <span class="btn-icon">💾</span><span class="btn-label">快照</span>
           </button>
-          <button class="btn-action-ghost" @click="shareDrawerVisible = true" title="分享与协作">
+          <button class="btn-action-ghost" :disabled="isOfflineData" @click="shareDrawerVisible = true"
+            :title="isOfflineData ? '离线模式暂不可用' : '分享与协作'">
             <span class="btn-icon">🔗</span><span class="btn-label">分享</span>
           </button>
         </div>

@@ -9,6 +9,7 @@ import type {
   NodeMovePayload,
   NodeBatchItem
 } from '@/api/nodes'
+import * as offlineDb from '@/offline/db'
 
 /** 命令历史记录，用于 undo/redo */
 interface HistoryCommand {
@@ -25,6 +26,9 @@ export const useNodesStore = defineStore('nodes', () => {
   const tree = ref<NodeTreeNodeDto[]>([])
   const loading = ref(false)
   const selectedNodeId = ref<string | null>(null)
+
+  /** 当前节点数据是否来自离线快照（供编辑器顶栏显示「离线数据」） */
+  const isOfflineSnapshot = ref(false)
 
   /** reloadTree 版本号：响应乱序时只采用最新一次请求结果 */
   let reloadVersion = 0
@@ -68,6 +72,19 @@ export const useNodesStore = defineStore('nodes', () => {
       ])
       nodes.value = flat
       tree.value = treeData
+      isOfflineSnapshot.value = false
+      // 增量回写：在线打开单图也保持快照新鲜（tree 不落库，读时由 nodes 组装）
+      offlineDb.updateMapNodes(mindMapIdParam, flat).catch(() => { /* ignore */ })
+    } catch (err) {
+      // 离线兜底：读单图快照，tree 由扁平 nodes 前端组装
+      const snapshot = await offlineDb.getMap(mindMapIdParam)
+      if (snapshot?.nodes) {
+        nodes.value = snapshot.nodes
+        tree.value = offlineDb.buildNodeTree(snapshot.nodes)
+        isOfflineSnapshot.value = true
+      } else {
+        throw err
+      }
     } finally {
       loading.value = false
     }
@@ -281,6 +298,7 @@ export const useNodesStore = defineStore('nodes', () => {
     nodes.value = []
     tree.value = []
     selectedNodeId.value = null
+    isOfflineSnapshot.value = false
     undoStack.value = []
     redoStack.value = []
   }
@@ -299,6 +317,7 @@ export const useNodesStore = defineStore('nodes', () => {
     tree,
     loading,
     selectedNodeId,
+    isOfflineSnapshot,
     rootNode,
     canUndo,
     canRedo,

@@ -4,6 +4,7 @@ import * as mapsApi from '@/api/mindmaps'
 import type { MindMapListItem, MindMapListQuery } from '@/api/mindmaps'
 import { useFoldersStore } from './folders'
 import { useTagsStore } from './tags'
+import * as offlineDb from '@/offline/db'
 
 async function refreshFolders(): Promise<void> {
   try {
@@ -31,6 +32,11 @@ export const useMindMapsStore = defineStore('mindmaps', () => {
   const tagId = ref<string | null>(null)
   const keyword = ref('')
 
+  /** 当前列表数据是否来自离线快照（供 HomeView 显示提示条） */
+  const isOfflineSnapshot = ref(false)
+  /** 离线快照的最后同步时间戳（ms） */
+  const lastSyncedAt = ref(0)
+
   const totalPages = computed(() =>
     pageSize.value <= 0 ? 1 : Math.max(1, Math.ceil(total.value / pageSize.value))
   )
@@ -55,9 +61,44 @@ export const useMindMapsStore = defineStore('mindmaps', () => {
       total.value = res.total
       page.value = res.page
       pageSize.value = res.pageSize
+      isOfflineSnapshot.value = false
+    } catch (err) {
+      // 离线兜底：读 lists 快照并按当前筛选条件本地过滤 + 分页
+      const loaded = await loadFromSnapshot()
+      if (!loaded) throw err
     } finally {
       loading.value = false
     }
+  }
+
+  /** 离线兜底：读 IndexedDB 列表快照，本地执行 folderId/tagId/keyword 过滤与分页 */
+  async function loadFromSnapshot(): Promise<boolean> {
+    const snapshot = await offlineDb.getList(scope.value)
+    if (!snapshot) return false
+
+    const kw = keyword.value.trim().toLowerCase()
+    let filtered = snapshot.items
+    if (folderId.value) filtered = filtered.filter((m) => m.folderId === folderId.value)
+    if (tagId.value) filtered = filtered.filter((m) => (m.tags ?? []).some((t) => t.id === tagId.value))
+    if (kw) {
+      filtered = filtered.filter(
+        (m) =>
+          m.title.toLowerCase().includes(kw) ||
+          (m.description ?? '').toLowerCase().includes(kw)
+      )
+    }
+    // 与服务端排序保持一致：最后编辑时间倒序
+    filtered = [...filtered].sort((a, b) => (a.lastEditedAt < b.lastEditedAt ? 1 : -1))
+
+    const size = pageSize.value > 0 ? pageSize.value : 20
+    const maxPage = Math.max(1, Math.ceil(filtered.length / size))
+    const p = Math.min(page.value, maxPage)
+    items.value = filtered.slice((p - 1) * size, p * size)
+    total.value = filtered.length
+    page.value = p
+    isOfflineSnapshot.value = true
+    lastSyncedAt.value = snapshot.syncedAt
+    return true
   }
 
   async function setScope(s: 'mine' | 'public') {
@@ -152,6 +193,8 @@ export const useMindMapsStore = defineStore('mindmaps', () => {
     folderId,
     tagId,
     keyword,
+    isOfflineSnapshot,
+    lastSyncedAt,
     load,
     setScope,
     setFolderFilter,

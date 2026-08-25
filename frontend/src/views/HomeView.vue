@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NButton,
@@ -36,6 +36,7 @@ import { useTemplatesStore } from '@/stores/templates'
 import { parseSwatch } from '@/api/templates'
 import { reportMindMap } from '@/api/admin'
 import { THEMES } from '@/themes/presets'
+import { syncAllOffline, getOfflineStatus, offlineState, formatSyncTime } from '@/offline/sync'
 
 const router = useRouter()
 const message = useMessage()
@@ -424,10 +425,45 @@ async function submitTags(): Promise<void> {
   }
 }
 
+// ---------- 离线状态 ----------
+/** 浏览器网络是否离线（online/offline 事件维护） */
+const isOffline = ref(typeof navigator !== 'undefined' ? navigator.onLine === false : false)
+const offlineLastSyncText = computed(() => formatSyncTime(offlineState.lastSync))
+/** 断网，或列表数据本身来自 IndexedDB 快照 → 显示全局离线提示条 */
+const showOfflineBanner = computed(() => isOffline.value || mapsStore.isOfflineSnapshot)
+
+function handleOnline() {
+  isOffline.value = false
+  // 网络恢复：静默触发全量同步（内部节流 10 分钟）
+  syncAllOffline().catch((err) => console.warn('[offline] 网络恢复后同步失败', err))
+}
+
+function handleOffline() {
+  isOffline.value = true
+}
+
 onMounted(async () => {
+  window.addEventListener('online', handleOnline)
+  window.addEventListener('offline', handleOffline)
+
+  // 补齐全局离线状态（lastSync），供提示条展示「最后同步时间」
+  getOfflineStatus()
+
   if (!mapsStore.items.length && !mapsStore.loading) {
     await mapsStore.load().catch(() => {})
   }
+
+  // 在线且已登录：静默全量同步到 IndexedDB（内部节流，10 分钟内重复挂载不重复拉取）
+  if (typeof navigator !== 'undefined' && navigator.onLine && authStore.isAuthenticated) {
+    syncAllOffline().catch((err) =>
+      console.warn('[offline] 快照同步失败，将在下次挂载或网络恢复时重试', err)
+    )
+  }
+})
+
+onUnmounted(() => {
+  window.removeEventListener('online', handleOnline)
+  window.removeEventListener('offline', handleOffline)
 })
 </script>
 
@@ -435,6 +471,12 @@ onMounted(async () => {
   <div class="home">
     <!-- 主内容区 -->
     <div class="home-content">
+      <!-- 离线提示条：断网或列表来自本地快照时显示 -->
+      <div v-if="showOfflineBanner" class="offline-banner">
+        <span class="offline-banner-icon">⚡</span>
+        当前离线，展示本地快照（只读）<span v-if="offlineLastSyncText"> · 最后同步 {{ offlineLastSyncText }}</span>
+      </div>
+
       <div class="home-header">
         <div class="title-row">
           <h1 class="title">{{ titleText }}</h1>
@@ -999,6 +1041,24 @@ onMounted(async () => {
 
 .home-content {
   width: 100%;
+}
+
+/* 离线提示条 */
+.offline-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 8px 14px;
+  font-size: 13px;
+  color: #b45309;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 8px;
+
+  .offline-banner-icon {
+    font-size: 13px;
+  }
 }
 
 .home-header {
