@@ -11,6 +11,7 @@ import {
 } from 'naive-ui'
 import { useThemeStore } from '@/stores/theme'
 import { useAuthStore } from '@/stores/auth'
+import PwaManager from '@/components/PwaManager.vue'
 
 const themeStore = useThemeStore()
 const authStore = useAuthStore()
@@ -28,6 +29,7 @@ onMounted(() => {
       <NMessageProvider>
         <NDialogProvider>
           <RouterView />
+          <PwaManager />
         </NDialogProvider>
       </NMessageProvider>
     </NLoadingBarProvider>
