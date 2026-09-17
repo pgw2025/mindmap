@@ -7,6 +7,7 @@ import Search from 'simple-mind-map/src/plugins/Search.js'
 import { verifyShare, fetchSharedMindMap } from '@/api/shares'
 import * as mindmapsApi from '@/api/mindmaps'
 import { useAuthStore } from '@/stores/auth'
+import NodeNoteTooltip from './editor/components/NodeNoteTooltip.vue'
 
 /** 后端 NodeShape 数字 → simple-mind-map 形状字符串 */
 const shapeMap: Record<number, string> = {
@@ -51,6 +52,7 @@ const copyLoading = ref(false)
 const shareVerified = ref(false)
 
 const canvasEl = ref<HTMLDivElement | null>(null)
+const noteTooltipRef = ref<InstanceType<typeof NodeNoteTooltip> | null>(null)
 let mindMapInstance: MindMap | null = null
 
 /** simple-mind-map 根节点布局方向（按后端 defaultLayout） */
@@ -169,6 +171,11 @@ async function loadMindMapData() {
       data: root || {
         data: { text: '（空思维导图）' },
         children: []
+      },
+      customNoteContentShow: {
+        show: (note: string, left: number, top: number) =>
+          noteTooltipRef.value?.show(note, left, top),
+        hide: () => noteTooltipRef.value?.hide()
       }
     } as any)
     MindMap.usePlugin(Search)
@@ -278,6 +285,7 @@ onMounted(() => {
         <button class="btn-canvas" @click="zoomIn" title="放大">+</button>
       </div>
       <div class="share-canvas" ref="canvasEl"></div>
+      <NodeNoteTooltip ref="noteTooltipRef" />
     </section>
 
     <!-- 登录提示弹窗 -->

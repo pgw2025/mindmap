@@ -305,6 +305,7 @@ import ShareDrawer from './components/ShareDrawer.vue'
 import VersionDrawer from './components/VersionDrawer.vue'
 import NodeContentModal from './components/NodeContentModal.vue'
 import NotePanel from './components/NotePanel.vue'
+import NodeNoteTooltip from './components/NodeNoteTooltip.vue'
 import OuterFrameStylePanel from './components/OuterFrameStylePanel.vue'
 import { useMindMapSync } from './composables/useMindMapSync'
 import { THEMES, getThemeConfig, getThemeIdOrDefault, type MindMapThemeConfig } from '@/themes/presets'
@@ -331,6 +332,7 @@ const readonly = computed(() => route.name === 'mindmap-preview')
 const mapDetail = ref<MindMapDetail | null>(null)
 const loading = ref(true)
 const mindMapRef = ref<HTMLDivElement | null>(null)
+const noteTooltipRef = ref<InstanceType<typeof NodeNoteTooltip> | null>(null)
 let mindMapInstance: MindMap | null = null
 
 // —— 离线快照状态 ——
@@ -448,6 +450,11 @@ function initMindMap() {
     scrollbarStyle: 'thin',
     minScale: 0.2,
     maxScale: 2,
+    customNoteContentShow: {
+      show: (note: string, left: number, top: number) =>
+        noteTooltipRef.value?.show(note, left, top),
+      hide: () => noteTooltipRef.value?.hide()
+    },
     beforeDragEnd: handleDragEnd
   })
 
@@ -1436,6 +1443,7 @@ watch(() => route.params.id, () => {
         </div>
       </div>
       <div ref="mindMapRef" class="mindmap-canvas"></div>
+      <NodeNoteTooltip ref="noteTooltipRef" />
       <div v-if="loading" class="loading-wrap">
         <div class="spinner"></div>
         <p>加载中...</p>
