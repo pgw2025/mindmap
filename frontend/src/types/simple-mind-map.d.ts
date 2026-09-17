@@ -43,6 +43,12 @@ declare module 'simple-mind-map/src/plugins/OuterFrame.js' {
   export default OuterFrame
 }
 
+declare module 'simple-mind-map/src/utils' {
+  export const throttle: (fn: (...args: any[]) => void, time: number, ctx?: any) => (...args: any[]) => void
+  export const debounce: (fn: (...args: any[]) => void, wait: number, ctx?: any) => (...args: any[]) => void
+  export const bfsWalk: (root: any, callback: (node: any) => void) => void
+}
+
 declare module 'simple-mind-map' {
   export default class MindMap {
     static readonly TREE: string

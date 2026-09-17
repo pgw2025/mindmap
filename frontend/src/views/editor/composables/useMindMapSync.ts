@@ -642,9 +642,12 @@ export function useMindMapSync(opts: {
     // ---------- 2. 展开/折叠变化（debounced，key=backendId） ----------
     const oldExpand = oldData.data.expand !== false
     const newExpand = data.data.expand !== false
-    if (oldExpand !== newExpand) {
+    if (oldExpand !== newExpand && !collapseBatchSyncActive) {
       scheduleCollapseUpdate(backendId, !newExpand)
     }
+    // 若 collapseBatchSyncActive（批量展开/折叠进行中），折叠变化的目标值
+    // 已由 applyExpandCollapse 内的单次 batchUpdate 统一落库，跳过逐节点同步，
+    // 避免 N 个节点触发 N 个防抖请求；其余字段分支照常处理。
 
     // ---------- 2.5 备注变化（debounced，key=backendId） ----------
     // note 可能为空字符串（清空备注），用 ?? '' 归一化比较
@@ -745,6 +748,92 @@ export function useMindMapSync(opts: {
       timer: setTimeout(flush, 250),
       flush
     })
+  }
+
+  /** 批量展开/折叠同步抑制标记：
+   *  「层级」菜单操作会一次性改变大量节点的 expand 状态，
+   *  data_change_detail 会为每个节点派发 update diff，若不抑制将触发
+   *  逐节点 debounced update（N 个请求）。抑制窗口内由 applyExpandCollapse
+   *  自行完成单次 batchUpdate 落库，diff 的折叠分支被跳过。 */
+  let collapseBatchSyncActive = false
+
+  /** ============================================================
+   *  批量展开/折叠（层级菜单）
+   *
+   *  mode:
+   *    - 'expand-all'   全部展开（simple-mind-map EXPAND_ALL）
+   *    - 'collapse-all' 全部折叠（UNEXPAND_ALL，仅根节点保持展开，收起后根节点居中）
+   *    - 数字 N         收起到第 N+1 级（UNEXPAND_TO_LEVEL，N=库内层级，
+   *                     layerIndex < N 的节点展开，其余有子节点的收起）
+   *
+   *  流程：
+   *    1. 与库内命令一致的逻辑预计算将发生变化的节点（仅统计有子节点的节点，
+   *       叶子节点的 isCollapsed 是无意义状态，不写库）
+   *    2. 置抑制标记 → execCommand 交由库修改 expand 并重渲染
+   *    3. 单次 batchUpdate 落库（入 undo/redo 栈，Ctrl+Z 一次整体还原）
+   *    4. 全部展开完成后自适应居中视图（node_tree_render_end 一次性监听）
+   *  ============================================================ */
+  async function applyExpandCollapse(mode: 'expand-all' | 'collapse-all' | number): Promise<void> {
+    const inst = getMindMapInstance()
+    if (!inst || readonly.value) return
+    const renderTree = (inst as any).renderer?.renderTree
+    if (!renderTree) return
+
+    // 1. 预计算将发生变化的节点（与 expandAllNode / unexpandAllNode / expandToLevel 逻辑一致）
+    const changed: Array<{ backendId: string; isCollapsed: boolean }> = []
+    const walk = (node: any, depth: number) => {
+      const hasChildren = Array.isArray(node.children) && node.children.length > 0
+      if (hasChildren) {
+        const targetExpand = mode === 'expand-all'
+          ? true
+          : mode === 'collapse-all'
+            ? depth !== 0 // 根节点永不折叠
+            : depth < mode
+        if (node.data.expand !== targetExpand) {
+          const backendId = getBackendId(node.data.uid)
+          if (backendId) {
+            changed.push({ backendId, isCollapsed: !targetExpand })
+          }
+        }
+        node.children.forEach((c: any) => walk(c, depth + 1))
+      }
+    }
+    walk(renderTree, 0)
+
+    // 2. 置抑制标记（覆盖 addHistory 节流 + data_change_detail 派发窗口）
+    collapseBatchSyncActive = true
+
+    try {
+      // 3. 交给库执行状态修改与重渲染
+      if (mode === 'expand-all') {
+        ; (inst as any).execCommand('EXPAND_ALL')
+        // 全部展开后画布通常溢出 → 渲染完成后自适应居中
+        const onRenderEnd = () => {
+          ; (inst as any).off('node_tree_render_end', onRenderEnd)
+          inst.view?.reset()
+        }
+        ; (inst as any).on('node_tree_render_end', onRenderEnd)
+        // 兜底清理：若 5 秒内没有渲染完成事件，移除一次性监听防止泄漏
+        setTimeout(() => { (inst as any).off('node_tree_render_end', onRenderEnd) }, 5000)
+      } else if (mode === 'collapse-all') {
+        ; (inst as any).execCommand('UNEXPAND_ALL') // 库内自带收起后根节点居中
+      } else {
+        ; (inst as any).execCommand('UNEXPAND_TO_LEVEL', mode)
+      }
+
+      // 4. 单次批量落库（走结构操作队列：统一同步状态标记与失败重试；
+      //    batchUpdate 成功后 pushHistory，产生一条 undo 记录）
+      if (changed.length > 0) {
+        const items = changed.map((c) => ({ id: c.backendId, isCollapsed: c.isCollapsed }))
+        await enqueueStructuralOp(
+          () => nodesStore.batchUpdate(items),
+          'collapse-batch'
+        )
+      }
+    } finally {
+      // 等待被抑制的 diff 派发完毕（addHistory 节流默认窗口内），再恢复逐节点同步
+      setTimeout(() => { collapseBatchSyncActive = false }, 600)
+    }
   }
 
   /** 备注更新核心逻辑（不带同步状态标记，供 flush 与失败重试复用） */
@@ -1075,18 +1164,33 @@ export function useMindMapSync(opts: {
     const root = inst.renderer.root
     if (!root) return
 
-    // 优先使用画布绝对坐标系计算落点方向
-    const { x: mouseCanvasX } = inst.toPos(lastMouseClientX, lastMouseClientY)
-    const { scaleX = 1, translateX = 0 } = inst.draw.transform()
-    const rootCanvasCenterX = (root.left + (root.width || 0) / 2) * scaleX + translateX
-    const targetDir: 'left' | 'right' = mouseCanvasX < rootCanvasCenterX ? 'left' : 'right'
-
     const rootUid = root.getData?.('uid')
 
     const willBeRootChild =
       info.overlapNodeUid === rootUid ||
       (info.prevNodeUid && findNodeParentUid(info.prevNodeUid) === rootUid) ||
       (info.nextNodeUid && findNodeParentUid(info.nextNodeUid) === rootUid)
+
+    // —— P1-3：优化根节点方向预判 ——
+    // 规则：
+    //   1. 拖到兄弟节点旁边（prev/next 存在）→ 继承该兄弟节点的方向（更符合直觉）
+    //   2. 直接拖到根节点上 → 按鼠标位置决定方向
+    //   3. 拖到非根节点子节点下 → 清除 dir，继承分支方向
+    let targetDir: 'left' | 'right' = 'right'
+
+    if (info.overlapNodeUid === rootUid) {
+      // 直接拖到根节点上 → 按鼠标位置判定
+      const { x: mouseCanvasX } = inst.toPos(lastMouseClientX, lastMouseClientY)
+      const { scaleX = 1, translateX = 0 } = inst.draw.transform()
+      const rootCanvasCenterX = (root.left + (root.width || 0) / 2) * scaleX + translateX
+      targetDir = mouseCanvasX < rootCanvasCenterX ? 'left' : 'right'
+    } else if (info.prevNodeUid || info.nextNodeUid) {
+      // 拖到兄弟节点旁边 → 继承兄弟节点的方向
+      const siblingUid = info.prevNodeUid || info.nextNodeUid
+      const siblingNode = siblingUid ? findRenderNodeByUid(siblingUid) : null
+      const siblingDir = siblingNode?.getData?.('dir')
+      targetDir = siblingDir === 'left' ? 'left' : 'right'
+    }
 
     if (willBeRootChild) {
       for (const node of info.beingDragNodeList) {
@@ -1100,6 +1204,24 @@ export function useMindMapSync(opts: {
         cleanDescendantDirs(node)
       }
     }
+  }
+
+  /** 根据 uid 在渲染树中查找节点 */
+  function findRenderNodeByUid(uid: string): any {
+    const inst = getMindMapInstance()
+    const root = inst?.renderer?.root
+    if (!root) return null
+    let result: any = null
+    const walk = (node: any) => {
+      if (result) return
+      if (node.getData?.('uid') === uid) {
+        result = node
+        return
+      }
+      node.children?.forEach(walk)
+    }
+    walk(root)
+    return result
   }
 
   /** ============================================================
@@ -1226,6 +1348,7 @@ export function useMindMapSync(opts: {
     bindGlobalMouseTracker,
     convertToMindMapData,
     reloadMindMap,
+    applyExpandCollapse,
     handleDragEnd,
     normalizeRootChildDirections,
     bindIncrementalSyncHandlers,

@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
+import { ref, onMounted, onUnmounted, computed, nextTick, watch, h } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
-import { useMessage, NModal, NDropdown } from 'naive-ui'
+import { useMessage, NModal, NDropdown, type DropdownOption } from 'naive-ui'
 import MindMap from 'simple-mind-map'
 import Search from 'simple-mind-map/src/plugins/Search.js'
 import Export from 'simple-mind-map/src/plugins/Export.js'
@@ -12,6 +12,7 @@ import Select from 'simple-mind-map/src/plugins/Select.js'
 import TouchEvent from 'simple-mind-map/src/plugins/TouchEvent.js'
 import AssociativeLine from 'simple-mind-map/src/plugins/AssociativeLine.js'
 import OuterFrame from 'simple-mind-map/src/plugins/OuterFrame.js'
+import { throttle } from 'simple-mind-map/src/utils'
 
 // 1. 增强 Drag 插件：修复松手后画布漂移 bug，并在松手时即时同步执行重叠检测，防止 300ms 节流导致落位判定失效
 if (Drag && (Drag as any).prototype) {
@@ -42,6 +43,153 @@ if (Drag && (Drag as any).prototype) {
     }
 
     return result
+  }
+
+  // —— P0-1 & P2-2：调整拖拽热区比例 ——
+  // 桌面端：兄弟节点热区从 1/4 扩大到 1/3，子节点区域相应从中间 1/2 缩小到 1/3
+  // 移动端：进一步扩大到 3/8，子节点区域约 1/4（触屏精度低，默认倾向同级插入）
+  // 思路：通过包装检测方法，临时放大 getNodeRect 返回的尺寸，
+  // 使得方法内部计算的 oneFourthHeight/oneFourthWidth 按比例扩大
+  const SIBLING_ZONE_SCALE_DESKTOP = 4 / 3  // 桌面端：H * 4/3 / 4 = H/3
+  const SIBLING_ZONE_SCALE_MOBILE = 1.5     // 移动端：H * 1.5 / 4 = 3H/8
+
+  const isMobileDrag = () => {
+    if (typeof window === 'undefined') return false
+    return window.innerWidth < 768 || ('ontouchstart' in window)
+  }
+
+  const wrapDragCheck = (origFn: any, sizeKey: 'originHeight' | 'originWidth') => {
+    return function (this: any, ...args: any[]) {
+      const origGetNodeRect = this.getNodeRect
+      const scale = isMobileDrag() ? SIBLING_ZONE_SCALE_MOBILE : SIBLING_ZONE_SCALE_DESKTOP
+      this.getNodeRect = function (node: any) {
+        const rect = origGetNodeRect.call(this, node)
+        rect[sizeKey] = rect[sizeKey] * scale
+        return rect
+      }
+      const result = origFn.apply(this, args)
+      this.getNodeRect = origGetNodeRect
+      return result
+    }
+  }
+
+  dragProto.handleVerticalCheck = wrapDragCheck(dragProto.handleVerticalCheck, 'originHeight')
+  dragProto.handleHorizontalCheck = wrapDragCheck(dragProto.handleHorizontalCheck, 'originWidth')
+
+  // —— P0-2：降低重叠检测节流时间（300ms → 120ms），让拖拽更跟手 ——
+  // 重写 bindEvent，在原始绑定完成后用更短的节流时间重新包装 checkOverlapNode
+  const origBindEvent = dragProto.bindEvent
+  dragProto.bindEvent = function (this: any) {
+    origBindEvent.call(this)
+    this.checkOverlapNode = throttle(Drag.prototype.checkOverlapNode, 120, this)
+  }
+
+  // —— P1-1：子节点模式视觉提示（目标节点高亮 + 标签） + 兄弟节点模式标签 ——
+  // 当拖拽进入「成为子节点」模式时，目标节点高亮虚线框 + 「添加为子节点」标签
+  // 当拖拽进入「同级插入」模式时，显示「插入为同级」标签
+  const origHandleOverlapNode = dragProto.handleOverlapNode
+  dragProto.handleOverlapNode = function (this: any) {
+    origHandleOverlapNode.call(this)
+    if (!this.overlapNode || !this.mindMap?.otherDraw) return
+
+    const node = this.overlapNode
+    const { left, top, width, height } = node
+    const padding = 6
+
+    // 高亮虚线框
+    if (!this._overlapHighlight) {
+      this._overlapHighlight = this.mindMap.otherDraw
+        .rect()
+        .radius(8)
+        .stroke({ color: '#18a058', width: 2, dasharray: '6,4' })
+        .fill({ color: 'rgba(24, 160, 88, 0.1)' })
+        .css('pointer-events', 'none')
+        .css('z-index', 9998)
+    }
+    this._overlapHighlight
+      .size(width + padding * 2, height + padding * 2)
+      .move(left - padding, top - padding)
+      .show()
+
+    // 文字标签
+    if (!this._overlapLabel) {
+      this._overlapLabel = this.mindMap.otherDraw.group().css('pointer-events', 'none')
+      this._overlapLabel._bg = this._overlapLabel.rect().radius(4).fill({ color: '#18a058' })
+      this._overlapLabel._text = this._overlapLabel
+        .text('添加为子节点')
+        .fill({ color: '#fff' })
+        .font({ size: 12, family: 'system-ui, -apple-system, sans-serif' })
+    }
+    const labelText = this._overlapLabel._text
+    const labelBg = this._overlapLabel._bg
+    const textBBox = labelText.bbox()
+    const padX = 10
+    const padY = 5
+    labelBg.size(textBBox.width + padX * 2, textBBox.height + padY * 2).move(0, 0)
+    labelText.move(padX, padY)
+    const labelW = textBBox.width + padX * 2
+    const labelX = left + width / 2 - labelW / 2
+    const labelY = top - 32
+    this._overlapLabel.move(labelX, labelY).show()
+
+    // 清理兄弟节点标签（避免两种模式同时显示）
+    if (this._siblingLabel) {
+      this._siblingLabel.hide()
+    }
+  }
+
+  // 包装 setPlaceholderRect：在兄弟节点模式下显示「插入为同级」标签
+  const origSetPlaceholderRect = dragProto.setPlaceholderRect
+  dragProto.setPlaceholderRect = function (this: any, opts: any) {
+    origSetPlaceholderRect.call(this, opts)
+    if (!this.mindMap?.otherDraw || this.overlapNode) return
+
+    const isSiblingMode = this.prevNode || this.nextNode
+    if (!isSiblingMode) return
+
+    const { x, y } = opts
+
+    if (!this._siblingLabel) {
+      this._siblingLabel = this.mindMap.otherDraw.group().css('pointer-events', 'none')
+      this._siblingLabel._bg = this._siblingLabel.rect().radius(4).fill({ color: '#3b82f6' })
+      this._siblingLabel._text = this._siblingLabel
+        .text('插入为同级')
+        .fill({ color: '#fff' })
+        .font({ size: 12, family: 'system-ui, -apple-system, sans-serif' })
+    }
+    const labelText = this._siblingLabel._text
+    const labelBg = this._siblingLabel._bg
+    const textBBox = labelText.bbox()
+    const padX = 10
+    const padY = 5
+    labelBg.size(textBBox.width + padX * 2, textBBox.height + padY * 2).move(0, 0)
+    labelText.move(padX, padY)
+    const labelW = textBBox.width + padX * 2
+    const labelX = x + this.placeholderWidth / 2 - labelW / 2
+    const labelY = y - 28
+    this._siblingLabel.move(labelX, labelY).show()
+
+    // 清理子节点高亮
+    if (this._overlapHighlight) this._overlapHighlight.hide()
+    if (this._overlapLabel) this._overlapLabel.hide()
+  }
+
+  // 清理高亮和标签
+  const origRemoveCloneNode = dragProto.removeCloneNode
+  dragProto.removeCloneNode = function (this: any) {
+    origRemoveCloneNode.call(this)
+    if (this._overlapHighlight) {
+      this._overlapHighlight.remove()
+      this._overlapHighlight = null
+    }
+    if (this._overlapLabel) {
+      this._overlapLabel.remove()
+      this._overlapLabel = null
+    }
+    if (this._siblingLabel) {
+      this._siblingLabel.remove()
+      this._siblingLabel = null
+    }
   }
 }
 
@@ -289,7 +437,7 @@ MindMap.usePlugin(TouchEvent)
 MindMap.usePlugin(AssociativeLine)
 MindMap.usePlugin(OuterFrame)
 
-import type { NodeDto, NodeCreatePayload, NodeUpdatePayload } from '@/api/nodes'
+import type { NodeDto, NodeCreatePayload, NodeUpdatePayload, NodeTreeNodeDto } from '@/api/nodes'
 import type { MindMapDetail } from '@/api/mindmaps'
 import { fetchMindMap, updateMindMap } from '@/api/mindmaps'
 import * as offlineDb from '@/offline/db'
@@ -378,6 +526,7 @@ const {
   bindGlobalMouseTracker,
   convertToMindMapData,
   reloadMindMap,
+  applyExpandCollapse,
   handleDragEnd,
   normalizeRootChildDirections,
   bindIncrementalSyncHandlers,
@@ -455,7 +604,13 @@ function initMindMap() {
         noteTooltipRef.value?.show(note, left, top),
       hide: () => noteTooltipRef.value?.hide()
     },
-    beforeDragEnd: handleDragEnd
+    beforeDragEnd: handleDragEnd,
+    // —— P1-2：拖拽透明度优化 ——
+    // 克隆节点更透明（看清下方落点），原节点更淡（视觉区分更明显）
+    dragOpacityConfig: {
+      cloneNodeOpacity: 0.55,
+      beingDragNodeOpacity: 0.25
+    }
   })
 
   // 全局鼠标位置记录（供 beforeDragEnd 判定方向用）
@@ -588,6 +743,36 @@ function initMindMap() {
   //    2. node_text_edit_change：编辑中实时 debounce 文本更新
   bindIncrementalSyncHandlers()
 
+  // —— P2-1：拖拽完成后显示可撤销提示 ——
+  let lastDragMsg: any = null
+  ;(mindMapInstance as any).on('node_dragend', () => {
+    if (readonly.value) return
+    if (lastDragMsg) {
+      lastDragMsg.destroy()
+      lastDragMsg = null
+    }
+    lastDragMsg = message.success('节点已移动', {
+      duration: 3000,
+      action: () => h('span', {
+        style: {
+          color: '#18a058',
+          cursor: 'pointer',
+          marginLeft: '8px',
+          fontWeight: 500
+        },
+        onClick: (e: Event) => {
+          e.stopPropagation()
+          handleUndo()
+          if (lastDragMsg) {
+            lastDragMsg.destroy()
+            lastDragMsg = null
+          }
+        }
+      }, '撤销')
+    } as any)
+    setTimeout(() => { lastDragMsg = null }, 3000)
+  })
+
   // 监听搜索匹配结果
   mindMapInstance.on('search_match_node_list_change', (...args: unknown[]) => {
     const list = args[0]
@@ -621,6 +806,11 @@ async function handleAddChild() {
   }
   try {
     await nodesStore.create(payload)
+    // 折叠态父节点上新增子节点时自动展开父节点（与画布 Tab/右键行为一致），
+    // 避免新节点在 reload 后被折叠隐藏
+    if (node?.isCollapsed) {
+      await nodesStore.update(node.id, { isCollapsed: false })
+    }
     reloadMindMap()
   } catch (e) {
     message.error((e as Error).message)
@@ -798,6 +988,53 @@ function handleZoomOut() {
 
 function handleReset() {
   mindMapInstance?.view?.reset()
+}
+
+/** ============ 层级菜单：全部展开 / 全部折叠 / 收起到第 N 级 ============ */
+const levelMenuBusy = ref(false)
+
+/** 「收起到第 N 级」的菜单项按当前导图实际深度生成（根节点为第 1 级），
+ *  最深到 7 级截断，避免菜单过长；深度不足时不显示无效层级 */
+const levelDropdownOptions = computed<DropdownOption[]>(() => {
+  const opts: DropdownOption[] = [
+    { label: '全部展开', key: 'expand-all' },
+    { type: 'divider', key: 'divider-1' },
+    { label: '全部折叠', key: 'collapse-all' },
+    { type: 'divider', key: 'divider-2' }
+  ]
+  let maxDepth = 1
+  const walk = (list: NodeTreeNodeDto[], depth: number) => {
+    for (const n of list) {
+      if (depth > maxDepth) maxDepth = depth
+      if (n.children?.length) walk(n.children, depth + 1)
+    }
+  }
+  if (nodesStore.tree?.length) walk(nodesStore.tree, 1)
+  const maxLevel = Math.min(maxDepth, 7)
+  for (let lv = 2; lv <= maxLevel; lv++) {
+    opts.push({ label: `收起到第 ${lv} 级`, key: String(lv) })
+  }
+  return opts
+})
+
+async function handleLevelSelect(key: string | number) {
+  if (readonly.value || isOfflineData.value || levelMenuBusy.value) return
+  levelMenuBusy.value = true
+  try {
+    if (key === 'expand-all') {
+      await applyExpandCollapse('expand-all')
+    } else if (key === 'collapse-all') {
+      await applyExpandCollapse('collapse-all')
+    } else {
+      // 菜单的「第 N 级」以根节点为第 1 级；库内 UNEXPAND_TO_LEVEL 的
+      // layerIndex 从根节点 0 起算，因此传 N - 1
+      await applyExpandCollapse(Number(key) - 1)
+    }
+  } catch (e) {
+    message.error((e as Error).message || '操作失败')
+  } finally {
+    levelMenuBusy.value = false
+  }
 }
 
 const currentThemeId = computed(() => getThemeIdOrDefault(mapDetail.value?.theme))
@@ -1353,6 +1590,16 @@ watch(() => route.params.id, () => {
           <button class="btn-tool-pill" @click="handleReset" title="自适应居中视图">
             <span class="pill-icon">⟲</span>
           </button>
+        </div>
+
+        <!-- 层级胶囊组：全部展开 / 全部折叠 / 收起到第 N 级 -->
+        <div class="btn-group-pill">
+          <NDropdown trigger="click" :options="levelDropdownOptions" @select="handleLevelSelect">
+            <button class="btn-tool-pill" :disabled="readonly || isOfflineData || levelMenuBusy"
+              title="层级：全部展开 / 全部折叠 / 收起到指定层级">
+              <span class="pill-icon">≡</span>
+            </button>
+          </NDropdown>
         </div>
 
         <span class="header-v-divider"></span>
