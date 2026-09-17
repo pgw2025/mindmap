@@ -302,19 +302,40 @@ public class NodeService : INodeService
         var nodeMap = nodes.ToDictionary(n => n.Id);
         var now = DateTime.UtcNow;
 
-        // 阶段1：带 SortOrder 的项先平移到临时排序区间，
-        // 避免 (MindMapId, ParentId, SortOrder) 唯一索引在同级排序交换时瞬时冲突。
-        var reorderItems = req.Nodes
-            .Where(x => x.SortOrder.HasValue && nodeMap.ContainsKey(x.Id))
-            .ToList();
-        if (reorderItems.Count > 0)
+        // 阶段1：把所有「可能被本次请求改变 (ParentId, SortOrder)」的父节点下
+        // 的全体兄弟节点，连同请求中的节点一起平移到临时排序区间。
+        // 与 MoveAsync 一致：必须「整组平移」而非「只平移请求内节点」，
+        // 否则阶段2 写入最终 SortOrder 时会与未提交的兄弟节点撞唯一索引
+        // (MindMapId, ParentId, SortOrder)，导致 Duplicate entry。
+        var affectedParentIds = new HashSet<Guid?>();
+        foreach (var item in req.Nodes)
         {
+            // 请求中带父节点变更的项，旧父节点与新父节点都可能受排序影响
+            if (item.ParentId.HasValue) affectedParentIds.Add(item.ParentId);
+        }
+        foreach (var item in req.Nodes)
+        {
+            if (nodeMap.TryGetValue(item.Id, out var n)) affectedParentIds.Add(n.ParentId);
+        }
+
+        var hasReorder = req.Nodes.Any(x => x.SortOrder.HasValue && nodeMap.ContainsKey(x.Id))
+                         || req.Nodes.Any(x => x.ParentId.HasValue && nodeMap.ContainsKey(x.Id));
+        if (hasReorder)
+        {
+            var parents = affectedParentIds
+                .Where(p => p.HasValue)
+                .Select(p => p!.Value)
+                .ToList();
+            // 只平移「有父节点」的兄弟（ParentId 非 null）；根节点（ParentId=null）
+            // 在 MySQL/MariaDB 唯一索引中 NULL 不参与去重，无需平移。
+            var siblings = await _db.Nodes
+                .Where(n => n.MindMapId == mindMapId && n.ParentId != null && parents.Contains(n.ParentId.Value))
+                .ToListAsync(ct);
             var temp = 1_000_000;
-            foreach (var item in reorderItems)
+            foreach (var s in siblings)
             {
-                var node = nodeMap[item.Id];
-                node.SortOrder = temp++;
-                node.UpdatedAt = now;
+                s.SortOrder = temp++;
+                s.UpdatedAt = now;
             }
             await _db.SaveChangesAsync(ct);
         }

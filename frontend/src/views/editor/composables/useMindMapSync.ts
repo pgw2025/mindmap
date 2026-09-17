@@ -952,23 +952,36 @@ export function useMindMapSync(opts: {
       })
     }
 
-    // 3. 第二遍：仍在原父节点下但排序变化的节点，合并为一次 batchUpdate。
-    //    move 之后 store 已刷新，被移动节点通常不再产生条目；
-    //    剩余条目来自同级排序调整（插入/移位导致的兄弟排序变化）。
-    const items: NodeBatchItem[] = []
+    // 3. 第二遍：提交「受影响父节点下完整兄弟集合」的 sortOrder。
+    //    修复 Duplicate entry 问题：此前只提交 targetUids 里排序变化的节点，
+    //    可能与该父节点下未提交的兄弟节点现有 sortOrder 撞 (MindMapId, ParentId, SortOrder)
+    //    唯一索引。现改为对每个受影响父节点，把其全部子节点按渲染树顺序
+    //    重编为 0..n-1 一并提交，保证请求自洽、无重复 sortOrder。
+    const affectedParentKeys = new Set<string | null>()
     for (const uid of targetUids) {
-      const backendId = await getBackendIdOrWait(uid)
-      if (!backendId) continue
-      const backendNode = nodesStore.findNode(backendId)
-      if (!backendNode) continue
-
       const newParentUid = parentOf.get(uid) ?? null
-      const newParentBackendId = newParentUid ? getBackendId(newParentUid) : null
-      if ((newParentBackendId ?? null) !== (backendNode.parentId ?? null)) continue
+      affectedParentKeys.add(newParentUid)
+    }
 
-      const newSortOrder = sortOrderOf.get(uid) ?? 0
-      if (newSortOrder !== backendNode.sortOrder) {
-        items.push({ id: backendId, sortOrder: newSortOrder })
+    const items: NodeBatchItem[] = []
+    const seenBackendIds = new Set<string>()
+    for (const parentUid of affectedParentKeys) {
+      // 收集该父节点下的全部子节点 uid（渲染树顺序）
+      const siblingUids: string[] = []
+      for (const [uid, p] of parentOf) {
+        if ((p ?? null) === (parentUid ?? null)) siblingUids.push(uid)
+      }
+      siblingUids.sort((a, b) => (sortOrderOf.get(a) ?? 0) - (sortOrderOf.get(b) ?? 0))
+
+      let order = 0
+      for (const uid of siblingUids) {
+        const backendId = await getBackendIdOrWait(uid)
+        if (!backendId) continue
+        // 跳过已提交的节点（避免同一次 batch 内重复 id）
+        if (seenBackendIds.has(backendId)) continue
+        seenBackendIds.add(backendId)
+        items.push({ id: backendId, sortOrder: order })
+        order++
       }
     }
     if (items.length > 0) {
