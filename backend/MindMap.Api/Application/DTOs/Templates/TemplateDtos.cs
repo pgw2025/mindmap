@@ -92,3 +92,67 @@ public class TemplateUpdateRequest
     [StringLength(512)]
     public string? SwatchJson { get; set; }
 }
+
+// ===================== 导入导出 DTO =====================
+
+/// <summary>
+/// 导出文件顶层结构（.mmtpl.json）。
+/// 单条导出时 "template" 为一个对象；批量导出时用 <see cref="TemplateExportBatchFile"/>。
+/// </summary>
+public class TemplateExportFile
+{
+    /// <summary>格式标识，用于导入时校验，固定为 "mindmap-template"。</summary>
+    public string Format { get; set; } = "mindmap-template";
+
+    /// <summary>文件结构版本，当前仅支持 1。</summary>
+    public int Version { get; set; } = 1;
+
+    /// <summary>导出时间（UTC）。</summary>
+    public DateTime ExportedAt { get; set; }
+
+    /// <summary>单个模板内容。</summary>
+    public TemplateExportPayload? Template { get; set; }
+}
+
+/// <summary>批量导出文件顶层结构：template 换成 templates 数组。</summary>
+public class TemplateExportBatchFile
+{
+    public string Format { get; set; } = "mindmap-template";
+    public int Version { get; set; } = 1;
+    public DateTime ExportedAt { get; set; }
+    public List<TemplateExportPayload> Templates { get; set; } = new();
+}
+
+/// <summary>导出的模板本体（不含 Id/CreatedAt 等服务端私有字段）。</summary>
+public class TemplateExportPayload
+{
+    public string Name { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public int SortOrder { get; set; }
+    public bool IsEnabled { get; set; } = true;
+
+    /// <summary>完整 MindMapThemeConfig，以结构化对象存储。</summary>
+    public System.Text.Json.JsonElement ConfigJson { get; set; }
+
+    /// <summary>初始节点树，可为 null（仅样式模板）。</summary>
+    public System.Text.Json.JsonElement? InitialStructureJson { get; set; }
+
+    /// <summary>缩略图色板，可为 null（导入时自动重建）。</summary>
+    public System.Text.Json.JsonElement? SwatchJson { get; set; }
+}
+
+/// <summary>导入报告。</summary>
+public class TemplateImportResult
+{
+    public int Created { get; set; }
+    public int Skipped { get; set; }
+    public List<TemplateImportFailedItem> Failed { get; set; } = new();
+    public int Total => Created + Skipped + Failed.Count;
+}
+
+/// <summary>单条导入失败明细。</summary>
+public class TemplateImportFailedItem
+{
+    public string Name { get; set; } = string.Empty;
+    public string Reason { get; set; } = string.Empty;
+}

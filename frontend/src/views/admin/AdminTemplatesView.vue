@@ -16,8 +16,11 @@ import {
   NTabPane,
   NRadioGroup,
   NRadioButton,
+  NUpload,
+  NUploadDragger,
   useMessage,
-  type DataTableColumns
+  type DataTableColumns,
+  type UploadFileInfo
 } from 'naive-ui'
 import { useTemplatesStore } from '@/stores/templates'
 import * as templatesApi from '@/api/templates'
@@ -93,6 +96,53 @@ const presetId = ref<string>('classic')
 const deleteModalVisible = ref(false)
 const deleteTarget = ref<AdminTemplateListItem | null>(null)
 const deleteSubmitting = ref(false)
+
+// ---------- 导入导出 ----------
+const importing = ref(false)
+const importModalVisible = ref(false)
+const importResult = ref<templatesApi.TemplateImportResult | null>(null)
+
+async function handleExport(row: AdminTemplateListItem): Promise<void> {
+  try {
+    await templatesApi.exportTemplate(row.id)
+    message.success(`已导出「${row.name}」`)
+  } catch (e) {
+    message.error((e as Error).message)
+  }
+}
+
+async function handleExportAll(): Promise<void> {
+  try {
+    await templatesApi.exportAllTemplates()
+    message.success('已导出全部模板')
+  } catch (e) {
+    message.error((e as Error).message)
+  }
+}
+
+function openImport(): void {
+  importResult.value = null
+  importModalVisible.value = true
+}
+
+async function handleImportUpload(data: { file: UploadFileInfo }): Promise<void> {
+  const raw = data.file.file
+  if (!raw) return
+  importing.value = true
+  try {
+    importResult.value = await templatesApi.importTemplate(raw)
+    await load()
+  } catch (e) {
+    message.error((e as Error).message)
+  } finally {
+    importing.value = false
+  }
+}
+
+function closeImport(): void {
+  importModalVisible.value = false
+  importResult.value = null
+}
 
 // ---------- 预览实例 ----------
 const previewRef = ref<HTMLDivElement | null>(null)
@@ -535,10 +585,11 @@ const columns = computed<DataTableColumns<AdminTemplateListItem>>(() => [
   { title: '创建人', key: 'createdByName', width: 100, ellipsis: { tooltip: true } },
   { title: '更新时间', key: 'updatedAt', width: 150, render: (row) => formatDate(row.updatedAt) },
   {
-    title: '操作', key: 'actions', width: 220, fixed: 'right',
+    title: '操作', key: 'actions', width: 260, fixed: 'right',
     render: (row) =>
       h(NSpace, { size: 4 }, () => [
         h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => openEdit(row) }, () => '编辑'),
+        h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => handleExport(row) }, () => '导出'),
         h(NButton, {
           size: 'tiny', quaternary: true,
           type: row.isEnabled ? 'error' : 'success',
@@ -567,6 +618,8 @@ onBeforeUnmount(() => {
         @keyup.enter="applySearch" />
       <NButton size="small" type="primary" @click="applySearch">搜索</NButton>
       <NButton size="small" type="success" @click="openCreate">+ 新建模板</NButton>
+      <NButton size="small" @click="openImport">导入</NButton>
+      <NButton size="small" @click="handleExportAll">导出全部</NButton>
     </NSpace>
 
     <NDataTable :columns="columns" :data="store.adminItems" :loading="loading" :bordered="false" :single-line="false"
@@ -771,6 +824,55 @@ onBeforeUnmount(() => {
           <NButton type="error" size="small" :loading="deleteSubmitting" @click="submitDelete">
             确认删除
           </NButton>
+        </div>
+      </template>
+    </NModal>
+
+    <!-- 导入模板 -->
+    <NModal v-model:show="importModalVisible" preset="card" title="导入模板" style="max-width: 520px" :bordered="false"
+      size="medium">
+      <div style="display: flex; flex-direction: column; gap: 16px;">
+        <p style="margin: 0; color: #64748b; font-size: 13px; line-height: 1.6;">
+          选择 <code>.mmtpl.json</code> 文件导入。同名模板将自动跳过，导入结果会逐条列出。
+        </p>
+
+        <NUpload :show-file-list="false" accept=".json,.mmtpl.json,application/json" :default-upload="false"
+          @change="handleImportUpload">
+          <NUploadDragger>
+            <div style="padding: 24px 0; text-align: center;">
+              <div style="font-size: 14px; color: #334155;">点击或拖拽文件到此处上传</div>
+              <div style="font-size: 12px; color: #94a3b8; margin-top: 6px;">
+                仅支持模板导出文件（.mmtpl.json）
+              </div>
+            </div>
+          </NUploadDragger>
+        </NUpload>
+
+        <div v-if="importing" style="text-align: center; color: #64748b; font-size: 13px;">正在导入…</div>
+
+        <div v-if="importResult" class="import-result">
+          <div class="import-result-row">
+            <span class="label">新建成功</span>
+            <span class="value success">{{ importResult.created }}</span>
+          </div>
+          <div class="import-result-row">
+            <span class="label">跳过（重名）</span>
+            <span class="value warn">{{ importResult.skipped }}</span>
+          </div>
+          <div class="import-result-row">
+            <span class="label">失败</span>
+            <span class="value error">{{ importResult.failed.length }}</span>
+          </div>
+          <div v-if="importResult.failed.length > 0" class="import-failed-list">
+            <div v-for="(f, i) in importResult.failed" :key="i" class="import-failed-item">
+              <b>{{ f.name || '（未命名）' }}</b>：{{ f.reason }}
+            </div>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <div style="display: flex; justify-content: flex-end;">
+          <NButton size="small" @click="closeImport">关闭</NButton>
         </div>
       </template>
     </NModal>
@@ -1003,6 +1105,63 @@ onBeforeUnmount(() => {
   margin: 6px 0 0;
   font-size: 12px;
   color: var(--app-text-secondary);
+}
+
+// 导入结果
+.import-result {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: #f8fafc;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+
+  .import-result-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+
+    .label {
+      color: #64748b;
+      width: 110px;
+      flex-shrink: 0;
+    }
+
+    .value {
+      font-weight: 600;
+
+      &.success {
+        color: #16a34a;
+      }
+
+      &.warn {
+        color: #d97706;
+      }
+
+      &.error {
+        color: #dc2626;
+      }
+    }
+  }
+
+  .import-failed-list {
+    margin-top: 4px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--app-border);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 160px;
+    overflow-y: auto;
+
+    .import-failed-item {
+      font-size: 12px;
+      color: #64748b;
+      line-height: 1.5;
+    }
+  }
 }
 
 @media (max-width: 767px) {

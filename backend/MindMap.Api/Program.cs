@@ -175,10 +175,13 @@ using (var scope = app.Services.CreateScope())
             await db.SaveChangesAsync();
             Log.Information("已创建默认管理员账号：{Username} / {Password}（请尽快修改）", defaultAdminUsername, defaultAdminPassword);
         }
+
+        // 初始化内置模板（仅当模板表为空时写入）
+        await TemplateSeedData.EnsureTemplatesAsync(db);
     }
     catch (Exception ex)
     {
-        Log.Warning(ex, "数据库迁移/管理员种子执行失败，应用仍将启动");
+        Log.Warning(ex, "数据库迁移/种子数据执行失败，应用仍将启动");
     }
 }
 

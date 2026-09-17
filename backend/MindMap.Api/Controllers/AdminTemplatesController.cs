@@ -1,3 +1,5 @@
+using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MindMap.Api.Application.DTOs.Templates;
@@ -55,9 +57,49 @@ public class AdminTemplatesController : ControllerBase
         return ApiResult.Ok(message: "已删除");
     }
 
+    [HttpGet("export")]
+    public async Task<IActionResult> ExportAll(CancellationToken ct)
+    {
+        RequireAdmin(out _);
+        var file = await _svc.ExportAllAsync(ct);
+        var json = JsonSerializer.Serialize(file, JsonOptions);
+        var bytes = Encoding.UTF8.GetBytes(json);
+        var fileName = $"templates-{DateTime.UtcNow:yyyyMMdd-HHmmss}.mmtpl.json";
+        return File(bytes, "application/json", fileName);
+    }
+
+    [HttpGet("{id:guid}/export")]
+    public async Task<IActionResult> Export(Guid id, CancellationToken ct)
+    {
+        RequireAdmin(out _);
+        var file = await _svc.ExportAsync(id, ct);
+        var json = JsonSerializer.Serialize(file, JsonOptions);
+        var bytes = Encoding.UTF8.GetBytes(json);
+        var safeName = SanitizeFileName(file.Template?.Name) ?? "template";
+        var fileName = $"{safeName}.mmtpl.json";
+        return File(bytes, "application/json", fileName);
+    }
+
+    [HttpPost("import")]
+    public async Task<ApiResult<TemplateImportResult>> Import([FromForm] IFormFile file, CancellationToken ct)
+    {
+        RequireAdmin(out _);
+        return ApiResult<TemplateImportResult>.Ok(await _svc.ImportAsync(file, ct));
+    }
+
     private void RequireAdmin(out Guid op)
     {
         op = _current.UserId ?? throw ApiException.Forbidden("未登录");
         if (!_current.IsAdmin) throw ApiException.Forbidden("需要管理员权限");
+    }
+
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    private static string? SanitizeFileName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return null;
+        var invalid = Path.GetInvalidFileNameChars();
+        var cleaned = new string(name.Trim().Select(c => invalid.Contains(c) ? '_' : c).ToArray());
+        return string.IsNullOrWhiteSpace(cleaned) ? null : cleaned;
     }
 }

@@ -38,6 +38,10 @@ async function doRefresh(): Promise<authApi.AuthResponse> {
 // 响应拦截器：解包 ApiResult，处理 401（静默刷新）
 http.interceptors.response.use(
   (response) => {
+    // blob 下载需要拿到响应头（Content-Disposition 携带导出文件名），直接返回完整 response
+    if (response.config.responseType === 'blob') {
+      return response
+    }
     const payload = response.data
     if (payload && typeof payload === 'object' && 'code' in payload) {
       const result = payload as { code: number; message?: string; data: unknown }
