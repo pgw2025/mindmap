@@ -564,6 +564,12 @@ const outerFrameConfig = ref({
   textBgColor: 'rgba(9,132,227,0.05)'
 })
 
+/** 外框标题浮动编辑器状态 */
+const outerFrameTitleEditorVisible = ref(false)
+const outerFrameTitleEditorValue = ref('')
+const outerFrameTitleEditorStyle = ref({ left: '0px', top: '0px', fontSize: '14px', color: '#333' })
+const outerFrameTitleEditorInputRef = ref<HTMLInputElement | null>(null)
+
 /** 当前选中节点（供 NodeContentModal 使用） */
 const selectedNodeForContent = computed<NodeDto | null>(() => {
   if (!selectedNodeId.value) return null
@@ -708,18 +714,41 @@ function initMindMap() {
     const active = args[0] as { el?: { cacheStyle?: any }, node?: any, range?: [number, number] } | undefined
     const inst = mindMapInstance
     if (active && inst?.outerFrame) {
-      // 从激活外框关联的第一个节点读取 outerFrame 数据
       const of = (inst.outerFrame as any)
-      const styleConfig = of.getStyle ? of.getStyle(active.node) : {}
-      // 合并默认值和实际样式
-      const nodeData = active.node?.nodeData?.data?.outerFrame || {}
+
+      // 1. 尝试从 getStyle 获取默认样式（兼容不同版本的节点结构）
+      let styleConfig: any = {}
+      try {
+        if (of.getStyle && active.node && typeof active.node.getData === 'function') {
+          styleConfig = of.getStyle(active.node) || {}
+        }
+      } catch {
+        // getStyle 调用失败，忽略
+      }
+
+      // 2. 从 el.cacheStyle 兜底读取
+      if (!Object.keys(styleConfig).length && active.el?.cacheStyle) {
+        styleConfig = active.el.cacheStyle
+      }
+
+      // 3. 从节点数据中读取实际的外框配置
+      let nodeData: any = {}
+      const node = active.node
+      if (node) {
+        // 尝试多种路径获取 outerFrame 数据
+        nodeData = node.nodeData?.data?.outerFrame
+          ?? node.data?.outerFrame
+          ?? (typeof node.getData === 'function' ? node.getData()?.outerFrame : null)
+          ?? {}
+      }
+
       outerFrameConfig.value = {
         strokeColor: nodeData.strokeColor ?? styleConfig.strokeColor ?? '#0984e3',
         strokeWidth: nodeData.strokeWidth ?? styleConfig.strokeWidth ?? 2,
         strokeDasharray: nodeData.strokeDasharray ?? styleConfig.strokeDasharray ?? '5,5',
         radius: nodeData.radius ?? styleConfig.radius ?? 5,
         fill: nodeData.fill ?? styleConfig.fill ?? 'rgba(9,132,227,0.05)',
-        text: nodeData.text ?? '',
+        text: nodeData.text ?? styleConfig.text ?? '',
         textFontSize: nodeData.textFontSize ?? styleConfig.textFontSize ?? 14,
         textColor: nodeData.textColor ?? styleConfig.textColor ?? '#333',
         textBgColor: nodeData.textBgColor ?? styleConfig.textBgColor ?? 'rgba(9,132,227,0.05)'
@@ -737,6 +766,9 @@ function initMindMap() {
   mindMapInstance.on('outer_frame_delete', () => {
     outerFramePanelVisible.value = false
   })
+
+  // 绑定双击外框标题编辑事件
+  mindMapRef.value?.addEventListener('dblclick', handleOuterFrameTitleDblClick)
 
   // —— 增量同步事件绑定：替代旧的 data_change → syncToBackend 整树 diff 方案
   //    1. data_change_detail：simple-mind-map 内置 diff，传出 create/update/delete 明细
@@ -948,6 +980,74 @@ function removeOuterFrame() {
   if (!inst || !inst.outerFrame) return
   ;(inst.outerFrame as any).removeActiveOuterFrame()
   outerFramePanelVisible.value = false
+}
+
+/** 双击外框标题：显示浮动输入框进行编辑 */
+function handleOuterFrameTitleDblClick(e: MouseEvent) {
+  if (readonly.value) return
+  const target = e.target as HTMLElement
+  // 判断是否点击了外框文字元素（simple-mind-map 外框标题的 class 包含 outer-frame-text 或类似）
+  const textEl = target.closest('[class*="outer-frame-text"], [class*="outer_frame_text"], text') as SVGTextElement | null
+  if (!textEl) return
+
+  // 确认外框处于激活状态（样式面板已打开即表示激活）
+  const inst = mindMapInstance
+  if (!inst?.outerFrame || !outerFramePanelVisible.value) return
+
+  // 获取文字元素在画布容器中的位置
+  const canvasRect = mindMapRef.value?.getBoundingClientRect()
+  const textRect = textEl.getBoundingClientRect()
+  if (!canvasRect) return
+
+  const left = textRect.left - canvasRect.left
+  const top = textRect.top - canvasRect.top
+  const width = textRect.width
+  const height = textRect.height
+
+  // 直接从当前面板配置读取（激活时已同步）
+  const config = outerFrameConfig.value
+  const fontSize = config.textFontSize ?? 14
+  const textColor = config.textColor ?? '#333'
+  const currentText = config.text ?? ''
+
+  // 设置编辑器样式和位置
+  outerFrameTitleEditorStyle.value = {
+    left: `${left}px`,
+    top: `${top}px`,
+    fontSize: `${fontSize}px`,
+    color: textColor
+  }
+  outerFrameTitleEditorValue.value = currentText
+  outerFrameTitleEditorVisible.value = true
+
+  // 聚焦并选中全部文字
+  nextTick(() => {
+    const input = outerFrameTitleEditorInputRef.value
+    if (input) {
+      input.focus()
+      input.select()
+      // 设置输入框宽度略大于文字宽度
+      input.style.width = `${Math.max(width + 20, 80)}px`
+      input.style.height = `${height + 4}px`
+    }
+  })
+}
+
+/** 确认外框标题编辑 */
+function confirmOuterFrameTitleEdit() {
+  const newText = outerFrameTitleEditorValue.value.trim()
+  const inst = mindMapInstance
+  if (inst?.outerFrame) {
+    ;(inst.outerFrame as any).updateActiveOuterFrame({ text: newText })
+    // 同步更新本地配置
+    outerFrameConfig.value.text = newText
+  }
+  outerFrameTitleEditorVisible.value = false
+}
+
+/** 取消外框标题编辑 */
+function cancelOuterFrameTitleEdit() {
+  outerFrameTitleEditorVisible.value = false
 }
 
 /** 备注面板内容变化：写入 simple-mind-map 节点 data.note，触发 data_change_detail 增量同步到后端 */
@@ -1706,6 +1806,17 @@ watch(() => route.params.id, () => {
       <!-- 外框样式面板：选中外框激活时显示 -->
       <OuterFrameStylePanel :visible="outerFramePanelVisible" :config="outerFrameConfig"
         @update="updateOuterFrameStyle" @remove="removeOuterFrame" @close="outerFramePanelVisible = false" />
+
+      <!-- 外框标题浮动编辑器：双击标题时出现 -->
+      <input v-if="outerFrameTitleEditorVisible" ref="outerFrameTitleEditorInputRef"
+        v-model="outerFrameTitleEditorValue"
+        class="outer-frame-title-editor"
+        :style="outerFrameTitleEditorStyle"
+        @blur="confirmOuterFrameTitleEdit"
+        @keydown.enter="confirmOuterFrameTitleEdit"
+        @keydown.esc="cancelOuterFrameTitleEdit"
+        @click.stop
+        @dblclick.stop />
     </main>
 
     <!-- 版本历史抽屉（含新建版本弹窗） -->
