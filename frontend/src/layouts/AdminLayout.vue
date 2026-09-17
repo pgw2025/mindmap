@@ -40,8 +40,8 @@ const navItems: NavItem[] = [
   { name: 'admin-dashboard', label: '看板', icon: GridOutline, showInBottom: true },
   { name: 'admin-users', label: '用户', icon: PeopleOutline, showInBottom: true },
   { name: 'admin-mindmaps', label: '导图', icon: MapOutline, showInBottom: true },
-  { name: 'admin-reports', label: '举报', icon: FlagOutline, showInBottom: true },
-  { name: 'admin-templates', label: '模板管理', icon: LayersOutline }
+  { name: 'admin-templates', label: '模板', icon: LayersOutline, showInBottom: true },
+  { name: 'admin-reports', label: '举报审核', icon: FlagOutline }
 ]
 
 const bottomNavItems = computed(() => navItems.filter((item) => item.showInBottom))
@@ -230,11 +230,9 @@ onMounted(async () => {
         @click="go(item.name)"
       >
         <div class="bottom-nav-icon">
-          <NBadge :value="item.name === 'admin-reports' ? pendingReportCount : 0" :max="99" :show-zero="false" type="error" size="small">
-            <NIcon size="20">
-              <component :is="item.icon" />
-            </NIcon>
-          </NBadge>
+          <NIcon size="20">
+            <component :is="item.icon" />
+          </NIcon>
         </div>
         <span class="bottom-nav-label">{{ item.label }}</span>
       </div>

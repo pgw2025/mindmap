@@ -1423,8 +1423,8 @@ onBeforeUnmount(() => {
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
-  background: #f1f5f9;
-  color: #475569;
+  background: rgba(148, 163, 184, 0.15);
+  color: var(--app-text-primary);
 
   &:active {
     transform: scale(0.96);
@@ -1432,18 +1432,18 @@ onBeforeUnmount(() => {
   }
 
   &.primary {
-    background: #eff6ff;
-    color: #2563eb;
+    background: rgba(37, 99, 235, 0.15);
+    color: #3b82f6;
   }
 
   &.warn {
-    background: #fef3c7;
-    color: #b45309;
+    background: rgba(217, 119, 6, 0.15);
+    color: #f59e0b;
   }
 
   &.success {
-    background: #dcfce7;
-    color: #166534;
+    background: rgba(22, 163, 74, 0.15);
+    color: #22c55e;
   }
 }
 
