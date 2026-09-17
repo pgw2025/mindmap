@@ -23,8 +23,11 @@ const emit = defineEmits<{
 
 const localNode = ref<Partial<NodeDto>>({})
 
-/** 移动端：工具栏折叠到只显示操作按钮，点击「更多」展开样式 */
+/** 移动端：样式面板折叠，点击「更多样式」展开 */
 const mobileExpanded = ref(false)
+
+/** 移动端：操作区折叠，只显示常用按钮，点击「更多」展开全部 */
+const mobileActionsExpanded = ref(false)
 
 watch(
   () => props.node,
@@ -33,6 +36,7 @@ watch(
       localNode.value = { ...val }
       // 切换节点时自动折叠移动端扩展面板
       mobileExpanded.value = false
+      mobileActionsExpanded.value = false
     }
   },
   { immediate: true, deep: true }
@@ -129,15 +133,11 @@ function selectEdgeStyle(style: EdgeStyle) {
 
 <template>
   <div class="node-toolbar">
-    <!-- 操作区 -->
-    <div class="toolbar-section actions">
+    <!-- 操作区 - 常用按钮（移动端始终可见） -->
+    <div class="toolbar-section actions actions-primary">
       <button class="tool-btn" @click="emit('add-child')" title="添加子节点">
         <span class="icon">＋</span>
         <span class="label">子节点</span>
-      </button>
-      <button v-if="!isRoot" class="tool-btn" @click="emit('add-sibling')" title="添加同级节点">
-        <span class="icon">∥</span>
-        <span class="label">同级</span>
       </button>
       <button v-if="!isRoot" class="tool-btn danger" @click="emit('delete')" title="删除节点">
         <span class="icon">🗑</span>
@@ -147,6 +147,24 @@ function selectEdgeStyle(style: EdgeStyle) {
         <span class="icon">⧉</span>
         <span class="label">复制</span>
       </button>
+      <button class="tool-btn" :class="{ 'has-note': !!localNode.note }" @click="emit('open-note')" title="编辑备注">
+        <span class="icon">📝</span>
+        <span class="label">备注</span>
+      </button>
+      <!-- 移动端：更多/收起 切换按钮 -->
+      <button class="tool-btn mobile-only actions-toggle" @click="mobileActionsExpanded = !mobileActionsExpanded"
+        :title="mobileActionsExpanded ? '收起更多操作' : '展开更多操作'">
+        <span class="icon">{{ mobileActionsExpanded ? '▲' : '⋯' }}</span>
+        <span class="label">{{ mobileActionsExpanded ? '收起' : '更多' }}</span>
+      </button>
+    </div>
+
+    <!-- 操作区 - 更多按钮（移动端折叠，桌面端始终可见） -->
+    <div class="toolbar-section actions actions-secondary" :class="{ 'mobile-collapsed': !mobileActionsExpanded }">
+      <button v-if="!isRoot" class="tool-btn" @click="emit('add-sibling')" title="添加同级节点">
+        <span class="icon">∥</span>
+        <span class="label">同级</span>
+      </button>
       <button class="tool-btn" @click="emit('paste')" title="粘贴 (Ctrl+V)">
         <span class="icon">📋</span>
         <span class="label">粘贴</span>
@@ -154,10 +172,6 @@ function selectEdgeStyle(style: EdgeStyle) {
       <button class="tool-btn" @click="toggleCollapse" title="折叠/展开">
         <span class="icon">{{ localNode.isCollapsed ? '▶' : '▼' }}</span>
         <span class="label">{{ localNode.isCollapsed ? '展开' : '折叠' }}</span>
-      </button>
-      <button class="tool-btn" :class="{ 'has-note': !!localNode.note }" @click="emit('open-note')" title="编辑备注">
-        <span class="icon">📝</span>
-        <span class="label">备注</span>
       </button>
       <button class="tool-btn" @click="emit('create-line')" title="连接到其他节点">
         <span class="icon">🔗</span>
@@ -305,6 +319,11 @@ function selectEdgeStyle(style: EdgeStyle) {
   flex-direction: row;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+/* 桌面端：两组操作按钮视觉上合并为一组 */
+.actions-secondary {
+  margin-top: -6px;
 }
 
 .tool-btn {
@@ -545,30 +564,58 @@ function selectEdgeStyle(style: EdgeStyle) {
   .actions {
     justify-content: flex-start;
     flex-wrap: nowrap;
-    overflow-x: auto;
-    overflow-y: hidden;
-    -webkit-overflow-scrolling: touch;
-    overscroll-behavior: contain;
-    touch-action: pan-x;
     gap: 5px;
     padding-bottom: 2px;
+    width: 100%;
 
     .tool-btn {
-      flex: 0 0 auto;
-      min-width: 46px;
-      padding: 4px 6px;
+      flex: 1 1 0;
+      min-width: 0;
+      padding: 6px 4px;
       border-radius: 6px;
-      gap: 1px;
+      gap: 2px;
 
       .icon {
-        font-size: 13px;
+        font-size: 15px;
         line-height: 1.2;
       }
 
       .label {
-        font-size: 9.5px;
+        font-size: 10px;
         line-height: 1.1;
       }
+    }
+  }
+
+  /* 移动端：第二行操作区（更多按钮），折叠时隐藏 */
+  .actions-secondary {
+    margin-top: 0;
+    padding-top: 4px;
+    border-top: 1px solid var(--app-border, #e0e0e6);
+    display: flex;
+    overflow: hidden;
+    transition: max-height 0.25s ease, padding-top 0.25s ease, opacity 0.2s ease;
+    max-height: 200px;
+    opacity: 1;
+  }
+
+  .actions-secondary.mobile-collapsed {
+    max-height: 0;
+    padding-top: 0;
+    border-top-color: transparent;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  /* 移动端「更多/收起」按钮高亮 */
+  .actions-toggle {
+    background: var(--app-primary, #18a058);
+    border-color: var(--app-primary, #18a058);
+    color: #fff;
+
+    &:hover {
+      background: #138047;
+      border-color: #138047;
     }
   }
 
