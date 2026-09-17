@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { NCard, NEmpty, NIcon, NSpin, NGrid, NGridItem, NButton, useMessage } from 'naive-ui'
+import { NCard, NEmpty, NIcon, NSpin, NGrid, NGridItem, useMessage } from 'naive-ui'
 import {
   PeopleOutline,
   MapOutline,

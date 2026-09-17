@@ -566,8 +566,8 @@ function formatShortDate(iso: string): string {
   return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`
 }
 
-function getSwatchColors(swatchJson: string): string[] {
-  const sw = templatesApi.parseSwatch(swatchJson)
+function getSwatchColors(swatchJson: string | null | undefined): string[] {
+  const sw = swatchJson ? templatesApi.parseSwatch(swatchJson) : null
   if (!sw) return ['#ccc', '#eee', '#999', '#fff']
   return [sw.rootFill, sw.secondFill, sw.lineColor, sw.bg]
 }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NIcon, NLayout, NLayoutContent, NLayoutHeader, NLayoutSider, NDrawer, NDrawerContent, NDivider, NTooltip, useMessage, NBadge } from 'naive-ui'
+import { NButton, NIcon, NLayout, NLayoutContent, NLayoutHeader, NLayoutSider, NDrawer, NDrawerContent, NDivider, NTooltip, useMessage } from 'naive-ui'
 import {
   GridOutline,
   PeopleOutline,
@@ -12,8 +12,7 @@ import {
   MoonOutline,
   SunnyOutline,
   LayersOutline,
-  LogOutOutline,
-  HomeOutline
+  LogOutOutline
 } from '@vicons/ionicons5'
 import { useThemeStore } from '@/stores/theme'
 import { useAuthStore } from '@/stores/auth'
@@ -47,9 +46,6 @@ const navItems: NavItem[] = [
 const bottomNavItems = computed(() => navItems.filter((item) => item.showInBottom))
 const activeKey = computed(() => route.name as string)
 const username = computed(() => authStore.user?.username ?? '管理员')
-
-// 待处理举报数量（用于底部导航角标）
-const pendingReportCount = computed(() => adminStore.stats?.pendingReportCount ?? 0)
 
 function toggleSider() {
   if (window.innerWidth < 768) {
