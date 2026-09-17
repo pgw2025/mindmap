@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NIcon, NLayout, NLayoutContent, NLayoutHeader, NLayoutSider, NDrawer, NDrawerContent, NDivider, NTooltip, useMessage } from 'naive-ui'
+import { NButton, NIcon, NLayout, NLayoutContent, NLayoutHeader, NLayoutSider, NDrawer, NDrawerContent, NDivider, NTooltip, useMessage, NBadge } from 'naive-ui'
 import {
   GridOutline,
   PeopleOutline,
@@ -12,7 +12,8 @@ import {
   MoonOutline,
   SunnyOutline,
   LayersOutline,
-  LogOutOutline
+  LogOutOutline,
+  HomeOutline
 } from '@vicons/ionicons5'
 import { useThemeStore } from '@/stores/theme'
 import { useAuthStore } from '@/stores/auth'
@@ -32,18 +33,23 @@ interface NavItem {
   name: string
   label: string
   icon: typeof GridOutline
+  showInBottom?: boolean
 }
 
 const navItems: NavItem[] = [
-  { name: 'admin-dashboard', label: '管理看板', icon: GridOutline },
-  { name: 'admin-users', label: '用户管理', icon: PeopleOutline },
-  { name: 'admin-mindmaps', label: '导图管理', icon: MapOutline },
-  { name: 'admin-reports', label: '举报审核', icon: FlagOutline },
+  { name: 'admin-dashboard', label: '看板', icon: GridOutline, showInBottom: true },
+  { name: 'admin-users', label: '用户', icon: PeopleOutline, showInBottom: true },
+  { name: 'admin-mindmaps', label: '导图', icon: MapOutline, showInBottom: true },
+  { name: 'admin-reports', label: '举报', icon: FlagOutline, showInBottom: true },
   { name: 'admin-templates', label: '模板管理', icon: LayersOutline }
 ]
 
+const bottomNavItems = computed(() => navItems.filter((item) => item.showInBottom))
 const activeKey = computed(() => route.name as string)
 const username = computed(() => authStore.user?.username ?? '管理员')
+
+// 待处理举报数量（用于底部导航角标）
+const pendingReportCount = computed(() => adminStore.stats?.pendingReportCount ?? 0)
 
 function toggleSider() {
   if (window.innerWidth < 768) {
@@ -81,25 +87,37 @@ onMounted(async () => {
     message.warning('无管理员权限')
     router.push({ name: 'home' })
   }
+  // 加载统计数据（供底部导航角标使用）
+  if (!adminStore.stats) {
+    adminStore.loadStats().catch(() => {})
+  }
 })
 </script>
 
 <template>
-  <NLayout position="absolute">
+  <NLayout position="absolute" class="admin-layout">
     <NLayoutHeader bordered class="app-header">
       <div class="left">
-        <NButton text class="menu-btn" @click="toggleSider">
+        <NButton text class="menu-btn desktop-only" @click="toggleSider">
           <template #icon>
             <NIcon size="22">
               <MenuOutline />
             </NIcon>
           </template>
         </NButton>
-        <span class="brand">管理后台</span>
+        <NButton text class="menu-btn mobile-only" @click="backToHome">
+          <template #icon>
+            <NIcon size="20">
+              <ArrowBackOutline />
+            </NIcon>
+          </template>
+        </NButton>
+        <span class="brand desktop-only">管理后台</span>
+        <span class="brand mobile-only">{{ route.meta?.title as string || '管理' }}</span>
       </div>
       <div class="right">
-        <span class="username">{{ username }}</span>
-        <NButton quaternary size="small" @click="backToHome">
+        <span class="username desktop-only">{{ username }}</span>
+        <NButton quaternary size="small" class="desktop-only" @click="backToHome">
           <template #icon>
             <NIcon size="18">
               <ArrowBackOutline />
@@ -107,7 +125,7 @@ onMounted(async () => {
           </template>
           返回前台
         </NButton>
-        <NDivider vertical class="header-divider" />
+        <NDivider vertical class="header-divider desktop-only" />
         <NTooltip trigger="hover">
           <template #trigger>
             <NButton quaternary circle size="small" class="action-icon-btn" @click="themeStore.toggle">
@@ -121,7 +139,7 @@ onMounted(async () => {
           </template>
           {{ themeStore.isDark ? '切换为明亮模式' : '切换为暗黑模式' }}
         </NTooltip>
-        <NButton quaternary size="small" class="logout-btn" @click="logout">
+        <NButton quaternary size="small" class="logout-btn desktop-only" @click="logout">
           <template #icon>
             <NIcon size="16">
               <LogOutOutline />
@@ -133,11 +151,25 @@ onMounted(async () => {
     </NLayoutHeader>
 
     <NLayout has-sider position="absolute" class="app-body">
-      <NLayoutSider bordered :collapsed="collapsed" :collapsed-width="0" :width="220" collapse-mode="width"
-        :native-scrollbar="true" class="app-sider-desktop">
+      <!-- 桌面端侧边栏 -->
+      <NLayoutSider
+        bordered
+        :collapsed="collapsed"
+        :collapsed-width="0"
+        :width="220"
+        collapse-mode="width"
+        :native-scrollbar="true"
+        class="app-sider-desktop"
+      >
         <div class="sider-inner">
-          <NButton v-for="item in navItems" :key="item.name" quaternary block
-            :type="activeKey === item.name ? 'primary' : 'default'" @click="go(item.name)">
+          <NButton
+            v-for="item in navItems"
+            :key="item.name"
+            quaternary
+            block
+            :type="activeKey === item.name ? 'primary' : 'default'"
+            @click="go(item.name)"
+          >
             <template #icon>
               <NIcon>
                 <component :is="item.icon" />
@@ -148,17 +180,36 @@ onMounted(async () => {
         </div>
       </NLayoutSider>
 
+      <!-- 移动端抽屉菜单 -->
       <NDrawer v-if="drawerVisible" v-model:show="drawerVisible" :width="240" placement="left">
         <NDrawerContent title="管理后台">
           <div class="sider-inner">
-            <NButton v-for="item in navItems" :key="item.name" quaternary block
-              :type="activeKey === item.name ? 'primary' : 'default'" @click="go(item.name)">
+            <NButton
+              v-for="item in navItems"
+              :key="item.name"
+              quaternary
+              block
+              :type="activeKey === item.name ? 'primary' : 'default'"
+              @click="go(item.name)"
+            >
               <template #icon>
                 <NIcon>
                   <component :is="item.icon" />
                 </NIcon>
               </template>
               {{ item.label }}
+            </NButton>
+            <NDivider style="margin: 12px 0" />
+            <div class="drawer-user-info">
+              <span class="drawer-username">{{ username }}</span>
+            </div>
+            <NButton quaternary block type="error" @click="logout">
+              <template #icon>
+                <NIcon size="16">
+                  <LogOutOutline />
+                </NIcon>
+              </template>
+              退出登录
             </NButton>
           </div>
         </NDrawerContent>
@@ -168,10 +219,34 @@ onMounted(async () => {
         <RouterView />
       </NLayoutContent>
     </NLayout>
+
+    <!-- 移动端底部导航栏 -->
+    <div class="mobile-bottom-nav">
+      <div
+        v-for="item in bottomNavItems"
+        :key="item.name"
+        class="bottom-nav-item"
+        :class="{ active: activeKey === item.name }"
+        @click="go(item.name)"
+      >
+        <div class="bottom-nav-icon">
+          <NBadge :value="item.name === 'admin-reports' ? pendingReportCount : 0" :max="99" :show-zero="false" type="error" size="small">
+            <NIcon size="20">
+              <component :is="item.icon" />
+            </NIcon>
+          </NBadge>
+        </div>
+        <span class="bottom-nav-label">{{ item.label }}</span>
+      </div>
+    </div>
   </NLayout>
 </template>
 
 <style scoped lang="scss">
+.admin-layout {
+  --admin-bottom-nav-height: 60px;
+}
+
 .app-header {
   height: var(--layout-header-h);
   padding: 0 12px;
@@ -238,12 +313,76 @@ onMounted(async () => {
   gap: 4px;
 }
 
+.drawer-user-info {
+  padding: 8px;
+  .drawer-username {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--app-text-primary);
+  }
+}
+
 .app-content {
   background: var(--app-bg);
   padding: 16px;
+  padding-bottom: 16px;
 }
 
+/* 移动端底部导航 */
+.mobile-bottom-nav {
+  display: none;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: var(--admin-bottom-nav-height);
+  background: var(--app-card-bg);
+  border-top: 1px solid var(--app-border);
+  z-index: 100;
+  padding-bottom: env(safe-area-inset-bottom);
+  box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.06);
+}
+
+.bottom-nav-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: var(--app-text-secondary);
+
+  &.active {
+    color: var(--app-primary, #18a058);
+  }
+
+  &:active {
+    transform: scale(0.95);
+  }
+}
+
+.bottom-nav-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bottom-nav-label {
+  font-size: 11px;
+  font-weight: 500;
+}
+
+/* 响应式 */
 @media (max-width: 767px) {
+  .desktop-only {
+    display: none !important;
+  }
+  .mobile-only {
+    display: flex !important;
+  }
+
   .app-sider-desktop {
     display: none;
   }
@@ -266,7 +405,21 @@ onMounted(async () => {
   }
 
   .app-content {
-    padding: 8px;
+    padding: 10px;
+    padding-bottom: calc(var(--admin-bottom-nav-height) + 12px);
+  }
+
+  .mobile-bottom-nav {
+    display: flex;
+  }
+}
+
+@media (min-width: 768px) {
+  .desktop-only {
+    display: flex;
+  }
+  .mobile-only {
+    display: none !important;
   }
 }
 </style>

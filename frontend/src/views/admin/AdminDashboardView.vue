@@ -1,16 +1,21 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { NCard, NEmpty, NIcon, NSpin, NGrid, NGridItem, useMessage } from 'naive-ui'
+import { NCard, NEmpty, NIcon, NSpin, NGrid, NGridItem, NButton, useMessage } from 'naive-ui'
 import {
   PeopleOutline,
   MapOutline,
   ShareSocialOutline,
-  FlagOutline
+  FlagOutline,
+  AddOutline,
+  SearchOutline,
+  LayersOutline
 } from '@vicons/ionicons5'
 import { useAdminStore } from '@/stores/admin'
+import { useRouter } from 'vue-router'
 
 const adminStore = useAdminStore()
 const message = useMessage()
+const router = useRouter()
 const loading = ref(true)
 
 const stats = computed(() => adminStore.stats)
@@ -154,6 +159,51 @@ onMounted(refresh)
           <div class="legend">
             <span><i class="dot dot-users"></i>新增用户</span>
             <span><i class="dot dot-maps"></i>新增导图</span>
+          </div>
+        </div>
+      </NCard>
+
+      <!-- 快捷操作入口 -->
+      <NCard class="quick-actions-card" title="快捷操作" :bordered="true">
+        <div class="quick-actions-grid">
+          <div class="quick-action-item" @click="router.push({ name: 'admin-users' })">
+            <div class="qa-icon" style="background: #eff6ff; color: #2563eb;">
+              <NIcon size="20"><SearchOutline /></NIcon>
+            </div>
+            <span class="qa-label">搜索用户</span>
+          </div>
+          <div class="quick-action-item" @click="router.push({ name: 'admin-mindmaps' })">
+            <div class="qa-icon" style="background: #dcfce7; color: #16a34a;">
+              <NIcon size="20"><MapOutline /></NIcon>
+            </div>
+            <span class="qa-label">导图管理</span>
+          </div>
+          <div class="quick-action-item" @click="router.push({ name: 'admin-reports' })">
+            <div class="qa-icon" style="background: #fee2e2; color: #dc2626;">
+              <NIcon size="20"><FlagOutline /></NIcon>
+            </div>
+            <span class="qa-label">处理举报</span>
+          </div>
+          <div class="quick-action-item" @click="router.push({ name: 'admin-templates' })">
+            <div class="qa-icon" style="background: #ede9fe; color: #7c3aed;">
+              <NIcon size="20"><LayersOutline /></NIcon>
+            </div>
+            <span class="qa-label">模板管理</span>
+          </div>
+          <div class="quick-action-item" @click="router.push({ name: 'admin-templates' })">
+            <div class="qa-icon" style="background: #fef3c7; color: #d97706;">
+              <NIcon size="20"><AddOutline /></NIcon>
+            </div>
+            <span class="qa-label">新建模板</span>
+          </div>
+          <div class="quick-action-item" @click="router.push({ name: 'admin-reports' })">
+            <div class="qa-icon" style="background: #cffafe; color: #0891b2;">
+              <NIcon size="20"><FlagOutline /></NIcon>
+            </div>
+            <span class="qa-label">待处理举报</span>
+            <span v-if="stats?.pendingReportCount" class="qa-badge">
+              {{ stats.pendingReportCount }}
+            </span>
           </div>
         </div>
       </NCard>
@@ -310,5 +360,90 @@ onMounted(refresh)
 
 .chart-empty {
   padding: 32px;
+}
+
+.quick-actions-card {
+  margin-top: 12px;
+}
+
+.quick-actions-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 12px;
+}
+
+.quick-action-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+
+  &:hover {
+    background: var(--app-bg);
+    transform: translateY(-2px);
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
+}
+
+.qa-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.qa-label {
+  font-size: 12px;
+  color: var(--app-text-secondary);
+  font-weight: 500;
+}
+
+.qa-badge {
+  position: absolute;
+  top: 6px;
+  right: calc(50% - 28px);
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: #ef4444;
+  color: white;
+  font-size: 11px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+/* 手机端快捷入口调整 */
+@media (max-width: 767px) {
+  .quick-actions-grid {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+  }
+
+  .quick-action-item {
+    padding: 10px 4px;
+  }
+
+  .qa-icon {
+    width: 40px;
+    height: 40px;
+  }
+
+  .qa-label {
+    font-size: 11px;
+  }
 }
 </style>

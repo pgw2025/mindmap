@@ -556,6 +556,46 @@ function formatDate(iso: string): string {
   return new Date(iso).toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' })
 }
 
+function formatShortDate(iso: string): string {
+  const d = new Date(iso)
+  const now = new Date()
+  const sameYear = d.getFullYear() === now.getFullYear()
+  if (sameYear) {
+    return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  }
+  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`
+}
+
+function getSwatchColors(swatchJson: string): string[] {
+  const sw = templatesApi.parseSwatch(swatchJson)
+  if (!sw) return ['#ccc', '#eee', '#999', '#fff']
+  return [sw.rootFill, sw.secondFill, sw.lineColor, sw.bg]
+}
+
+const paginationInfo = computed(() => {
+  const total = store.adminTotal
+  if (total === 0) return '共 0 条'
+  const start = (page.value - 1) * pageSize.value + 1
+  const end = Math.min(page.value * pageSize.value, total)
+  return `第 ${start}-${end} 条 / 共 ${total} 条`
+})
+
+const canNextPage = computed(() => page.value * pageSize.value < store.adminTotal)
+
+function prevPage() {
+  if (page.value > 1) {
+    page.value--
+    store.gotoAdminPage(page.value)
+  }
+}
+
+function nextPage() {
+  if (canNextPage.value) {
+    page.value++
+    store.gotoAdminPage(page.value)
+  }
+}
+
 function renderSwatch(row: AdminTemplateListItem) {
   const sw = templatesApi.parseSwatch(row.swatchJson)
   if (!sw) return h('span', { style: 'color: var(--app-text-secondary)' }, '—')
@@ -622,13 +662,65 @@ onBeforeUnmount(() => {
       <NButton size="small" @click="handleExportAll">导出全部</NButton>
     </NSpace>
 
-    <NDataTable :columns="columns" :data="store.adminItems" :loading="loading" :bordered="false" :single-line="false"
-      size="small" :scroll-x="1100" />
+    <div class="desktop-only">
+      <NDataTable :columns="columns" :data="store.adminItems" :loading="loading" :bordered="false" :single-line="false"
+        size="small" :scroll-x="1100" />
 
-    <div class="pagination-wrap">
-      <NPagination v-model:page="page" :page-size="pageSize" :item-count="store.adminTotal" :page-sizes="[10, 20, 50]"
-        show-size-picker show-quick-jumper @update:page="(p) => { page = p; store.gotoAdminPage(p) }"
-        @update:page-size="(s) => { pageSize = s; page = 1; store.gotoAdminPage(1) }" />
+      <div class="pagination-wrap">
+        <NPagination v-model:page="page" :page-size="pageSize" :item-count="store.adminTotal" :page-sizes="[10, 20, 50]"
+          show-size-picker show-quick-jumper @update:page="(p) => { page = p; store.gotoAdminPage(p) }"
+          @update:page-size="(s) => { pageSize = s; page = 1; store.gotoAdminPage(1) }" />
+      </div>
+    </div>
+
+    <!-- 手机端卡片列表 -->
+    <div class="mobile-only mobile-templates">
+      <div v-if="loading" class="mobile-loading">加载中…</div>
+      <template v-else>
+        <div v-if="store.adminItems.length === 0" class="mobile-empty">暂无模板</div>
+        <div v-else class="mobile-card-list">
+          <div v-for="row in store.adminItems" :key="row.id" class="mobile-template-card">
+            <div class="mtc-header">
+              <span class="mtc-name">{{ row.name }}</span>
+              <NTag :type="row.isEnabled ? 'success' : 'default'" size="small">
+                {{ row.isEnabled ? '启用' : '禁用' }}
+              </NTag>
+            </div>
+            <div class="mtc-desc">{{ row.description || '暂无描述' }}</div>
+            <div class="mtc-meta">
+              <div class="mtc-swatch">
+                <span v-for="(c, ci) in getSwatchColors(row.swatchJson)" :key="ci" class="swatch-dot" :style="{ background: c }"></span>
+              </div>
+              <span class="mtc-sort">排序 {{ row.sortOrder }}</span>
+              <span class="mtc-date">{{ formatShortDate(row.updatedAt) }}</span>
+            </div>
+            <div class="mtc-actions">
+              <button class="mtc-btn primary" @click="openEdit(row)">编辑</button>
+              <button class="mtc-btn" @click="handleExport(row)">导出</button>
+              <button
+                class="mtc-btn"
+                :class="row.isEnabled ? 'warn' : 'success'"
+                @click="confirmToggleEnabled(row)"
+              >
+                {{ row.isEnabled ? '禁用' : '启用' }}
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="mobile-pagination">
+          <button
+            class="mp-btn"
+            :disabled="page <= 1 || loading"
+            @click="prevPage"
+          >上一页</button>
+          <span class="mp-info">{{ paginationInfo }}</span>
+          <button
+            class="mp-btn"
+            :disabled="!canNextPage || loading"
+            @click="nextPage"
+          >下一页</button>
+        </div>
+      </template>
     </div>
 
     <!-- 编辑弹窗 -->
@@ -1169,15 +1261,249 @@ onBeforeUnmount(() => {
     width: 100vw;
     max-width: 100vw;
     height: 100vh;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+
+  .edit-shell {
+    border-radius: 0;
+  }
+
+  .edit-header {
+    padding: 10px 12px;
   }
 
   .edit-body {
     flex-direction: column;
+    padding: 8px;
+    gap: 8px;
   }
 
   .edit-left {
     width: 100%;
-    max-height: 40%;
+    flex: 1;
+    max-height: none;
+    order: 2;
+  }
+
+  .edit-right {
+    order: 1;
+    height: 160px;
+    flex-shrink: 0;
+    flex: none;
+  }
+
+  .edit-footer {
+    padding: 10px 12px;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+    position: sticky;
+    bottom: 0;
+    background: var(--app-card-bg);
+    border-top: 1px solid var(--app-border);
+    z-index: 10;
+  }
+
+  .section-card {
+    padding: 10px;
+  }
+
+  .level-form {
+    gap: 10px;
+  }
+
+  .form-row.inline {
+    gap: 8px;
+  }
+
+  .form-row label {
+    width: 60px;
+    font-size: 12px;
+  }
+
+  .preview-toolbar {
+    padding: 4px 6px;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+
+  .tip-inline {
+    display: none;
+  }
+}
+
+/* ===== 手机端模板卡片 ===== */
+.mobile-templates {
+  display: none;
+}
+
+.mobile-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mobile-template-card {
+  background: var(--app-card-bg);
+  border-radius: 10px;
+  padding: 12px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.06);
+  border: 1px solid var(--app-border);
+}
+
+.mtc-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.mtc-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--app-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  margin-right: 8px;
+}
+
+.mtc-desc {
+  font-size: 12px;
+  color: var(--app-text-secondary);
+  margin-bottom: 8px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.4;
+}
+
+.mtc-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--app-text-secondary);
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.mtc-swatch {
+  display: flex;
+  gap: 2px;
+}
+
+.swatch-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  display: inline-block;
+}
+
+.mtc-sort,
+.mtc-date {
+  opacity: 0.8;
+}
+
+.mtc-actions {
+  display: flex;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--app-border);
+}
+
+.mtc-btn {
+  flex: 1;
+  height: 36px;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  background: #f1f5f9;
+  color: #475569;
+
+  &:active {
+    transform: scale(0.96);
+    opacity: 0.8;
+  }
+
+  &.primary {
+    background: #eff6ff;
+    color: #2563eb;
+  }
+
+  &.warn {
+    background: #fef3c7;
+    color: #b45309;
+  }
+
+  &.success {
+    background: #dcfce7;
+    color: #166534;
+  }
+}
+
+.mobile-loading,
+.mobile-empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--app-text-secondary);
+  font-size: 13px;
+}
+
+.mobile-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 4px 8px;
+  gap: 10px;
+}
+
+.mp-btn {
+  height: 40px;
+  padding: 0 16px;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  background: var(--app-card-bg);
+  color: var(--app-text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  &:active:not(:disabled) {
+    transform: scale(0.96);
+  }
+}
+
+.mp-info {
+  font-size: 12px;
+  color: var(--app-text-secondary);
+  flex: 1;
+  text-align: center;
+}
+
+@media (max-width: 767px) {
+  .desktop-only {
+    display: none !important;
+  }
+  .mobile-templates {
+    display: block;
+  }
+}
+
+@media (min-width: 768px) {
+  .mobile-templates {
+    display: none;
   }
 }
 </style>
