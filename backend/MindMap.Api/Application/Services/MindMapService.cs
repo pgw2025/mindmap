@@ -330,6 +330,9 @@ public class MindMapService : IMindMapService
         var map = await _db.MindMaps.FirstOrDefaultAsync(m => m.Id == id && m.OwnerId == userId, ct)
             ?? throw ApiException.NotFound("MindMap", id);
 
+        // 整个删除流程包在事务里，保证原子性，失败时整体回滚，避免中间态。
+        await using var tx = await _db.Database.BeginTransactionAsync(ct);
+
         // 1. 先清空 RootNodeId 引用，否则后续删除根节点时会被
         //    MindMap.RootNodeId -> Node 的 Restrict FK 阻止。
         map.RootNodeId = null;
@@ -350,12 +353,15 @@ public class MindMapService : IMindMapService
         // 4. 删除思维导图本身（节点外键已清理，MindMap -> Nodes 级联不再触发）。
         _db.MindMaps.Remove(map);
         await _db.SaveChangesAsync(ct);
+
+        await tx.CommitAsync(ct);
     }
 
     public async Task<MindMapDetailDto> CopyAsync(Guid userId, Guid id, MindMapCopyRequest req, CancellationToken ct = default)
     {
         var src = await _db.MindMaps
             .Include(m => m.Tags)
+            .Include(m => m.Nodes)
             .FirstOrDefaultAsync(m => m.Id == id && (m.IsPublic || m.OwnerId == userId), ct);
         if (src is null) throw ApiException.NotFound("MindMap", id);
 
@@ -374,7 +380,6 @@ public class MindMapService : IMindMapService
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             LastEditedAt = DateTime.UtcNow
-            // 注意：阶段 4 加 Nodes 后，复制要一并复制节点结构
         };
 
         var tagIds = src.Tags.Select(t => t.Id).ToList();
@@ -384,9 +389,105 @@ public class MindMapService : IMindMapService
             foreach (var t in tags) copy.Tags.Add(t);
         }
 
+        // 深拷贝节点树：重建父子映射，保留 SortOrder/Direction/ExtraData 等全字段。
+        // 返回克隆节点列表与新根节点 Id；不直接加入 copy.Nodes 导航集合，
+        // 避免 _db.MindMaps.Add(copy) 级联追踪节点导致与 RootNodeId 形成循环依赖。
+        var (clonedNodes, newRootId) = CloneNodeTree(src, copy);
+
+        // 整个复制流程包在事务里，保证原子性：导图、节点、根节点引用要么全部成功，要么全部回滚。
+        await using var tx = await _db.Database.BeginTransactionAsync(ct);
+
+        // 分三步保存，消除 MindMap 与 Node 的循环依赖：
+        //   Node.MindMapId -> MindMap 与 MindMap.RootNodeId -> Node 互相引用，
+        //   若在同一批 SaveChanges 里同时 Added 会触发拓扑排序环。
+        // 1) 先保存导图（RootNodeId 暂空，节点尚未追踪）。
         _db.MindMaps.Add(copy);
         await _db.SaveChangesAsync(ct);
+
+        // 2) 再插入节点（Node.MindMapId 指向已存在的导图）。
+        if (clonedNodes.Count > 0)
+        {
+            _db.Nodes.AddRange(clonedNodes);
+            await _db.SaveChangesAsync(ct);
+        }
+
+        // 3) 回填根节点引用。
+        if (newRootId.HasValue)
+        {
+            copy.RootNodeId = newRootId.Value;
+            await _db.SaveChangesAsync(ct);
+        }
+
+        await tx.CommitAsync(ct);
+
         return (await GetAsync(userId, copy.Id, ct))!;
+    }
+
+    /// <summary>
+    /// 将源导图的节点树深拷贝为新的节点列表（不保留原 Id，重建父子映射），
+    /// 返回 (克隆节点列表, 新根节点 Id)。不设置 dst.RootNodeId，由调用方分步保存后回填。
+    /// </summary>
+    private static (List<Node> Clones, Guid? NewRootId) CloneNodeTree(MindMapEntity src, MindMapEntity dst)
+    {
+        var nodes = src.Nodes.ToList();
+        if (nodes.Count == 0) return (new List<Node>(), null);
+
+        var now = DateTime.UtcNow;
+        var idMap = new Dictionary<Guid, Guid>(nodes.Count);
+        var cloneMap = new Dictionary<Guid, Node>(nodes.Count);
+        var clones = new List<Node>(nodes.Count);
+
+        // 第一遍：克隆全部节点并记录旧 Id -> 新 Id 映射。
+        foreach (var n in nodes)
+        {
+            var clone = new Node
+            {
+                Id = Guid.NewGuid(),
+                MindMapId = dst.Id,
+                ParentId = null,
+                Title = n.Title,
+                Content = n.Content,
+                Note = n.Note,
+                SortOrder = n.SortOrder,
+                IsCollapsed = n.IsCollapsed,
+                X = n.X,
+                Y = n.Y,
+                Width = n.Width,
+                Height = n.Height,
+                Color = n.Color,
+                FontSize = n.FontSize,
+                FontFamily = n.FontFamily,
+                Shape = n.Shape,
+                Icon = n.Icon,
+                BorderColor = n.BorderColor,
+                BackgroundColor = n.BackgroundColor,
+                EdgeColor = n.EdgeColor,
+                Direction = n.Direction,
+                EdgeStyle = n.EdgeStyle,
+                ExtraData = n.ExtraData,
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+            idMap[n.Id] = clone.Id;
+            cloneMap[n.Id] = clone;
+            clones.Add(clone);
+        }
+
+        // 第二遍：回填父子引用。
+        foreach (var n in nodes)
+        {
+            if (n.ParentId is null) continue;
+            cloneMap[n.Id].ParentId = idMap[n.ParentId.Value];
+        }
+
+        dst.NodeCount = nodes.Count;
+
+        // 计算新根节点 Id（旧 RootNodeId 对应的新 Id）。
+        var newRootId = src.RootNodeId is Guid rootId && idMap.TryGetValue(rootId, out var newRoot)
+            ? newRoot
+            : (Guid?)null;
+
+        return (clones, newRootId);
     }
 
     public async Task SetTagsAsync(Guid userId, Guid id, List<Guid> tagIds, CancellationToken ct = default)

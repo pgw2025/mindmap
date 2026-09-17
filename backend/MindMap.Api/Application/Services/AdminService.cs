@@ -101,6 +101,9 @@ public class AdminService : IAdminService
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == targetUserId, ct)
             ?? throw ApiException.NotFound("User", targetUserId);
 
+        // 整个删除流程包在事务里，保证原子性，失败时整体回滚。
+        await using var tx = await _db.Database.BeginTransactionAsync(ct);
+
         // —— 删除用户前必须先处理 Restrict 外键，否则级联会被 MySQL 阻止 ——
 
         // 1) 解除导图对根节点的引用：MindMap.RootNodeId -> Node (Restrict)
@@ -125,13 +128,9 @@ public class AdminService : IAdminService
             .Where(f => f.UserId == targetUserId)
             .ExecuteUpdateAsync(s => s.SetProperty(f => f.ParentId, (Guid?)null), ct);
 
-        // 4) 清理该用户创建的版本的 CreatedById 引用：MindMapVersions.CreatedById -> User (Restrict)
-        //    注意：Version 与 MindMap 是 Cascade，删导图时版本会被连带删，
-        //    但如果该用户曾给别人的导图创建过版本（非自己拥有的导图），这些版本仍在，
-        //    需要单独把 CreatedById 置空，避免删用户时被 Restrict 阻断。
-        await _db.MindMapVersions
-            .Where(v => v.CreatedById == targetUserId)
-            .ExecuteUpdateAsync(s => s.SetProperty(v => v.CreatedById, (Guid?)null), ct);
+        // 4) MindMapVersions.CreatedById -> User 为 Restrict 且非空。版本归属导图、导图归属所有者，
+        //    且创建/回滚都限定 map.OwnerId == userId，因此用户只能给自己的导图创建版本，
+        //    这些版本会随导图 Cascade 删除，不存在「给别人的导图建的版本」，无需单独清理。
 
         // 5) 清理该用户作为举报处理者的引用：MindMapReports.ResolvedById -> User (SetNull 由 EF 级联负责)
         //    MindMapReports.ReporterId -> User (SetNull 由 EF 级联负责)
@@ -139,6 +138,8 @@ public class AdminService : IAdminService
         // 6) 删除用户；其余 Cascade FK（导图/节点/版本/分享/举报/刷新令牌/文件夹/标签等）由 EF 自动级联。
         _db.Users.Remove(user);
         await _db.SaveChangesAsync(ct);
+
+        await tx.CommitAsync(ct);
     }
 
     // ===================== 导图管理 =====================
@@ -229,6 +230,9 @@ public class AdminService : IAdminService
         var map = await _db.MindMaps.FirstOrDefaultAsync(m => m.Id == mindMapId, ct)
             ?? throw ApiException.NotFound("MindMap", mindMapId);
 
+        // 整个删除流程包在事务里，保证原子性，失败时整体回滚。
+        await using var tx = await _db.Database.BeginTransactionAsync(ct);
+
         // 1. 清空 RootNodeId 引用：MindMap.RootNodeId -> Node 为 Restrict，
         //    若仍指向某节点，后续删除节点会被 FK 阻止。
         map.RootNodeId = null;
@@ -248,6 +252,8 @@ public class AdminService : IAdminService
         // 4. 删除思维导图本身（节点已清理，MindMap -> Nodes 级联不再触发）。
         _db.MindMaps.Remove(map);
         await _db.SaveChangesAsync(ct);
+
+        await tx.CommitAsync(ct);
     }
 
     // ===================== 统计 =====================

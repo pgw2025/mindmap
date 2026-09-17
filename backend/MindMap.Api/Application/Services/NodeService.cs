@@ -497,64 +497,43 @@ public class NodeService : INodeService
             return lookup[parent.Id]
                 .OrderBy(n => n.SortOrder)
                 .ThenBy(n => n.CreatedAt)
-                .Select(child => new NodeTreeNodeDto
-                {
-                    Id = child.Id,
-                    MindMapId = child.MindMapId,
-                    ParentId = child.ParentId,
-                    Title = child.Title,
-                    Content = child.Content,
-                    Note = child.Note,
-                    SortOrder = child.SortOrder,
-                    IsCollapsed = child.IsCollapsed,
-                    X = child.X,
-                    Y = child.Y,
-                    Width = child.Width,
-                    Height = child.Height,
-                    Color = child.Color,
-                    FontSize = child.FontSize,
-                    FontFamily = child.FontFamily,
-                    Shape = child.Shape,
-                    Icon = child.Icon,
-                    BorderColor = child.BorderColor,
-                    BackgroundColor = child.BackgroundColor,
-                    EdgeColor = child.EdgeColor,
-                    EdgeStyle = child.EdgeStyle,
-                    ExtraData = child.ExtraData,
-                    CreatedAt = child.CreatedAt,
-                    UpdatedAt = child.UpdatedAt,
-                    Children = BuildChildren(child)
-                })
+                .Select(child => ToTreeNodeDto(child, BuildChildren(child)))
                 .ToList();
         }
 
-        return roots.Select(r => new NodeTreeNodeDto
-        {
-            Id = r.Id,
-            MindMapId = r.MindMapId,
-            ParentId = r.ParentId,
-            Title = r.Title,
-            Content = r.Content,
-            Note = r.Note,
-            SortOrder = r.SortOrder,
-            IsCollapsed = r.IsCollapsed,
-            X = r.X,
-            Y = r.Y,
-            Width = r.Width,
-            Height = r.Height,
-            Color = r.Color,
-            FontSize = r.FontSize,
-            FontFamily = r.FontFamily,
-            Shape = r.Shape,
-            Icon = r.Icon,
-            BorderColor = r.BorderColor,
-            BackgroundColor = r.BackgroundColor,
-            EdgeColor = r.EdgeColor,
-            EdgeStyle = r.EdgeStyle,
-            ExtraData = r.ExtraData,
-            CreatedAt = r.CreatedAt,
-            UpdatedAt = r.UpdatedAt,
-            Children = BuildChildren(r)
-        }).ToList();
+        return roots.Select(r => ToTreeNodeDto(r, BuildChildren(r))).ToList();
     }
+
+    /// <summary>
+    /// 将扁平节点 DTO 转为树节点 DTO，统一字段赋值（含 Direction），避免多处手写遗漏字段。
+    /// </summary>
+    private static NodeTreeNodeDto ToTreeNodeDto(NodeDto n, List<NodeTreeNodeDto> children) => new()
+    {
+        Id = n.Id,
+        MindMapId = n.MindMapId,
+        ParentId = n.ParentId,
+        Title = n.Title,
+        Content = n.Content,
+        Note = n.Note,
+        SortOrder = n.SortOrder,
+        IsCollapsed = n.IsCollapsed,
+        X = n.X,
+        Y = n.Y,
+        Width = n.Width,
+        Height = n.Height,
+        Color = n.Color,
+        FontSize = n.FontSize,
+        FontFamily = n.FontFamily,
+        Shape = n.Shape,
+        Icon = n.Icon,
+        BorderColor = n.BorderColor,
+        BackgroundColor = n.BackgroundColor,
+        EdgeColor = n.EdgeColor,
+        EdgeStyle = n.EdgeStyle,
+        Direction = n.Direction,
+        ExtraData = n.ExtraData,
+        CreatedAt = n.CreatedAt,
+        UpdatedAt = n.UpdatedAt,
+        Children = children
+    };
 }

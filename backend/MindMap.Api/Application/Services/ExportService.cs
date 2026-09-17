@@ -3,6 +3,7 @@ using System.Xml;
 using System.Xml.Linq;
 using Microsoft.EntityFrameworkCore;
 using MindMap.Api.Common.Exceptions;
+using MindMap.Api.Domain.Entities.Enums;
 using MindMap.Api.Infrastructure.Data;
 
 namespace MindMap.Api.Application.Services;
@@ -88,16 +89,30 @@ public class ExportService : IExportService
         if (node.IsCollapsed)
             el.SetAttributeValue("FOLDED", "true");
 
-        // 递归构建子节点（按 SortOrder 排序，交替 right/left）
+        // 递归构建子节点（按 SortOrder 排序）。优先使用节点存储的生长方向，
+        // 未指定（null）时回退到交替 right/left，兼容旧数据。
         var children = lookup[node.Id].OrderBy(n => n.SortOrder).ToList();
         for (var i = 0; i < children.Count; i++)
         {
             var childEl = BuildNode(children[i], lookup, isRoot: false);
-            childEl.SetAttributeValue("POSITION", i % 2 == 0 ? "right" : "left");
+            childEl.SetAttributeValue("POSITION", ToFreeMindPosition(children[i].Direction, i));
             el.Add(childEl);
         }
 
         return el;
+    }
+
+    /// <summary>
+    /// 将节点的生长方向映射为 FreeMind 的 POSITION 值；未指定时回退到交替布局。
+    /// </summary>
+    private static string ToFreeMindPosition(Direction? direction, int index)
+    {
+        return direction switch
+        {
+            Direction.Left => "left",
+            Direction.Right => "right",
+            _ => index % 2 == 0 ? "right" : "left"
+        };
     }
 
     /// <summary>
