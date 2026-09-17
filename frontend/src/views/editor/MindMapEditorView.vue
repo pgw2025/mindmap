@@ -711,50 +711,57 @@ function initMindMap() {
 
   // 监听外框激活：从 activeOuterFrame 读取当前样式填充到面板
   mindMapInstance.on('outer_frame_active', (...args: unknown[]) => {
-    const active = args[0] as { el?: { cacheStyle?: any }, node?: any, range?: [number, number] } | undefined
+    // 事件参数为 (el, node, range) 三个独立参数
+    const el = args[0] as any
+    const node = args[1] as any
+    const range = args[2] as [number, number] | undefined
     const inst = mindMapInstance
-    if (active && inst?.outerFrame) {
-      const of = (inst.outerFrame as any)
+    if (!inst?.outerFrame || !node) return
 
-      // 1. 尝试从 getStyle 获取默认样式（兼容不同版本的节点结构）
-      let styleConfig: any = {}
-      try {
-        if (of.getStyle && active.node && typeof active.node.getData === 'function') {
-          styleConfig = of.getStyle(active.node) || {}
-        }
-      } catch {
-        // getStyle 调用失败，忽略
-      }
+    const of = inst.outerFrame as any
 
-      // 2. 从 el.cacheStyle 兜底读取
-      if (!Object.keys(styleConfig).length && active.el?.cacheStyle) {
-        styleConfig = active.el.cacheStyle
+    // 从第一个节点读取完整的外框样式配置
+    let styleConfig: any = {}
+    try {
+      const firstNode = of.getNodeRangeFirstNode
+        ? of.getNodeRangeFirstNode(node, range)
+        : node
+      if (firstNode && typeof firstNode.getData === 'function') {
+        styleConfig = of.getStyle ? of.getStyle(firstNode) : {}
       }
-
-      // 3. 从节点数据中读取实际的外框配置
-      let nodeData: any = {}
-      const node = active.node
-      if (node) {
-        // 尝试多种路径获取 outerFrame 数据
-        nodeData = node.nodeData?.data?.outerFrame
-          ?? node.data?.outerFrame
-          ?? (typeof node.getData === 'function' ? node.getData()?.outerFrame : null)
-          ?? {}
-      }
-
-      outerFrameConfig.value = {
-        strokeColor: nodeData.strokeColor ?? styleConfig.strokeColor ?? '#0984e3',
-        strokeWidth: nodeData.strokeWidth ?? styleConfig.strokeWidth ?? 2,
-        strokeDasharray: nodeData.strokeDasharray ?? styleConfig.strokeDasharray ?? '5,5',
-        radius: nodeData.radius ?? styleConfig.radius ?? 5,
-        fill: nodeData.fill ?? styleConfig.fill ?? 'rgba(9,132,227,0.05)',
-        text: nodeData.text ?? styleConfig.text ?? '',
-        textFontSize: nodeData.textFontSize ?? styleConfig.textFontSize ?? 14,
-        textColor: nodeData.textColor ?? styleConfig.textColor ?? '#333',
-        textBgColor: nodeData.textBgColor ?? styleConfig.textBgColor ?? 'rgba(9,132,227,0.05)'
-      }
-      outerFramePanelVisible.value = true
+    } catch {
+      // getStyle 调用失败，忽略
     }
+
+    // 从 el.cacheStyle 兜底读取
+    if (!Object.keys(styleConfig).length && el?.cacheStyle) {
+      styleConfig = { ...styleConfig, ...el.cacheStyle }
+    }
+
+    // 读取实际的外框数据（用户设置的值）
+    let nodeData: any = {}
+    try {
+      if (node && typeof node.getData === 'function') {
+        nodeData = node.getData('outerFrame') || {}
+      }
+    } catch {
+      // 忽略
+    }
+
+    // 映射字段名：插件字段 → 我们面板使用的字段
+    outerFrameConfig.value = {
+      strokeColor: nodeData.strokeColor ?? styleConfig.strokeColor ?? '#0984e3',
+      strokeWidth: nodeData.strokeWidth ?? styleConfig.strokeWidth ?? 2,
+      strokeDasharray: nodeData.strokeDasharray ?? styleConfig.strokeDasharray ?? '5,5',
+      radius: nodeData.radius ?? styleConfig.radius ?? 5,
+      fill: nodeData.fill ?? styleConfig.fill ?? 'rgba(9,132,227,0.05)',
+      text: nodeData.text ?? styleConfig.text ?? '',
+      // 插件字段名：fontSize / color / textFill
+      textFontSize: nodeData.fontSize ?? nodeData.textFontSize ?? styleConfig.fontSize ?? 14,
+      textColor: nodeData.color ?? nodeData.textColor ?? styleConfig.color ?? '#333',
+      textBgColor: nodeData.textFill ?? nodeData.textBgColor ?? styleConfig.textFill ?? 'rgba(9,132,227,0.1)'
+    }
+    outerFramePanelVisible.value = true
   })
 
   // 监听外框取消激活：隐藏样式面板
@@ -971,7 +978,32 @@ function updateOuterFrameStyle(payload: Partial<typeof outerFrameConfig.value>) 
   const inst = mindMapInstance
   if (!inst || !inst.outerFrame) return
   Object.assign(outerFrameConfig.value, payload)
-  ;(inst.outerFrame as any).updateActiveOuterFrame(payload)
+
+  // 将我们的字段名映射为插件识别的字段名
+  const pluginPayload: any = {}
+  ;(['strokeColor', 'strokeWidth', 'strokeDasharray', 'radius', 'fill', 'text'] as const).forEach(key => {
+    if (payload[key] !== undefined) {
+      pluginPayload[key] = payload[key]
+    }
+  })
+  // 文字相关字段名映射
+  if (payload.textFontSize !== undefined) pluginPayload.fontSize = payload.textFontSize
+  if (payload.textColor !== undefined) pluginPayload.color = payload.textColor
+  if (payload.textBgColor !== undefined) pluginPayload.textFill = payload.textBgColor
+
+  ;(inst.outerFrame as any).updateActiveOuterFrame(pluginPayload)
+
+  // 修复：激活状态下插件的 updateOuterFrameStyle 会强制把 dasharray 设为 none（选中高亮）
+  // 这里手动把用户设置的线型应用回去，并同步更新 cacheStyle 确保失活后也正确
+  const of = inst.outerFrame as any
+  const active = of.activeOuterFrame
+  if (active && active.el && pluginPayload.strokeDasharray !== undefined) {
+    const dasharray = pluginPayload.strokeDasharray
+    active.el.stroke({ dasharray })
+    if (active.el.cacheStyle) {
+      active.el.cacheStyle.dasharray = dasharray
+    }
+  }
 }
 
 /** 删除当前激活的外框 */
