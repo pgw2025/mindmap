@@ -35,6 +35,7 @@ public record VersionNodeData(
     string? EdgeColor,
     int? Shape,
     int? EdgeStyle,
+    int? Direction,
     string? ExtraData,
     List<VersionNodeData>? Children
 );

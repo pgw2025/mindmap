@@ -60,26 +60,41 @@ public class MindMapVersionService : IMindMapVersionService
         var tree = BuildTree(nodes);
         var json = JsonSerializer.Serialize(tree);
 
-        // 计算下一版本号
-        var nextVersion = await _db.MindMapVersions
-            .Where(v => v.MindMapId == mindMapId)
-            .MaxAsync(v => (int?)v.VersionNumber, ct) ?? 0;
-        nextVersion++;
-
-        var version = new MindMapVersion
+        // 计算下一版本号并重试，处理并发创建时 Max+1 撞唯一索引的问题。
+        // 重试上限 3 次，每次冲突后重新读取当前最大版本号，避免并发下返回 500。
+        const int maxAttempts = 3;
+        var version = new MindMapVersion();
+        for (var attempt = 1; ; attempt++)
         {
-            Id = Guid.NewGuid(),
-            MindMapId = mindMapId,
-            VersionNumber = nextVersion,
-            Remark = req.Remark?.Trim(),
-            NodeSnapshotJson = json,
-            NodeCount = nodes.Count,
-            CreatedById = userId,
-            CreatedAt = DateTime.UtcNow
-        };
+            var nextVersion = await _db.MindMapVersions
+                .Where(v => v.MindMapId == mindMapId)
+                .MaxAsync(v => (int?)v.VersionNumber, ct) ?? 0;
+            nextVersion++;
 
-        _db.MindMapVersions.Add(version);
-        await _db.SaveChangesAsync(ct);
+            version = new MindMapVersion
+            {
+                Id = Guid.NewGuid(),
+                MindMapId = mindMapId,
+                VersionNumber = nextVersion,
+                Remark = req.Remark?.Trim(),
+                NodeSnapshotJson = json,
+                NodeCount = nodes.Count,
+                CreatedById = userId,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            _db.MindMapVersions.Add(version);
+            try
+            {
+                await _db.SaveChangesAsync(ct);
+                break;
+            }
+            catch (DbUpdateException) when (attempt < maxAttempts)
+            {
+                // 唯一索引冲突：清理 ChangeTracker 中被拒绝的实体，重算版本号重试。
+                _db.ChangeTracker.Clear();
+            }
+        }
 
         var user = await _db.Users.AsNoTracking()
             .Where(u => u.Id == userId)
@@ -110,24 +125,25 @@ public class MindMapVersionService : IMindMapVersionService
         var tree = JsonSerializer.Deserialize<List<VersionNodeData>>(version.NodeSnapshotJson);
         if (tree is null || tree.Count == 0) throw new ApiException("版本数据为空", StatusCodes.Status400BadRequest);
 
+        // 整个回滚流程包在事务里，保证原子性：
+        // 删旧节点 + 重插新节点要么全部成功，要么全部回滚，避免留下中间态。
+        await using var tx = await _db.Database.BeginTransactionAsync(ct);
+
         // 删除所有现有节点
         var allNodes = await _db.Nodes
             .Where(n => n.MindMapId == mindMapId)
             .Select(n => n.Id)
             .ToListAsync(ct);
 
-        // 清空 RootNodeId，避免 RESTRICT 删除失败
-        // 注意：必须先 SaveChangesAsync 持久化到数据库，
-        // 因为后续 ExecuteUpdateAsync / ExecuteDeleteAsync 绕过 ChangeTracker，
-        // 数据库中 mindmaps.RootNodeId 仍指向旧节点 Id 会触发 ON DELETE RESTRICT。
+        // 清空 RootNodeId，避免 RESTRICT 删除失败。
         map.RootNodeId = null;
         await _db.SaveChangesAsync(ct);
 
         if (allNodes.Count > 0)
         {
-            // 自引用表需分批：先查叶子再删，或直接按层级 BFS 删除。
-            // 简单做法：先删除所有非叶节点（没有子节点引用它们的），这里直接用 BFS 反向。
-            // 更稳妥：先清空 ParentId 解除引用，再批量删除。
+            // 自引用表需分批：先清空 ParentId 解除引用，再批量删除。
+            // 注意：ExecuteUpdateAsync / ExecuteDeleteAsync 绕过 ChangeTracker，
+            // 必须显式传入事务，否则会在外层事务之外各自提交，导致回滚失效。
             await _db.Nodes.Where(n => allNodes.Contains(n.Id))
                 .ExecuteUpdateAsync(setter => setter.SetProperty(n => n.ParentId, (Guid?)null), ct);
             await _db.Nodes.Where(n => allNodes.Contains(n.Id))
@@ -163,6 +179,7 @@ public class MindMapVersionService : IMindMapVersionService
                     EdgeColor = item.EdgeColor,
                     Shape = (Domain.Entities.Enums.NodeShape?)item.Shape,
                     EdgeStyle = (Domain.Entities.Enums.EdgeStyle?)item.EdgeStyle,
+                    Direction = (Domain.Entities.Enums.Direction?)item.Direction,
                     ExtraData = item.ExtraData,
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow
@@ -188,6 +205,7 @@ public class MindMapVersionService : IMindMapVersionService
         map.LastEditedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
     }
 
     public async Task DeleteAsync(Guid userId, Guid mindMapId, Guid versionId, CancellationToken ct)
@@ -242,6 +260,7 @@ public class MindMapVersionService : IMindMapVersionService
             n.EdgeColor,
             (int?)n.Shape,
             (int?)n.EdgeStyle,
+            (int?)n.Direction,
             n.ExtraData,
             children.Count > 0 ? children.Select(c => BuildNode(c, byParent)).ToList() : null
         );

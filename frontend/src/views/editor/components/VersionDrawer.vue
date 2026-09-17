@@ -88,13 +88,19 @@ function formatVersionTime(iso: string): string {
   const now = new Date()
   const diffMs = now.getTime() - d.getTime()
   const diffMins = Math.floor(diffMs / 60000)
-  if (diffMins < 1) return '刚刚'
-  if (diffMins < 60) return `${diffMins} 分钟前`
-  const diffHours = Math.floor(diffMins / 60)
-  if (diffHours < 24) return `${diffHours} 小时前`
-  const diffDays = Math.floor(diffHours / 24)
-  if (diffDays < 30) return `${diffDays} 天前`
-  return d.toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' }) + ' ' + d.toLocaleTimeString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' }).slice(0, 5)
+
+  // 绝对时间始终显示，便于精确追溯
+  const absolute = d.toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' }) +
+    ' ' + d.toLocaleTimeString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' }).slice(0, 5)
+
+  // 近期版本在绝对时间后补充相对时间提示
+  let relative = ''
+  if (diffMins < 1) relative = '刚刚'
+  else if (diffMins < 60) relative = `${diffMins} 分钟前`
+  else if (diffMins < 60 * 24) relative = `${Math.floor(diffMins / 60)} 小时前`
+  else if (diffMins < 60 * 24 * 30) relative = `${Math.floor(diffMins / (60 * 24))} 天前`
+
+  return relative ? `${absolute}（${relative}）` : absolute
 }
 
 /** 暴露给父组件：外部按钮直接打开"保存版本快照"弹窗 */
