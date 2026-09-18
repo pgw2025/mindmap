@@ -75,3 +75,22 @@ body {
 .n-data-table .n-data-table-td {
   background-color: var(--app-card-bg) !important;
 }
+
+/* Naive UI Drawer 背景色与文字色统一 */
+.n-drawer {
+  background-color: var(--app-card-bg) !important;
+  color: var(--app-text-primary) !important;
+}
+.n-drawer .n-drawer-header {
+  background-color: var(--app-card-bg) !important;
+  color: var(--app-text-primary) !important;
+}
+.n-drawer .n-drawer-footer {
+  background-color: var(--app-card-bg) !important;
+}
+
+/* Naive UI Modal 背景色统一 */
+.n-modal {
+  background-color: var(--app-card-bg) !important;
+  color: var(--app-text-primary) !important;
+}
