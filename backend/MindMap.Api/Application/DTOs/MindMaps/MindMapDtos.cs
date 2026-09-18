@@ -88,6 +88,7 @@ public class MindMapListItemDto
     public int NodeCount { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime LastEditedAt { get; set; }
+    public string? Theme { get; set; }
 
     public Guid OwnerId { get; set; }
     public string OwnerName { get; set; } = string.Empty;
@@ -100,7 +101,6 @@ public class MindMapListItemDto
 public class MindMapDetailDto : MindMapListItemDto
 {
     public DateTime UpdatedAt { get; set; }
-    public string? Theme { get; set; }
     public Guid? TemplateId { get; set; }
     public Guid? RootNodeId { get; set; }
 }

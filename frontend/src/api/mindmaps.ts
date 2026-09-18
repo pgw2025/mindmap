@@ -15,6 +15,7 @@ export interface MindMapListItem {
   nodeCount: number
   createdAt: string
   lastEditedAt: string
+  theme?: string | null
   ownerId: string
   ownerName: string
   folderId?: string | null

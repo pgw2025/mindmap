@@ -35,7 +35,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useTemplatesStore } from '@/stores/templates'
 import { parseSwatch } from '@/api/templates'
 import { reportMindMap } from '@/api/admin'
-import { THEMES } from '@/themes/presets'
+import { THEMES, getThemeIdOrDefault } from '@/themes/presets'
 import { syncAllOffline, getOfflineStatus, offlineState, formatSyncTime } from '@/offline/sync'
 
 const router = useRouter()
@@ -343,6 +343,13 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`
 }
 
+/** 根据导图 theme 获取主题 swatch 颜色，用于卡片封面预览 */
+function getMapSwatch(themeId: string | null | undefined) {
+  const id = getThemeIdOrDefault(themeId)
+  const theme = THEMES.find(t => t.id === id) ?? THEMES[0]
+  return theme.swatch
+}
+
 const folderOptions = computed(() => {
   const options: { label: string; value: any }[] = [
     { label: '根目录（不放入文件夹）', value: null }
@@ -553,21 +560,40 @@ onUnmounted(() => {
             v-for="map in mapsStore.items"
             :key="map.id"
             class="map-card map-card-clickable"
-            :title="map.title"
             size="small"
             hoverable
+            :bordered="false"
+            :content-style="{ padding: 0 }"
             @click="onCardClick(map.id)"
           >
-            <template #header-extra>
-              <NIcon v-if="map.isPublic" size="14" color="#18a058">
-                <GlobeOutline />
-              </NIcon>
-              <NIcon v-else size="14" color="#999">
-                <LockClosedOutline />
-              </NIcon>
-            </template>
+            <!-- 封面预览区 -->
+            <div class="card-cover" :style="{ background: getMapSwatch(map.theme).bg }">
+              <svg class="cover-svg" viewBox="0 0 200 80" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+                <!-- 连接线 -->
+                <path d="M56 40 L92 20" :stroke="getMapSwatch(map.theme).lineColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+                <path d="M56 40 L92 40" :stroke="getMapSwatch(map.theme).lineColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+                <path d="M56 40 L92 60" :stroke="getMapSwatch(map.theme).lineColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+                <!-- 根节点 -->
+                <rect x="20" y="28" width="72" height="24" rx="4" :fill="getMapSwatch(map.theme).rootFill"/>
+                <!-- 二级节点 -->
+                <rect x="98" y="12" width="72" height="16" rx="3" :fill="getMapSwatch(map.theme).secondFill" :stroke="getMapSwatch(map.theme).lineColor" stroke-width="1"/>
+                <rect x="98" y="32" width="72" height="16" rx="3" :fill="getMapSwatch(map.theme).secondFill" :stroke="getMapSwatch(map.theme).lineColor" stroke-width="1"/>
+                <rect x="98" y="52" width="72" height="16" rx="3" :fill="getMapSwatch(map.theme).secondFill" :stroke="getMapSwatch(map.theme).lineColor" stroke-width="1"/>
+              </svg>
+              <!-- 右上角状态徽章 -->
+              <div class="cover-badge" :class="{ public: map.isPublic }">
+                <NIcon v-if="map.isPublic" size="12">
+                  <GlobeOutline />
+                </NIcon>
+                <NIcon v-else size="12">
+                  <LockClosedOutline />
+                </NIcon>
+              </div>
+            </div>
 
+            <!-- 卡片内容区 -->
             <div class="card-body">
+              <h3 class="card-title">{{ map.title }}</h3>
               <p v-if="map.description" class="desc">{{ map.description }}</p>
               <p v-else class="desc muted">（无描述）</p>
 
@@ -1113,28 +1139,78 @@ onUnmounted(() => {
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
 }
 
 .map-card {
   background: var(--app-card-bg);
-  border-radius: 8px;
+  border-radius: 12px;
+  overflow: hidden;
 }
 
 .map-card-clickable {
   cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 .map-card-clickable:hover {
-  transform: translateY(-2px);
+  transform: translateY(-3px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
 }
 
+/* 封面预览区 */
+.card-cover {
+  position: relative;
+  height: 100px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cover-svg {
+  width: 80%;
+  max-width: 200px;
+  height: auto;
+}
+
+.cover-badge {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--app-text-secondary, #999);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+
+  &.public {
+    color: #18a058;
+  }
+}
+
+/* 卡片内容区 */
 .card-body {
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  min-height: 60px;
+}
+
+.card-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--app-text-primary, #1f2329);
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.4;
 }
 
 .desc {
@@ -1208,7 +1284,7 @@ onUnmounted(() => {
   }
   .grid {
     grid-template-columns: 1fr;
-    gap: 10px;
+    gap: 12px;
   }
   .title {
     font-size: 18px;
@@ -1220,10 +1296,14 @@ onUnmounted(() => {
       flex: 0 0 auto;
     }
   }
-  .map-card {
-    :deep(.n-card__action) {
-      padding: 8px 10px;
-    }
+  .card-cover {
+    height: 88px;
+  }
+  .card-body {
+    padding: 10px 12px;
+  }
+  .card-title {
+    font-size: 14px;
   }
   .card-body .meta-row {
     gap: 8px;

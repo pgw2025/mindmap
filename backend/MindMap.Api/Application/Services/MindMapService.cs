@@ -81,6 +81,7 @@ public class MindMapService : IMindMapService
                 NodeCount = m.Nodes.Count,
                 CreatedAt = m.CreatedAt,
                 LastEditedAt = m.LastEditedAt,
+                Theme = m.Theme,
                 OwnerId = m.OwnerId,
                 OwnerName = m.Owner.Username,
                 FolderId = m.FolderId,
