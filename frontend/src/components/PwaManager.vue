@@ -1,29 +1,27 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
-import { useDialog, useMessage } from 'naive-ui'
+import { useMessage, NModal, NButton, NSpace } from 'naive-ui'
 import { CloudOfflineOutline } from '@vicons/ionicons5'
 import { setupPwa } from '@/pwa'
 
-const dialog = useDialog()
 const message = useMessage()
 
 /** 当前离线标记：驱动顶部警示横幅显隐 */
 const offline = ref(false)
+
+/** PWA 更新弹窗显隐 */
+const refreshModalVisible = ref(false)
+
+/** 保存 updateSW 函数，供用户点击确认后调用 */
+let doUpdateSW: ((reloadPage?: boolean) => Promise<void>) | null = null
 
 let handle: { dispose: () => void } | undefined
 
 onMounted(() => {
   handle = setupPwa({
     onNeedRefresh(updateSW) {
-      dialog.warning({
-        title: '发现新版本',
-        content: '新版本已就绪，点击"立即刷新"后生效（当前编辑内容不会丢失）。',
-        positiveText: '立即刷新',
-        negativeText: '稍后',
-        onPositiveClick: () => {
-          updateSW(true)
-        },
-      })
+      doUpdateSW = updateSW
+      refreshModalVisible.value = true
     },
     onOfflineReady() {
       message.success('离线模式已就绪，断网时仍可打开应用')
@@ -40,6 +38,12 @@ onMounted(() => {
 onBeforeUnmount(() => {
   handle?.dispose()
 })
+
+function handleConfirmRefresh() {
+  if (doUpdateSW) {
+    doUpdateSW(true)
+  }
+}
 </script>
 
 <template>
@@ -49,6 +53,30 @@ onBeforeUnmount(() => {
       <span>当前离线，编辑不会被保存，请恢复网络后再操作</span>
     </div>
   </Transition>
+
+  <!-- PWA 更新提示弹窗 -->
+  <NModal
+    v-model:show="refreshModalVisible"
+    preset="card"
+    title="发现新版本"
+    style="max-width: 420px"
+    :bordered="false"
+    size="medium"
+  >
+    <div style="font-size: 14px; color: #334155; line-height: 1.6;">
+      新版本已就绪，点击「立即刷新」后生效（当前编辑内容不会丢失）。
+    </div>
+    <template #footer>
+      <NSpace justify="end">
+        <NButton size="small" @click="refreshModalVisible = false">
+          稍后
+        </NButton>
+        <NButton type="primary" size="small" @click="handleConfirmRefresh">
+          立即刷新
+        </NButton>
+      </NSpace>
+    </template>
+  </NModal>
 </template>
 
 <style scoped>
