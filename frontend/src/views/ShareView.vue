@@ -8,7 +8,8 @@ import { verifyShare, fetchSharedMindMap } from '@/api/shares'
 import * as mindmapsApi from '@/api/mindmaps'
 import { useAuthStore } from '@/stores/auth'
 import { useThemeStore } from '@/stores/theme'
-import { resolveThemeConfig } from '@/themes/presets'
+import { resolveThemeConfig, type ResolvedNodeInk } from '@/themes/presets'
+import { computeNodeInkOverrides, patchNodeInkOverrides, type InkNodeLike } from '@/themes/nodeInk'
 import NodeNoteTooltip from './editor/components/NodeNoteTooltip.vue'
 
 /** 后端 NodeShape 数字 → simple-mind-map 形状字符串 */
@@ -61,13 +62,26 @@ let mindMapInstance: MindMap | null = null
 /** 这份脑图的配色预设 id（与创建者选择的一致） */
 const sharedThemeId = ref<string | null>(null)
 
+/** 分享接口返回的原始节点列表（墨色重算需要它，不能用渲染树反推） */
+let shareNodes: InkNodeLike[] = []
+
+/** backendId → 已写入渲染数据的文字色（只存在于内存，不落库） */
+const injectedNodeInk = new Map<string, string>()
+
 /**
  * 分享页画布配色跟随「访问者」的明暗，而不是创建者的：
  * 色相沿用这份脑图的主题，明暗取访问者当前的应用主题。
  */
 function applySharedTheme() {
   if (!mindMapInstance) return
-  mindMapInstance.setThemeConfig(resolveThemeConfig(sharedThemeId.value, themeStore.isDark), false)
+  const cfg = resolveThemeConfig(sharedThemeId.value, themeStore.isDark)
+  mindMapInstance.setThemeConfig(cfg, false)
+  // 主题层级变了，按生效底色解算的节点墨色也要刷新（只补差集，不动视口）
+  patchNodeInkOverrides({
+    instance: mindMapInstance,
+    overrides: computeNodeInkOverrides(shareNodes, cfg),
+    injected: injectedNodeInk
+  })
 }
 
 // 访问者切换浅色/深色时同步画布配色（只换配色，不动缩放与位移）
@@ -117,8 +131,13 @@ async function submitVerify(pwd?: string) {
   }
 }
 
-/** 后端节点树 → simple-mind-map 根对象 */
-function convertNodeTreeToMindMap(nodes: any[]): any {
+/**
+ * 后端节点树 → simple-mind-map 根对象
+ * @param inkOverrides 节点墨色解算结果（由 computeNodeInkOverrides 生成），
+ *                     传入后会把「按生效底色修正过的文字色」注入渲染数据；
+ *                     与编辑器共用同一份规则，保证分享链接的观感与编辑时一致。
+ */
+function convertNodeTreeToMindMap(nodes: any[], inkOverrides?: Map<string, ResolvedNodeInk>): any {
   if (!nodes || nodes.length === 0) return null
   const idMap = new Map<string, any>()
   let root: any = null
@@ -138,6 +157,12 @@ function convertNodeTreeToMindMap(nodes: any[]): any {
     if (n.note) data.note = n.note
     if (n.direction === 0) data.dir = 'left'
     else if (n.direction === 1) data.dir = 'right'
+    // 墨色解算：节点自定义底色与继承来的文字色脱节时按底色修正（只写渲染数据）
+    const resolvedInk = inkOverrides?.get(String(n.id))
+    if (resolvedInk?.injected) {
+      data.color = resolvedInk.ink
+      injectedNodeInk.set(String(n.id), resolvedInk.ink)
+    }
     const item = { id: n.id, data, children: [] as any[] }
     idMap.set(n.id, item)
     if (!n.parentId) root = item
@@ -167,7 +192,13 @@ async function loadMindMapData() {
   loading.value = true
   try {
     const data = await fetchSharedMindMap(shareToken.value)
-    const root = convertNodeTreeToMindMap(data.nodes)
+    sharedThemeId.value = data.mindMap.theme ?? null
+    // 先解出配色再映射数据：首次渲染就能带上按生效底色解算的节点墨色
+    const initialTheme = resolveThemeConfig(sharedThemeId.value, themeStore.isDark)
+    shareNodes = (data.nodes ?? []) as InkNodeLike[]
+    injectedNodeInk.clear()
+    const inkOverrides = computeNodeInkOverrides(shareNodes, initialTheme)
+    const root = convertNodeTreeToMindMap(data.nodes, inkOverrides)
     const flat = flattenNodes(data.nodes as any[])
     nodesFlat.value = flat
     document.title = `${shareMeta.value?.title || '分享的思维导图'} · 思维导图`
@@ -180,7 +211,6 @@ async function loadMindMapData() {
     await nextTick()
 
     const layout = layoutConfig[data.mindMap.defaultLayout] ?? layoutConfig[0]
-    sharedThemeId.value = data.mindMap.theme ?? null
 
     if (mindMapInstance) {
       mindMapInstance.destroy()

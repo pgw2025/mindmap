@@ -107,6 +107,17 @@ const ALREADY_DARK_BG_LUMINANCE = 0.25
 /** 底色亮于此值即视为「浅底」，其上的文字保持原有深浅 */
 const LIGHT_BG_LUMINANCE = 0.45
 
+/* --- 墨色解算（节点级覆盖：见 resolveNodeInk） --- */
+
+/** 文字可读目标对比度（WCAG AA，正文 4.5:1） */
+const INK_TARGET_CONTRAST = 4.5
+/** 用户手选墨色的硬下限：低于此值才介入，避免「我明明选了黑字它却改浅了」 */
+const INK_MIN_CONTRAST = 3
+/** 每次调整混入的比例，越小越接近原色相 */
+const INK_MIX_STEP = 0.12
+/** 调整步数上限（超过即认定该底色无解，返回当前最优值） */
+const INK_MAX_STEPS = 32
+
 /** 解析 #rgb / #rrggbb；transparent、rgba() 等一律返回 null（视为不可解析） */
 function parseHex(color: string | undefined | null): [number, number, number] | null {
   if (typeof color !== 'string') return null
@@ -157,6 +168,19 @@ function lightenTo(color: string, target: number): string {
     res = mixColor(res, '#ffffff', 0.15)
   }
   return res
+}
+
+/**
+ * WCAG 对比度（1~21）。任一端不可解析时返回 21，
+ * 表示「无法判定 = 不干预」，避免对 transparent / rgba() 误伤。
+ */
+export function contrastRatio(a: string | undefined | null, b: string | undefined | null): number {
+  const la = colorLuminance(a)
+  const lb = colorLuminance(b)
+  if (la === null || lb === null) return 21
+  const hi = Math.max(la, lb)
+  const lo = Math.min(la, lb)
+  return (hi + 0.05) / (lo + 0.05)
 }
 
 /**
@@ -437,6 +461,123 @@ export function resolveThemeConfig(
 export function getThemeIdOrDefault(id: string | null | undefined): string {
   if (!id) return 'classic'
   return THEMES.some((t) => t.id === id) ? id : 'classic'
+}
+
+/* ============================================================================
+ * 墨色解算：节点级覆盖
+ * ----------------------------------------------------------------------------
+ * 背景：文字色与底色是 simple-mind-map 里两条**独立**的解析链，各自按
+ * 「节点自身 data → 对应主题层级 → 主题根」取值（见 Style.merge）。
+ * 用户在节点工具条点选底色时只写了 data.fillColor，文字色那一路没有值，
+ * 于是继续继承主题层级色 —— 深色模式下层级墨色已被派生成浅色，
+ * 撞在用户选的亮底上就是 1.4:1，等于看不见。
+ * 浅色模式下同样有镜像问题：深底 + 继承来的深字（三级节点底色 #2d3436
+ * 配 #6a6d6c 只有约 2.4:1），只是不容易被联想到「主题」。
+ *
+ * 所以文字色的最终值不该由「来源优先级」决定，而该由**生效底色**解算：
+ * 先按优先级取候选墨色与生效底色，再做 WCAG 对比度判定，不足时保色相调明度。
+ * 这条规则不含 isDark 分支，因此同时覆盖「深色下亮底」与「浅色下深底」。
+ *
+ * 注入值只写进渲染期的节点 data，**不落库**：反向同步 handleUpdate 只回写
+ * text / expand / note / extraData / dir，color 不在其中。
+ * ========================================================================== */
+
+/** 节点在主题里的层级：与 Style.merge 的三个分支一一对应 */
+export type NodeLevelKey = 'root' | 'second' | 'node'
+
+export interface ResolvedNodeInk {
+  /** 候选墨色（节点显式 color → 主题层级 color → 主题根 color） */
+  candidate: string
+  /** 生效底色（节点显式 fillColor → 主题层级 fillColor → 画布底色） */
+  fill: string
+  /** 实际应写入渲染数据的文字色 */
+  ink: string
+  /** 是否需要显式注入（false 表示与继承结果一致，可以不写） */
+  injected: boolean
+  /** ink 与 fill 的最终对比度，便于排查 */
+  contrast: number
+}
+
+/**
+ * 保色相把墨色调到可用：底亮则压暗、底暗则提亮，直到达标或走完步数。
+ * 返回达标值；无解时返回过程中对比度最高的那个值。
+ */
+export function solveInkColor(
+  ink: string,
+  fill: string,
+  opts: { floor?: number; target?: number } = {}
+): string {
+  if (!parseHex(ink) || !parseHex(fill)) return ink
+  const floor = opts.floor ?? INK_TARGET_CONTRAST
+  const target = opts.target ?? INK_TARGET_CONTRAST
+  if (contrastRatio(ink, fill) >= floor) return ink
+
+  // 方向：黑能拉开更大差距说明底色偏亮，反之偏暗
+  const towardDark = contrastRatio('#000000', fill) >= contrastRatio('#ffffff', fill)
+  const step = towardDark ? '#000000' : '#ffffff'
+
+  let res = ink
+  let best = ink
+  let bestContrast = contrastRatio(ink, fill)
+  for (let i = 0; i < INK_MAX_STEPS; i++) {
+    res = mixColor(res, step, INK_MIX_STEP)
+    const c = contrastRatio(res, fill)
+    if (c > bestContrast) {
+      best = res
+      bestContrast = c
+    }
+    if (c >= target) return res
+  }
+  return best
+}
+
+/**
+ * 解算单个节点的文字色。
+ *
+ * ⚠️ 介入范围只限于「用户动过其中一端」的节点：
+ * 主题（预设/模板）的墨色与底色是**成对设计**的，比如清新绿的根节点是
+ * 白字 + #549688 绿底（3.45:1，粗体大字号下是刻意的选择）。如果对主题
+ * 自己配的这一对也做对比度校验，就会把每一张图的根节点从白字改成近黑色 ——
+ * 那不是修 bug，是擅自重裁判别人的设计。真正的问题是「一端被覆盖、
+ * 另一端还在继承」，所以只有出现显式值时才需要校验这一对是否还成立。
+ *
+ * @param levelKey     该节点在主题里的层级（按深度判定）
+ * @param config       当前生效的完整配色（已含明暗派生）
+ * @param explicitInk  节点显式文字色（后端 node.color）
+ * @param explicitFill 节点显式底色（后端 node.backgroundColor）
+ * @returns 解算结果；候选墨色缺失时返回 null（不在管辖范围）
+ */
+export function resolveNodeInk(input: {
+  levelKey: NodeLevelKey
+  config: MindMapThemeConfig
+  explicitInk?: string | null
+  explicitFill?: string | null
+}): ResolvedNodeInk | null {
+  const { levelKey, config, explicitInk, explicitFill } = input
+  const level = config[levelKey]
+  const candidate = explicitInk || level?.color || config.root?.color
+  if (!candidate) return null
+
+  // 生效底色：不可解析（transparent / rgba）时退回画布底色
+  const rawFill = explicitFill || level?.fillColor || ''
+  const fill = parseHex(rawFill) ? rawFill : config.backgroundColor
+
+  // 用户没动过这一对 → 主题成对设计的搭配，原样尊重（含刻意低于 4.5:1 的情况）
+  if (!explicitInk && !explicitFill) {
+    return { candidate, fill, ink: candidate, injected: false, contrast: contrastRatio(candidate, fill) }
+  }
+
+  // 手选墨色只在跌破硬下限时介入；只覆盖了底色、墨色仍是继承来的，
+  // 说明这一对已经脱节，按目标对比度修正
+  const floor = explicitInk ? INK_MIN_CONTRAST : INK_TARGET_CONTRAST
+  const ink = solveInkColor(candidate, fill, { floor })
+  return {
+    candidate,
+    fill,
+    ink,
+    injected: ink !== candidate,
+    contrast: contrastRatio(ink, fill)
+  }
 }
 
 /**

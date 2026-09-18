@@ -2,6 +2,8 @@ import { ref, shallowRef, type ComputedRef } from 'vue'
 import type MindMap from 'simple-mind-map'
 import type { NodeDto, NodeBatchItem } from '@/api/nodes'
 import { useNodesStore } from '@/stores/nodes'
+import type { MindMapThemeConfig, ResolvedNodeInk } from '@/themes/presets'
+import { computeNodeInkOverrides, patchNodeInkOverrides } from '@/themes/nodeInk'
 
 type NodesStore = ReturnType<typeof useNodesStore>
 
@@ -56,11 +58,26 @@ export function useMindMapSync(opts: {
   getMindMapInstance: () => MindMap | null
   nodesStore: NodesStore
   readonly: ComputedRef<boolean>
+  /**
+   * 当前生效的完整配色（已含明暗派生）。
+   * 数据映射时要按它解算节点墨色，所以**必须先于** convertToMindMapData / reloadMindMap 更新；
+   * 返回 null 表示尚未解析出配色，此时跳过墨色解算（保持主题继承行为）。
+   */
+  getRenderTheme?: () => MindMapThemeConfig | null
 }) {
   const { getMindMapInstance, nodesStore, readonly } = opts
 
   /** 防止 setData 触发 data_change 循环 */
   const isSettingData = ref(false)
+
+  /* ============================================================
+   *  渲染期墨色注入表（backendId → 已写入渲染数据的文字色）
+   *
+   *  只存在于内存：用于主题/明暗变化时按差集给节点打补丁，
+   *  避免为一次配色切换做全量 setData（那会丢掉「切明暗不动视口」的性质）。
+   *  不参与任何后端写入 —— 见 handleUpdate 的字段分支，color 不在回写清单里。
+   * ============================================================ */
+  const injectedNodeInk = new Map<string, string>()
 
   /** ============================================================
    *  同步状态（供 UI 实时展示保存进度）
@@ -374,9 +391,18 @@ export function useMindMapSync(opts: {
 
     // 清空旧映射（下面会立即重新注册，不存在空窗口）
     uidToBackendId.clear()
+    // 渲染数据即将整体重建，注入表同步重建
+    injectedNodeInk.clear()
 
     const nodeMap = new Map<string, Record<string, unknown>>()
     const roots: unknown[] = []
+
+    // 墨色解算所需的上下文：当前生效配色 + 各节点目标墨色
+    // （配色未就绪时整表为空，退回「继承主题层级色」的原有行为）
+    const renderTheme = opts.getRenderTheme?.() ?? null
+    const inkOverrides = renderTheme
+      ? computeNodeInkOverrides(nodes, renderTheme)
+      : new Map<string, ResolvedNodeInk>()
 
     // 1. 创建节点，uid / id / backendId 三者统一为后端 ID
     for (const n of nodes) {
@@ -392,6 +418,13 @@ export function useMindMapSync(opts: {
       if (n.fontFamily) data.fontFamily = n.fontFamily
       if (n.backgroundColor) data.fillColor = n.backgroundColor
       if (n.borderColor) data.borderColor = n.borderColor
+      // 墨色解算：节点自定义底色会让「继承来的文字色」失效（深色下亮底 + 亮字看不见，
+      // 浅色下深底 + 深字同样看不见）。按生效底色解算，只写进渲染数据、不落库。
+      const resolvedInk = inkOverrides.get(String(n.id))
+      if (resolvedInk?.injected) {
+        data.color = resolvedInk.ink
+        injectedNodeInk.set(String(n.id), resolvedInk.ink)
+      }
       if (n.shape != null && n.shape in shapeMap) data.shape = shapeMap[n.shape]
       if (n.edgeColor) data.lineColor = n.edgeColor
       if (n.edgeStyle != null && n.edgeStyle in edgeStyleMap) data.lineDasharray = edgeStyleMap[n.edgeStyle]
@@ -508,6 +541,22 @@ export function useMindMapSync(opts: {
       // 数据渲染完成后扫描一次，建立 uid↔backendId 映射
       scanAndRegisterIdMappingsAfterSetData()
     }, 150)
+  }
+
+  /**
+   * 主题 / 明暗变化后刷新节点墨色补丁。
+   *
+   * 每次只做一遍纯计算（不碰 DOM），只有当某节点的目标墨色与上次写入值不同时
+   * 才调用 SET_NODE_DATA —— 普通导图里这种节点通常是个位数甚至零个，
+   * 也就是说一次配色切换的代价是「一次遍历」而不是「一次重绘」
+   * （详见 themes/nodeInk.ts 的 patchNodeInkOverrides）。
+   */
+  function applyNodeInkOverrides() {
+    const inst = getMindMapInstance()
+    const renderTheme = opts.getRenderTheme?.() ?? null
+    if (!inst || !renderTheme) return
+    const overrides = computeNodeInkOverrides(nodesStore.nodes, renderTheme)
+    patchNodeInkOverrides({ instance: inst, overrides, injected: injectedNodeInk })
   }
 
   /** ============================================================
@@ -1379,6 +1428,7 @@ export function useMindMapSync(opts: {
     bindGlobalMouseTracker,
     convertToMindMapData,
     reloadMindMap,
+    applyNodeInkOverrides,
     applyExpandCollapse,
     handleDragEnd,
     normalizeRootChildDirections,

@@ -525,6 +525,13 @@ const searchMatchCount = ref(0)
 const searchCurrentIndex = ref(0)
 
 // —— 组合式函数：数据转换/同步/方向归一化/拖拽预判 ——
+/**
+ * 当前生效的完整配色（已含明暗派生）。
+ * 放在 useMindMapSync 之前声明：数据映射要用它解算节点墨色，
+ * 必须保证「先解析主题、再映射数据」这个顺序。
+ */
+let currentRenderTheme: MindMapThemeConfig | null = null
+
 const {
   isSettingData,
   syncStatus,
@@ -535,6 +542,7 @@ const {
   bindGlobalMouseTracker,
   convertToMindMapData,
   reloadMindMap,
+  applyNodeInkOverrides,
   applyExpandCollapse,
   handleDragEnd,
   normalizeRootChildDirections,
@@ -546,7 +554,8 @@ const {
 } = useMindMapSync({
   getMindMapInstance: () => mindMapInstance,
   nodesStore,
-  readonly
+  readonly,
+  getRenderTheme: () => currentRenderTheme
 })
 
 // —— 子组件引用 ——
@@ -576,7 +585,7 @@ const outerFrameConfig = ref({
 /** 外框标题浮动编辑器状态 */
 const outerFrameTitleEditorVisible = ref(false)
 const outerFrameTitleEditorValue = ref('')
-const outerFrameTitleEditorStyle = ref({ left: '0px', top: '0px', fontSize: '14px', color: '#333' })
+const outerFrameTitleEditorStyle = ref({ left: '0px', top: '0px', fontSize: '14px' })
 const outerFrameTitleEditorInputRef = ref<HTMLInputElement | null>(null)
 
 /** 当前选中节点（供 NodeContentModal 使用） */
@@ -599,8 +608,14 @@ function applyResolvedTheme(notRender = false, themeIdOverride?: string) {
   const cfg = resolveThemeConfig(themeIdOverride ?? mapDetail.value?.theme, themeStore.isDark, {
     templateConfig: templateConfigCache.value
   })
+  // 先落库到「当前生效配色」，再应用：数据映射与墨色补丁都读它，
+  // 顺序颠倒会拿到上一份配色算出的墨色。
+  currentRenderTheme = cfg
   // 第二个参数 notRender=false 表示立即触发重绘
   mindMapInstance.setThemeConfig(cfg, notRender)
+  // 主题层级变了，按生效底色解算的节点墨色也要跟着刷新（只补差集，不动视口）。
+  // 放在这里而不是各个调用方，保证任何入口都不会漏掉这一步。
+  applyNodeInkOverrides()
 }
 
 /**
@@ -675,6 +690,12 @@ function initMindMap() {
   bindGlobalMouseTracker()
 
   // 加载数据
+  // 先解出配色再映射数据：首次 setData 就能带上按生效底色解算的节点墨色。
+  // 模板配置此刻可能还没拉到（下面 onFirstRender 里异步补），补到之后
+  // applyResolvedTheme 会再刷一次墨色补丁，两条路都不会漏。
+  currentRenderTheme = resolveThemeConfig(mapDetail.value?.theme, themeStore.isDark, {
+    templateConfig: templateConfigCache.value
+  })
   const mindMapData = convertToMindMapData(nodesStore.nodes)
   if (mindMapData) {
     mindMapInstance.setData(mindMapData)
@@ -1053,15 +1074,16 @@ function handleOuterFrameTitleDblClick(e: MouseEvent) {
   // 直接从当前面板配置读取（激活时已同步）
   const config = outerFrameConfig.value
   const fontSize = config.textFontSize ?? 14
-  const textColor = config.textColor ?? '#333'
   const currentText = config.text ?? ''
 
   // 设置编辑器样式和位置
+  // 注意：不要用外框的 textColor —— 这个输入框底色恒为白色，
+  // 深色模式下外框标题色往往是浅色，套进来就是「白底白字」，编辑时完全看不见。
+  // 输入框统一走浅色外观（见 .outer-frame-title-editor），文字色交给样式表。
   outerFrameTitleEditorStyle.value = {
     left: `${left}px`,
     top: `${top}px`,
-    fontSize: `${fontSize}px`,
-    color: textColor
+    fontSize: `${fontSize}px`
   }
   outerFrameTitleEditorValue.value = currentText
   outerFrameTitleEditorVisible.value = true
