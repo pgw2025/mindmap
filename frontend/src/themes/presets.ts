@@ -73,6 +73,8 @@ export interface ThemePreset {
   name: string
   description: string
   swatch: { rootFill: string; secondFill: string; lineColor: string; bg: string }
+  /** 深色模式下的缩略图配色（卡片封面用） */
+  swatchDark: { rootFill: string; secondFill: string; lineColor: string; bg: string }
   config: MindMapThemeConfig
 }
 
@@ -177,6 +179,7 @@ export const THEMES: ThemePreset[] = [
     name: '清新绿',
     description: '简约自然，经典配色',
     swatch: { rootFill: '#549688', secondFill: '#ffffff', lineColor: '#549688', bg: '#fafafa' },
+    swatchDark: { rootFill: '#3d8b75', secondFill: '#1e293b', lineColor: '#549688', bg: '#0f172a' },
     config: buildBaseTheme({
       lineColor: '#549688',
       bg: '#fafafa',
@@ -190,6 +193,7 @@ export const THEMES: ThemePreset[] = [
     name: '海洋蓝',
     description: '商务沉稳，清晰专业',
     swatch: { rootFill: '#3b82f6', secondFill: '#eff6ff', lineColor: '#3b82f6', bg: '#f1f5f9' },
+    swatchDark: { rootFill: '#2563eb', secondFill: '#1e3a5f', lineColor: '#3b82f6', bg: '#0f172a' },
     config: buildBaseTheme({
       lineColor: '#3b82f6',
       bg: '#f1f5f9',
@@ -203,6 +207,7 @@ export const THEMES: ThemePreset[] = [
     name: '日落橙',
     description: '温暖活力，充满能量',
     swatch: { rootFill: '#f97316', secondFill: '#fff7ed', lineColor: '#fb923c', bg: '#fffbeb' },
+    swatchDark: { rootFill: '#ea580c', secondFill: '#431407', lineColor: '#fb923c', bg: '#1c1917' },
     config: buildBaseTheme({
       lineColor: '#fb923c',
       bg: '#fffbeb',
@@ -216,6 +221,7 @@ export const THEMES: ThemePreset[] = [
     name: '森林绿',
     description: '深邃稳重，自然气息',
     swatch: { rootFill: '#15803d', secondFill: '#f0fdf4', lineColor: '#22c55e', bg: '#f7fdf4' },
+    swatchDark: { rootFill: '#16a34a', secondFill: '#052e16', lineColor: '#22c55e', bg: '#0f1f14' },
     config: buildBaseTheme({
       lineColor: '#22c55e',
       bg: '#f7fdf4',
@@ -229,6 +235,7 @@ export const THEMES: ThemePreset[] = [
     name: '樱粉',
     description: '柔和浪漫，温馨舒适',
     swatch: { rootFill: '#ec4899', secondFill: '#fdf2f8', lineColor: '#f472b6', bg: '#fdf4ff' },
+    swatchDark: { rootFill: '#db2777', secondFill: '#500724', lineColor: '#f472b6', bg: '#1f1018' },
     config: buildBaseTheme({
       lineColor: '#f472b6',
       bg: '#fdf4ff',
@@ -242,6 +249,7 @@ export const THEMES: ThemePreset[] = [
     name: '暗夜',
     description: '深色模式，夜间护眼',
     swatch: { rootFill: '#6366f1', secondFill: '#312e81', lineColor: '#818cf8', bg: '#1e1b4b' },
+    swatchDark: { rootFill: '#818cf8', secondFill: '#1e1b4b', lineColor: '#a5b4fc', bg: '#0f0d24' },
     config: buildBaseTheme({
       lineColor: '#818cf8',
       bg: '#1e1b4b',
@@ -261,4 +269,23 @@ export function getThemeConfig(id: string): MindMapThemeConfig {
 export function getThemeIdOrDefault(id: string | null | undefined): string {
   if (!id) return 'classic'
   return THEMES.some((t) => t.id === id) ? id : 'classic'
+}
+
+/**
+ * 获取导图主题的封面缩略图配色。
+ * - isDark=true 时返回深色模式配色，与深色界面背景协调
+ * - 根节点文字始终为白色，二级节点文字在深色模式下取 lineColor
+ */
+export function getThemeSwatch(
+  themeId: string | null | undefined,
+  isDark: boolean
+): { rootFill: string; secondFill: string; lineColor: string; bg: string; secondTextColor: string } {
+  const id = getThemeIdOrDefault(themeId)
+  const theme = THEMES.find((t) => t.id === id) ?? THEMES[0]
+  const swatch = isDark ? theme.swatchDark : theme.swatch
+  return {
+    ...swatch,
+    // 二级节点文字颜色：浅色模式用根节点填充色（深），深色模式用 lineColor（浅）
+    secondTextColor: isDark ? swatch.lineColor : swatch.rootFill
+  }
 }

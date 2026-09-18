@@ -35,7 +35,8 @@ import { useAuthStore } from '@/stores/auth'
 import { useTemplatesStore } from '@/stores/templates'
 import { parseSwatch } from '@/api/templates'
 import { reportMindMap } from '@/api/admin'
-import { THEMES, getThemeIdOrDefault } from '@/themes/presets'
+import { THEMES, getThemeSwatch } from '@/themes/presets'
+import { useThemeStore } from '@/stores/theme'
 import { syncAllOffline, getOfflineStatus, offlineState, formatSyncTime } from '@/offline/sync'
 
 const router = useRouter()
@@ -45,6 +46,7 @@ const tagsStore = useTagsStore()
 const foldersStore = useFoldersStore()
 const authStore = useAuthStore()
 const templatesStore = useTemplatesStore()
+const themeStore = useThemeStore()
 
 const keywordInput = ref('')
 
@@ -343,11 +345,9 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`
 }
 
-/** 根据导图 theme 获取主题 swatch 颜色，用于卡片封面预览 */
+/** 根据导图 theme 获取主题 swatch 颜色（响应深色模式），用于卡片封面预览 */
 function getMapSwatch(themeId: string | null | undefined) {
-  const id = getThemeIdOrDefault(themeId)
-  const theme = THEMES.find(t => t.id === id) ?? THEMES[0]
-  return theme.swatch
+  return getThemeSwatch(themeId, themeStore.isDark)
 }
 
 /**
@@ -643,7 +643,7 @@ onUnmounted(() => {
                       x="160"
                       :y="(getCoverLayout(map.coverPreview.secondLevelCount).nodes[idx]?.y ?? 0) + 10"
                       text-anchor="middle"
-                      :fill="getMapSwatch(map.theme).rootFill"
+                      :fill="getMapSwatch(map.theme).secondTextColor"
                       font-size="9"
                       font-family='PingFang SC, "Microsoft YaHei", sans-serif'
                     >
@@ -675,7 +675,7 @@ onUnmounted(() => {
                       x="160"
                       :y="getCoverLayout(4).nodes[3].y + 26"
                       text-anchor="middle"
-                      :fill="getMapSwatch(map.theme).lineColor"
+                      :fill="getMapSwatch(map.theme).secondTextColor"
                       font-size="9"
                       font-family='PingFang SC, "Microsoft YaHei", sans-serif'
                     >
@@ -1305,6 +1305,16 @@ onUnmounted(() => {
 
   &.public {
     color: #18a058;
+  }
+}
+
+:global(.dark) .cover-badge {
+  background: rgba(24, 28, 34, 0.8);
+  color: var(--app-text-secondary, #9ca3af);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+
+  &.public {
+    color: #36ad6a;
   }
 }
 
