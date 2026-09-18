@@ -77,6 +77,24 @@ public class TagBriefDto
     public string Color { get; set; } = "#18a058";
 }
 
+/// <summary>
+/// 封面预览节点：仅包含标题，用于列表卡片 SVG 缩略图展示。
+/// </summary>
+public class CoverPreviewNodeDto
+{
+    public string Title { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// 封面预览数据：根节点标题 + 前 N 个二级节点标题，供前端 SVG 渲染缩略图。
+/// </summary>
+public class CoverPreviewDto
+{
+    public string RootTitle { get; set; } = string.Empty;
+    public int SecondLevelCount { get; set; }
+    public List<CoverPreviewNodeDto> SecondLevelNodes { get; set; } = new();
+}
+
 public class MindMapListItemDto
 {
     public Guid Id { get; set; }
@@ -89,6 +107,7 @@ public class MindMapListItemDto
     public DateTime CreatedAt { get; set; }
     public DateTime LastEditedAt { get; set; }
     public string? Theme { get; set; }
+    public CoverPreviewDto? CoverPreview { get; set; }
 
     public Guid OwnerId { get; set; }
     public string OwnerName { get; set; } = string.Empty;

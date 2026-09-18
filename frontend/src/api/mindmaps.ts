@@ -16,11 +16,18 @@ export interface MindMapListItem {
   createdAt: string
   lastEditedAt: string
   theme?: string | null
+  coverPreview?: CoverPreviewData | null
   ownerId: string
   ownerName: string
   folderId?: string | null
   folderName?: string | null
   tags: Pick<TagDto, 'id' | 'name' | 'color'>[]
+}
+
+export interface CoverPreviewData {
+  rootTitle: string
+  secondLevelCount: number
+  secondLevelNodes: { title: string }[]
 }
 
 export interface MindMapDetail extends MindMapListItem {

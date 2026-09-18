@@ -90,6 +90,53 @@ public class MindMapService : IMindMapService
             })
             .ToListAsync(ct);
 
+        // 批量加载封面预览数据（根节点标题 + 前 4 个二级节点标题）
+        if (items.Count > 0)
+        {
+            const int maxSecondLevel = 4;
+            var mapIds = items.Select(i => i.Id).ToList();
+
+            // 一次性查出所有相关导图的根节点（ParentId=null）和二级节点（ParentId=根节点Id）
+            var nodes = await _db.Nodes
+                .Where(n => mapIds.Contains(n.MindMapId))
+                .Select(n => new
+                {
+                    n.MindMapId,
+                    n.Id,
+                    n.ParentId,
+                    n.Title,
+                    n.SortOrder
+                })
+                .ToListAsync(ct);
+
+            var nodesByMap = nodes.ToLookup(n => n.MindMapId);
+
+            foreach (var item in items)
+            {
+                var mapNodes = nodesByMap[item.Id].ToList();
+                if (mapNodes.Count == 0) continue;
+
+                var root = mapNodes.FirstOrDefault(n => n.ParentId == null);
+                if (root == null) continue;
+
+                var secondLevel = mapNodes
+                    .Where(n => n.ParentId == root.Id)
+                    .OrderBy(n => n.SortOrder)
+                    .Take(maxSecondLevel)
+                    .Select(n => new CoverPreviewNodeDto { Title = n.Title })
+                    .ToList();
+
+                var secondLevelTotal = mapNodes.Count(n => n.ParentId == root.Id);
+
+                item.CoverPreview = new CoverPreviewDto
+                {
+                    RootTitle = root.Title,
+                    SecondLevelCount = secondLevelTotal,
+                    SecondLevelNodes = secondLevel
+                };
+            }
+        }
+
         return PagedResult<MindMapListItemDto>.Create(items, total, page, pageSize);
     }
 

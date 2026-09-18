@@ -350,6 +350,35 @@ function getMapSwatch(themeId: string | null | undefined) {
   return theme.swatch
 }
 
+/**
+ * 封面 SVG 缩略图布局计算
+ * 根据二级节点数量动态计算每个节点的 y 坐标，保证均匀分布
+ */
+function getCoverLayout(secondLevelCount: number) {
+  const count = Math.max(1, Math.min(secondLevelCount, 4))
+  const viewBoxH = 80
+  const rootY = viewBoxH / 2 - 12 // 根节点 y（节点高24，居中）
+  const nodeH = 14
+  const totalH = count * nodeH + (count - 1) * 6 // 节点总高度 + 间距
+  const startY = (viewBoxH - totalH) / 2
+
+  const nodes = Array.from({ length: count }, (_, i) => ({
+    y: startY + i * (nodeH + 6)
+  }))
+
+  return {
+    viewBoxH,
+    rootY,
+    nodes
+  }
+}
+
+/** 截断节点标题，保证在缩略图中不溢出 */
+function truncateNodeTitle(title: string, maxLen = 8): string {
+  if (title.length <= maxLen) return title
+  return title.slice(0, maxLen) + '…'
+}
+
 const folderOptions = computed(() => {
   const options: { label: string; value: any }[] = [
     { label: '根目录（不放入文件夹）', value: null }
@@ -568,17 +597,102 @@ onUnmounted(() => {
           >
             <!-- 封面预览区 -->
             <div class="card-cover" :style="{ background: getMapSwatch(map.theme).bg }">
-              <svg class="cover-svg" viewBox="0 0 200 80" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
-                <!-- 连接线 -->
-                <path d="M56 40 L92 20" :stroke="getMapSwatch(map.theme).lineColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
-                <path d="M56 40 L92 40" :stroke="getMapSwatch(map.theme).lineColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
-                <path d="M56 40 L92 60" :stroke="getMapSwatch(map.theme).lineColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
-                <!-- 根节点 -->
-                <rect x="20" y="28" width="72" height="24" rx="4" :fill="getMapSwatch(map.theme).rootFill"/>
-                <!-- 二级节点 -->
-                <rect x="98" y="12" width="72" height="16" rx="3" :fill="getMapSwatch(map.theme).secondFill" :stroke="getMapSwatch(map.theme).lineColor" stroke-width="1"/>
-                <rect x="98" y="32" width="72" height="16" rx="3" :fill="getMapSwatch(map.theme).secondFill" :stroke="getMapSwatch(map.theme).lineColor" stroke-width="1"/>
-                <rect x="98" y="52" width="72" height="16" rx="3" :fill="getMapSwatch(map.theme).secondFill" :stroke="getMapSwatch(map.theme).lineColor" stroke-width="1"/>
+              <svg
+                class="cover-svg"
+                :viewBox="`0 0 220 ${getCoverLayout(map.coverPreview?.secondLevelCount ?? 3).viewBoxH}`"
+                preserveAspectRatio="xMidYMid meet"
+                aria-hidden="true"
+              >
+                <template v-if="map.coverPreview && map.coverPreview.secondLevelNodes.length > 0">
+                  <!-- 连接线 -->
+                  <path
+                    v-for="(node, idx) in getCoverLayout(map.coverPreview.secondLevelCount).nodes"
+                    :key="'line-' + idx"
+                    :d="`M86 40 L110 ${node.y + 7}`"
+                    :stroke="getMapSwatch(map.theme).lineColor"
+                    stroke-width="1.5"
+                    fill="none"
+                    stroke-linecap="round"
+                  />
+                  <!-- 根节点 -->
+                  <rect x="14" y="28" width="72" height="24" rx="5" :fill="getMapSwatch(map.theme).rootFill"/>
+                  <text
+                    x="50"
+                    y="44"
+                    text-anchor="middle"
+                    fill="#fff"
+                    font-size="11"
+                    font-weight="600"
+                    font-family='PingFang SC, "Microsoft YaHei", sans-serif'
+                  >
+                    {{ truncateNodeTitle(map.coverPreview.rootTitle, 10) }}
+                  </text>
+                  <!-- 二级节点 -->
+                  <g v-for="(node, idx) in map.coverPreview.secondLevelNodes" :key="'node-' + idx">
+                    <rect
+                      x="115"
+                      :y="getCoverLayout(map.coverPreview.secondLevelCount).nodes[idx]?.y ?? 0"
+                      width="90"
+                      height="14"
+                      rx="3"
+                      :fill="getMapSwatch(map.theme).secondFill"
+                      :stroke="getMapSwatch(map.theme).lineColor"
+                      stroke-width="1"
+                    />
+                    <text
+                      x="160"
+                      :y="(getCoverLayout(map.coverPreview.secondLevelCount).nodes[idx]?.y ?? 0) + 10"
+                      text-anchor="middle"
+                      :fill="getMapSwatch(map.theme).rootFill"
+                      font-size="9"
+                      font-family='PingFang SC, "Microsoft YaHei", sans-serif'
+                    >
+                      {{ truncateNodeTitle(node.title, 8) }}
+                    </text>
+                  </g>
+                  <!-- 更多节点提示 -->
+                  <g v-if="map.coverPreview.secondLevelCount > 4" opacity="0.6">
+                    <path
+                      :d="`M86 40 L110 ${getCoverLayout(4).nodes[3].y + 7 + 16}`"
+                      :stroke="getMapSwatch(map.theme).lineColor"
+                      stroke-width="1.5"
+                      stroke-dasharray="3,3"
+                      fill="none"
+                      stroke-linecap="round"
+                    />
+                    <rect
+                      x="115"
+                      :y="getCoverLayout(4).nodes[3].y + 16"
+                      width="90"
+                      height="14"
+                      rx="3"
+                      fill="none"
+                      :stroke="getMapSwatch(map.theme).lineColor"
+                      stroke-width="1"
+                      stroke-dasharray="2,2"
+                    />
+                    <text
+                      x="160"
+                      :y="getCoverLayout(4).nodes[3].y + 26"
+                      text-anchor="middle"
+                      :fill="getMapSwatch(map.theme).lineColor"
+                      font-size="9"
+                      font-family='PingFang SC, "Microsoft YaHei", sans-serif'
+                    >
+                      +{{ map.coverPreview.secondLevelCount - 4 }} 更多
+                    </text>
+                  </g>
+                </template>
+                <!-- 兜底：无节点数据时显示占位结构 -->
+                <template v-else>
+                  <path d="M86 40 L110 20" :stroke="getMapSwatch(map.theme).lineColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+                  <path d="M86 40 L110 40" :stroke="getMapSwatch(map.theme).lineColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+                  <path d="M86 40 L110 60" :stroke="getMapSwatch(map.theme).lineColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+                  <rect x="14" y="28" width="72" height="24" rx="5" :fill="getMapSwatch(map.theme).rootFill"/>
+                  <rect x="115" y="12" width="90" height="14" rx="3" :fill="getMapSwatch(map.theme).secondFill" :stroke="getMapSwatch(map.theme).lineColor" stroke-width="1"/>
+                  <rect x="115" y="32" width="90" height="14" rx="3" :fill="getMapSwatch(map.theme).secondFill" :stroke="getMapSwatch(map.theme).lineColor" stroke-width="1"/>
+                  <rect x="115" y="52" width="90" height="14" rx="3" :fill="getMapSwatch(map.theme).secondFill" :stroke="getMapSwatch(map.theme).lineColor" stroke-width="1"/>
+                </template>
               </svg>
               <!-- 右上角状态徽章 -->
               <div class="cover-badge" :class="{ public: map.isPublic }">
@@ -1169,8 +1283,8 @@ onUnmounted(() => {
 }
 
 .cover-svg {
-  width: 80%;
-  max-width: 200px;
+  width: 88%;
+  max-width: 220px;
   height: auto;
 }
 
