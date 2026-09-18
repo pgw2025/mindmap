@@ -48,3 +48,24 @@ body {
   user-select: none;
   -webkit-touch-callout: none;
 }
+
+/* Naive UI Layout 侧边栏背景色统一为卡片背景色（与顶部标签栏一致） */
+.n-layout-sider {
+  background-color: var(--app-card-bg) !important;
+}
+
+/* Naive UI Card 背景色统一 */
+.n-card {
+  background-color: var(--app-card-bg) !important;
+}
+
+/* Naive UI DataTable 背景色统一（表头和表体） */
+.n-data-table {
+  background-color: var(--app-card-bg) !important;
+}
+.n-data-table .n-data-table-th {
+  background-color: var(--app-card-bg) !important;
+}
+.n-data-table .n-data-table-td {
+  background-color: var(--app-card-bg) !important;
+}
