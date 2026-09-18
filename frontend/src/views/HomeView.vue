@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import {
   NButton,
   NCard,
+  NDropdown,
   NEmpty,
   NIcon,
   NInput,
@@ -20,9 +21,9 @@ import {
   CloudUploadOutline,
   CopyOutline,
   DocumentTextOutline,
+  EllipsisHorizontalOutline,
   LockClosedOutline,
   SearchOutline,
-  TrashOutline,
   GlobeOutline,
   CreateOutline,
   FlagOutline,
@@ -35,6 +36,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useTemplatesStore } from '@/stores/templates'
 import { parseSwatch } from '@/api/templates'
 import { reportMindMap } from '@/api/admin'
+import type { MindMapListItem } from '@/api/mindmaps'
 import { THEMES, getThemeSwatch } from '@/themes/presets'
 import { useThemeStore } from '@/stores/theme'
 import { syncAllOffline, getOfflineStatus, offlineState, formatSyncTime } from '@/offline/sync'
@@ -379,6 +381,50 @@ function truncateNodeTitle(title: string, maxLen = 8): string {
   return title.slice(0, maxLen) + '…'
 }
 
+/** 生成「更多」下拉菜单选项 */
+function moreOptions(map: MindMapListItem) {
+  return [
+    {
+      label: map.isPublic ? '设为私有' : '设为公开',
+      key: 'togglePublic'
+    },
+    {
+      label: '移动到...',
+      key: 'move'
+    },
+    {
+      label: '管理标签',
+      key: 'tags'
+    },
+    {
+      type: 'divider' as const,
+      key: 'd1'
+    },
+    {
+      label: '删除',
+      key: 'delete'
+    }
+  ]
+}
+
+/** 处理「更多」下拉菜单选择 */
+function handleMoreSelect(key: string, map: MindMapListItem) {
+  switch (key) {
+    case 'togglePublic':
+      onTogglePublic(map.id, map.isPublic)
+      break
+    case 'move':
+      openMoveModal(map.id, map.title, map.folderId ?? null)
+      break
+    case 'tags':
+      openTagsModal(map.id, map.title, map.tags)
+      break
+    case 'delete':
+      onRemove(map.id, map.title)
+      break
+  }
+}
+
 const folderOptions = computed(() => {
   const options: { label: string; value: any }[] = [
     { label: '根目录（不放入文件夹）', value: null }
@@ -695,7 +741,7 @@ onUnmounted(() => {
                 </template>
               </svg>
               <!-- 右上角状态徽章 -->
-              <div class="cover-badge" :class="{ public: map.isPublic }">
+              <div class="cover-badge" :class="{ public: map.isPublic }" @click.stop>
                 <NIcon v-if="map.isPublic" size="12">
                   <GlobeOutline />
                 </NIcon>
@@ -736,70 +782,58 @@ onUnmounted(() => {
             </div>
 
             <template #action>
-              <NSpace size="small" justify="end" align="center" :wrap="true">
-                <NButton
-                  text
-                  size="small"
-                  type="primary"
-                  @click.stop="onEdit(map.id)"
-                >
-                  <template #icon><NIcon><CreateOutline /></NIcon></template>
-                  编辑
-                </NButton>
-                <NButton
-                  v-if="mapsStore.scope === 'mine'"
-                  text
-                  size="small"
-                  @click.stop="onTogglePublic(map.id, map.isPublic)"
-                >
-                  {{ map.isPublic ? '设私有' : '设公开' }}
-                </NButton>
-                <NButton
-                  v-if="mapsStore.scope === 'mine'"
-                  text
-                  size="small"
-                  @click.stop="openMoveModal(map.id, map.title, map.folderId ?? null)"
-                >
-                  移动
-                </NButton>
-                <NButton
-                  v-if="mapsStore.scope === 'mine'"
-                  text
-                  size="small"
-                  @click.stop="openTagsModal(map.id, map.title, map.tags)"
-                >
-                  标签
-                </NButton>
-                <NButton
-                  v-if="mapsStore.scope === 'mine'"
-                  text
-                  size="small"
-                  @click.stop="onCopy(map.id)"
-                >
-                  <template #icon><NIcon><CopyOutline /></NIcon></template>
-                  复制
-                </NButton>
-                <NButton
-                  v-if="mapsStore.scope === 'mine'"
-                  text
-                  size="small"
-                  type="error"
-                  @click.stop="onRemove(map.id, map.title)"
-                >
-                  <template #icon><NIcon><TrashOutline /></NIcon></template>
-                  删除
-                </NButton>
-                <NButton
-                  v-if="mapsStore.scope === 'public' && !authStore.isAdmin"
-                  text
-                  size="small"
-                  type="warning"
-                  @click.stop="openReportModal(map.id, map.title)"
-                >
-                  <template #icon><NIcon><FlagOutline /></NIcon></template>
-                  举报
-                </NButton>
-              </NSpace>
+              <div class="card-action-bar" @click.stop>
+                <!-- 左侧：状态胶囊 -->
+                <div class="action-left">
+                  <span
+                    v-if="mapsStore.scope === 'mine'"
+                    class="status-pill"
+                    :class="{ public: map.isPublic }"
+                  >
+                    <NIcon size="12">
+                      <GlobeOutline v-if="map.isPublic" />
+                      <LockClosedOutline v-else />
+                    </NIcon>
+                    {{ map.isPublic ? '公开' : '私有' }}
+                  </span>
+                  <span v-else-if="mapsStore.scope === 'public'" class="status-pill public">
+                    <NIcon size="12"><GlobeOutline /></NIcon>
+                    公开
+                  </span>
+                </div>
+
+                <!-- 右侧：操作按钮 -->
+                <div class="action-right">
+                  <!-- 编辑：始终显示 -->
+                  <button class="action-icon-btn primary" @click.stop="onEdit(map.id)" title="编辑">
+                    <NIcon size="16"><CreateOutline /></NIcon>
+                  </button>
+
+                  <!-- 我的导图：复制 + 更多菜单 -->
+                  <template v-if="mapsStore.scope === 'mine'">
+                    <button class="action-icon-btn" @click.stop="onCopy(map.id)" title="复制">
+                      <NIcon size="16"><CopyOutline /></NIcon>
+                    </button>
+                    <NDropdown
+                      :options="moreOptions(map)"
+                      trigger="click"
+                      placement="bottom-end"
+                      @select="(key: string) => handleMoreSelect(key, map)"
+                    >
+                      <button class="action-icon-btn more-btn" @click.stop title="更多操作">
+                        <NIcon size="16"><EllipsisHorizontalOutline /></NIcon>
+                      </button>
+                    </NDropdown>
+                  </template>
+
+                  <!-- 公开导图：举报 -->
+                  <template v-else-if="mapsStore.scope === 'public' && !authStore.isAdmin">
+                    <button class="action-icon-btn warn" @click.stop="openReportModal(map.id, map.title)" title="举报">
+                      <NIcon size="16"><FlagOutline /></NIcon>
+                    </button>
+                  </template>
+                </div>
+              </div>
             </template>
           </NCard>
         </div>
@@ -1378,6 +1412,138 @@ onUnmounted(() => {
   overflow-y: auto;
 }
 
+/* 卡片底部操作栏 */
+.card-action-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.action-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.action-right {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* 状态胶囊 */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--app-bg-hover, #f3f3f3);
+  color: var(--app-text-secondary, #6b7280);
+  transition: all 0.15s;
+
+  &.public {
+    background: rgba(24, 160, 88, 0.1);
+    color: #18a058;
+  }
+}
+
+:global(.dark) .status-pill {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--app-text-secondary, #9ca3af);
+
+  &.public {
+    background: rgba(54, 173, 106, 0.18);
+    color: #36ad6a;
+  }
+}
+
+/* 图标按钮 */
+.action-icon-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--app-text-secondary, #6b7280);
+  transition: all 0.15s;
+
+  &:hover {
+    background: var(--app-bg-hover, #f3f3f3);
+    color: var(--app-text-primary, #1f2329);
+  }
+
+  &.primary {
+    color: #18a058;
+
+    &:hover {
+      background: rgba(24, 160, 88, 0.1);
+    }
+  }
+
+  &.warn {
+    color: #f0a020;
+
+    &:hover {
+      background: rgba(240, 160, 32, 0.1);
+    }
+  }
+
+  &.more-btn {
+    border: 1px solid var(--app-border, #e5e7eb);
+
+    &:hover {
+      border-color: var(--app-border-strong, #d1d5db);
+    }
+  }
+}
+
+:global(.dark) .action-icon-btn {
+  color: var(--app-text-secondary, #9ca3af);
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--app-text-primary, #e5e7eb);
+  }
+
+  &.primary {
+    color: #36ad6a;
+
+    &:hover {
+      background: rgba(54, 173, 106, 0.18);
+    }
+  }
+
+  &.warn {
+    color: #f0a020;
+
+    &:hover {
+      background: rgba(240, 160, 32, 0.18);
+    }
+  }
+
+  &.more-btn {
+    border-color: var(--app-border, #2a2f36);
+
+    &:hover {
+      border-color: var(--app-border-strong, #3a3f46);
+    }
+  }
+}
+
+/* NCard action 区域内边距微调 */
+.map-card :deep(.n-card__action) {
+  padding: 8px 12px;
+}
+
 .pager {
   margin-top: 16px;
   display: flex;
@@ -1432,6 +1598,17 @@ onUnmounted(() => {
   .card-body .meta-row {
     gap: 8px;
     font-size: 11px;
+  }
+  .status-pill {
+    font-size: 10px;
+    padding: 3px 8px;
+  }
+  .action-icon-btn {
+    width: 28px;
+    height: 28px;
+  }
+  .map-card :deep(.n-card__action) {
+    padding: 6px 10px;
   }
   .pager {
     :deep(.n-pagination) {
