@@ -1082,7 +1082,7 @@ onBeforeUnmount(() => {
   }
 
   .section-card {
-    background: #ffffff;
+    background: var(--app-card-bg);
     border: 1px solid var(--app-border);
     border-radius: 6px;
     padding: 12px;
@@ -1090,7 +1090,7 @@ onBeforeUnmount(() => {
     .section-header {
       font-size: 13px;
       font-weight: 600;
-      color: #1e293b;
+      color: var(--app-text-primary);
       margin-bottom: 10px;
       padding-bottom: 6px;
       border-bottom: 1px dashed var(--app-border);
@@ -1120,7 +1120,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--app-border);
   border-radius: 6px;
   overflow: hidden;
-  background: #fafafa;
+  background: var(--app-bg);
   position: relative;
 }
 
@@ -1205,7 +1205,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 8px;
   padding: 12px;
-  background: #f8fafc;
+  background: var(--app-bg);
   border: 1px solid var(--app-border);
   border-radius: 6px;
 
@@ -1216,13 +1216,14 @@ onBeforeUnmount(() => {
     font-size: 13px;
 
     .label {
-      color: #64748b;
+      color: var(--app-text-secondary);
       width: 110px;
       flex-shrink: 0;
     }
 
     .value {
       font-weight: 600;
+      color: var(--app-text-primary);
 
       &.success {
         color: #16a34a;
@@ -1250,7 +1251,7 @@ onBeforeUnmount(() => {
 
     .import-failed-item {
       font-size: 12px;
-      color: #64748b;
+      color: var(--app-text-secondary);
       line-height: 1.5;
     }
   }
