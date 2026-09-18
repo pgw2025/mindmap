@@ -775,9 +775,27 @@ export function useMindMapSync(opts: {
    *  ============================================================ */
   async function applyExpandCollapse(mode: 'expand-all' | 'collapse-all' | number): Promise<void> {
     const inst = getMindMapInstance()
-    if (!inst || readonly.value) return
+    if (!inst) return
     const renderTree = (inst as any).renderer?.renderTree
     if (!renderTree) return
+
+    // readonly 模式：纯前端视图操作，不涉及后端同步，直接执行后返回
+    if (readonly.value) {
+      if (mode === 'expand-all') {
+        ; (inst as any).execCommand('EXPAND_ALL')
+        const onRenderEnd = () => {
+          ; (inst as any).off('node_tree_render_end', onRenderEnd)
+          inst.view?.reset()
+        }
+        ; (inst as any).on('node_tree_render_end', onRenderEnd)
+        setTimeout(() => { (inst as any).off('node_tree_render_end', onRenderEnd) }, 5000)
+      } else if (mode === 'collapse-all') {
+        ; (inst as any).execCommand('UNEXPAND_ALL')
+      } else {
+        ; (inst as any).execCommand('UNEXPAND_TO_LEVEL', mode)
+      }
+      return
+    }
 
     // 1. 预计算将发生变化的节点（与 expandAllNode / unexpandAllNode / expandToLevel 逻辑一致）
     const changed: Array<{ backendId: string; isCollapsed: boolean }> = []

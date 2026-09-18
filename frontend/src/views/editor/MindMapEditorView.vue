@@ -1150,7 +1150,7 @@ const levelDropdownOptions = computed<DropdownOption[]>(() => {
 })
 
 async function handleLevelSelect(key: string | number) {
-  if (readonly.value || isOfflineData.value || levelMenuBusy.value) return
+  if (isOfflineData.value || levelMenuBusy.value) return
   levelMenuBusy.value = true
   try {
     if (key === 'expand-all') {
@@ -1727,7 +1727,7 @@ watch(() => route.params.id, () => {
         <!-- 层级胶囊组：全部展开 / 全部折叠 / 收起到第 N 级 -->
         <div class="btn-group-pill">
           <NDropdown trigger="click" :options="levelDropdownOptions" @select="handleLevelSelect">
-            <button class="btn-tool-pill" :disabled="readonly || isOfflineData || levelMenuBusy"
+            <button class="btn-tool-pill" :disabled="isOfflineData || levelMenuBusy"
               title="层级：全部展开 / 全部折叠 / 收起到指定层级">
               <span class="pill-icon">≡</span>
             </button>
