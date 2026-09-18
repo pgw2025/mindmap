@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, nextTick } from 'vue'
+import { ref, watch, onMounted, computed, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMessage, NButton, NInput, NSpin, NResult, NCard, NTag, NModal } from 'naive-ui'
 import MindMap from 'simple-mind-map'
@@ -7,6 +7,8 @@ import Search from 'simple-mind-map/src/plugins/Search.js'
 import { verifyShare, fetchSharedMindMap } from '@/api/shares'
 import * as mindmapsApi from '@/api/mindmaps'
 import { useAuthStore } from '@/stores/auth'
+import { useThemeStore } from '@/stores/theme'
+import { resolveThemeConfig } from '@/themes/presets'
 import NodeNoteTooltip from './editor/components/NodeNoteTooltip.vue'
 
 /** 后端 NodeShape 数字 → simple-mind-map 形状字符串 */
@@ -31,6 +33,7 @@ const route = useRoute()
 const router = useRouter()
 const message = useMessage()
 const authStore = useAuthStore()
+const themeStore = useThemeStore()
 
 // 登录提示弹窗
 const loginPromptVisible = ref(false)
@@ -54,6 +57,24 @@ const shareVerified = ref(false)
 const canvasEl = ref<HTMLDivElement | null>(null)
 const noteTooltipRef = ref<InstanceType<typeof NodeNoteTooltip> | null>(null)
 let mindMapInstance: MindMap | null = null
+
+/** 这份脑图的配色预设 id（与创建者选择的一致） */
+const sharedThemeId = ref<string | null>(null)
+
+/**
+ * 分享页画布配色跟随「访问者」的明暗，而不是创建者的：
+ * 色相沿用这份脑图的主题，明暗取访问者当前的应用主题。
+ */
+function applySharedTheme() {
+  if (!mindMapInstance) return
+  mindMapInstance.setThemeConfig(resolveThemeConfig(sharedThemeId.value, themeStore.isDark), false)
+}
+
+// 访问者切换浅色/深色时同步画布配色（只换配色，不动缩放与位移）
+watch(
+  () => themeStore.isDark,
+  () => applySharedTheme()
+)
 
 /** simple-mind-map 根节点布局方向（按后端 defaultLayout） */
 const layoutConfig: Record<number, { direction: string }> = {
@@ -159,6 +180,7 @@ async function loadMindMapData() {
     await nextTick()
 
     const layout = layoutConfig[data.mindMap.defaultLayout] ?? layoutConfig[0]
+    sharedThemeId.value = data.mindMap.theme ?? null
 
     if (mindMapInstance) {
       mindMapInstance.destroy()
@@ -178,6 +200,12 @@ async function loadMindMapData() {
         hide: () => noteTooltipRef.value?.hide()
       }
     } as any)
+    // 配色要等首次渲染完成后再应用，否则会被构造时的异步渲染覆盖
+    const onFirstRender = () => {
+      ; (mindMapInstance as any)?.off('node_tree_render_end', onFirstRender)
+      applySharedTheme()
+    }
+    ; (mindMapInstance as any).on('node_tree_render_end', onFirstRender)
     MindMap.usePlugin(Search)
     ;(mindMapInstance as any).on('node_active', () => {
       // 只读模式下不做处理

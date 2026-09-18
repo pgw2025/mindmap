@@ -447,6 +447,7 @@ import { useNodesStore } from '@/stores/nodes'
 import { useMindMapsStore } from '@/stores/mindmaps'
 import { useAuthStore } from '@/stores/auth'
 import { useTemplatesStore } from '@/stores/templates'
+import { useThemeStore } from '@/stores/theme'
 import { fetchTemplate } from '@/api/templates'
 import NodeToolbar from './NodeToolbar.vue'
 import ShareDrawer from './components/ShareDrawer.vue'
@@ -456,7 +457,14 @@ import NotePanel from './components/NotePanel.vue'
 import NodeNoteTooltip from './components/NodeNoteTooltip.vue'
 import OuterFrameStylePanel from './components/OuterFrameStylePanel.vue'
 import { useMindMapSync } from './composables/useMindMapSync'
-import { THEMES, getThemeConfig, getThemeIdOrDefault, type MindMapThemeConfig } from '@/themes/presets'
+import {
+  THEMES,
+  resolveThemeConfig,
+  getThemeIdOrDefault,
+  getThemePreset,
+  getThemeSwatch,
+  type MindMapThemeConfig
+} from '@/themes/presets'
 
 const route = useRoute()
 const router = useRouter()
@@ -464,6 +472,7 @@ const message = useMessage()
 const nodesStore = useNodesStore()
 const mapsStore = useMindMapsStore()
 const templatesStore = useTemplatesStore()
+const themeStore = useThemeStore()
 
 // 后端约定 Guid.Empty 表示清除引用（JSON null 不会触发 Guid? 更新）
 const EMPTY_GUID = '00000000-0000-0000-0000-000000000000'
@@ -576,6 +585,51 @@ const selectedNodeForContent = computed<NodeDto | null>(() => {
   return nodesStore.findNode(selectedNodeId.value) ?? null
 })
 
+/** 已解析的模板配置（模板优先级高于主题；明暗切换时复用它，避免重复请求） */
+const templateConfigCache = ref<MindMapThemeConfig | null>(null)
+
+/**
+ * 把当前「色相 × 明暗」的解析结果应用到画布 —— 全组件唯一的配色出口。
+ * 初始化、切换主题、套用/清除模板、切浅色深色都必须走这里，
+ * 否则会出现两套解析逻辑，深色下必然漏掉某条路径。
+ * @param themeIdOverride 用于「先预览后落库」的场景（切换主题时后端还没返回）
+ */
+function applyResolvedTheme(notRender = false, themeIdOverride?: string) {
+  if (!mindMapInstance) return
+  const cfg = resolveThemeConfig(themeIdOverride ?? mapDetail.value?.theme, themeStore.isDark, {
+    templateConfig: templateConfigCache.value
+  })
+  // 第二个参数 notRender=false 表示立即触发重绘
+  mindMapInstance.setThemeConfig(cfg, notRender)
+}
+
+/**
+ * 拉取并缓存模板配置后应用配色；无模板或模板获取/解析失败时回退到主题预设。
+ */
+async function applyResolvedThemeWithTemplate() {
+  const templateId = mapDetail.value?.templateId
+  if (!templateId) {
+    templateConfigCache.value = null
+    applyResolvedTheme()
+    return
+  }
+  try {
+    const tpl = await fetchTemplate(templateId)
+    templateConfigCache.value = JSON.parse(tpl.configJson) as MindMapThemeConfig
+  } catch {
+    // 拉取失败或 configJson 不是合法 JSON：清掉缓存，回退到主题预设
+    templateConfigCache.value = null
+  }
+  applyResolvedTheme()
+}
+
+// 切换浅色/深色时重新解析画布配色。
+// 只换配色：不重新居中、不动缩放与位移（setThemeConfig 内部不会重置视口）。
+watch(
+  () => themeStore.isDark,
+  () => applyResolvedTheme()
+)
+
 /** 初始化 simple-mind-map */
 function initMindMap() {
   if (!mindMapRef.value) {
@@ -585,8 +639,6 @@ function initMindMap() {
 
   // 1. 开启保护开关，防止初始化和首次 setData 触发 syncToBackend 误删数据库节点
   isSettingData.value = true
-
-  const themeId = getThemeIdOrDefault(mapDetail.value?.theme)
 
   mindMapInstance = new MindMap({
     el: mindMapRef.value,
@@ -631,58 +683,20 @@ function initMindMap() {
     // simple-mind-map 没有 once API，用 on + off 手动实现
     const onFirstRender = () => {
       mindMapInstance?.off('node_tree_render_end', onFirstRender)
-      // 样式应用优先级：模板 > 主题
-      // 模板：异步获取 configJson 后应用（完整自定义配置）
-      // 主题：同步获取内置预设应用
-      const templateId = mapDetail.value?.templateId
-      if (templateId) {
-        fetchTemplate(templateId)
-          .then((tpl) => {
-            try {
-              const cfg = JSON.parse(tpl.configJson) as MindMapThemeConfig
-              mindMapInstance?.setThemeConfig(cfg, false)
-            } catch {
-              mindMapInstance?.setThemeConfig(getThemeConfig(themeId), false)
-            }
-            const r = mindMapInstance?.renderer?.root
-            if (r) {
-              ; (mindMapInstance?.renderer as any)?.moveNodeToCenter(r)
-            }
-          })
-          .catch(() => {
-            mindMapInstance?.setThemeConfig(getThemeConfig(themeId), false)
-          })
-      } else {
-        // 主题在 setData 之后应用，否则会被 setData 的异步渲染覆盖
-        // setThemeConfig 第二个参数 notRender=false 表示立即触发重绘
-        mindMapInstance?.setThemeConfig(getThemeConfig(themeId), false)
+      // 配色必须在 setData 之后应用，否则会被 setData 的异步渲染覆盖。
+      // 样式优先级：模板 > 主题；浅色/深色由 applyResolvedTheme 统一派生。
+      applyResolvedThemeWithTemplate().finally(() => {
         const root = mindMapInstance?.renderer?.root
         if (root) {
           // moveNodeToCenter 在 Render 实例上，不在 MindMap 实例上
           ; (mindMapInstance?.renderer as any)?.moveNodeToCenter(root)
         }
-      }
+      })
     }
     mindMapInstance.on('node_tree_render_end', onFirstRender)
   } else {
     // 没有数据时直接应用样式（模板优先，否则主题）
-    const templateId = mapDetail.value?.templateId
-    if (templateId) {
-      fetchTemplate(templateId)
-        .then((tpl) => {
-          try {
-            const cfg = JSON.parse(tpl.configJson) as MindMapThemeConfig
-            mindMapInstance?.setThemeConfig(cfg, false)
-          } catch {
-            mindMapInstance?.setThemeConfig(getThemeConfig(themeId), false)
-          }
-        })
-        .catch(() => {
-          mindMapInstance?.setThemeConfig(getThemeConfig(themeId), false)
-        })
-    } else {
-      mindMapInstance.setThemeConfig(getThemeConfig(themeId), false)
-    }
+    void applyResolvedThemeWithTemplate()
   }
 
   // 3. 延迟关闭保护开关，确保初始渲染引发的 data_change 被安全跳过
@@ -1188,7 +1202,9 @@ const templateDropdownOptions = computed(() => [
 async function handleThemeSelect(key: string) {
   if (!mindMapInstance || !mapDetail.value) return
   if (key === currentThemeId.value && !currentTemplateId.value) return
-  mindMapInstance.setThemeConfig(getThemeConfig(key))
+  // 切换主题 = 放弃模板（模板优先级高于主题）：先清模板缓存，再按新色相 + 当前明暗应用
+  templateConfigCache.value = null
+  applyResolvedTheme(false, key)
   if (!readonly.value) {
     try {
       // 切换主题时清除模板（模板优先级高于主题，切换主题=放弃模板）
@@ -1206,8 +1222,8 @@ async function handleTemplateSelect(key: string) {
   if (!mindMapInstance || !mapDetail.value) return
   if (key === '__none__') {
     // 清除模板，回退到当前主题
-    const themeId = currentThemeId.value
-    mindMapInstance.setThemeConfig(getThemeConfig(themeId))
+    templateConfigCache.value = null
+    applyResolvedTheme()
     if (!readonly.value) {
       try {
         await updateMindMap(mindMapId.value, { templateId: EMPTY_GUID })
@@ -1219,7 +1235,7 @@ async function handleTemplateSelect(key: string) {
     return
   }
   if (key === currentTemplateId.value) return
-  // 套用模板：拉取详情 → 应用 configJson → 保存 templateId
+  // 套用模板：拉取详情 → 缓存 configJson → 应用（明暗由唯一出口派生）
   try {
     const tpl = await fetchTemplate(key)
     let cfg: MindMapThemeConfig
@@ -1229,7 +1245,8 @@ async function handleTemplateSelect(key: string) {
       message.error('模板样式解析失败')
       return
     }
-    mindMapInstance.setThemeConfig(cfg)
+    templateConfigCache.value = cfg
+    applyResolvedTheme()
     if (!readonly.value) {
       await updateMindMap(mindMapId.value, { templateId: key })
       mapDetail.value.templateId = key
@@ -1753,8 +1770,8 @@ watch(() => route.params.id, () => {
             @select="handleThemeSelect">
             <button class="btn-action-ghost" :class="{ 'is-dimmed': !!currentTemplateId }" title="切换配色主题">
               <span class="theme-swatch"
-                :style="{ background: THEMES.find(t => t.id === currentThemeId)?.swatch.rootFill }"></span>
-              <span class="btn-label">{{THEMES.find(t => t.id === currentThemeId)?.name ?? '主题'}}</span>
+                :style="{ background: getThemeSwatch(currentThemeId, themeStore.isDark).rootFill }"></span>
+              <span class="btn-label">{{getThemePreset(currentThemeId).name}}</span>
             </button>
           </NDropdown>
         </div>
