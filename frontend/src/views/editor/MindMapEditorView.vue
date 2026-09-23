@@ -437,7 +437,7 @@ MindMap.usePlugin(TouchEvent)
 MindMap.usePlugin(AssociativeLine)
 MindMap.usePlugin(OuterFrame)
 
-import type { NodeDto, NodeCreatePayload, NodeUpdatePayload, NodeTreeNodeDto } from '@/api/nodes'
+import type { NodeDto, NodeCreatePayload, NodeUpdatePayload, NodeTreeNodeDto, NodeBatchItem } from '@/api/nodes'
 import type { MindMapDetail } from '@/api/mindmaps'
 import { fetchMindMap, updateMindMap } from '@/api/mindmaps'
 import * as offlineDb from '@/offline/db'
@@ -503,6 +503,8 @@ const offlineLastSyncText = computed(() => formatSyncTime(offlineState.lastSync)
 const selectedNodeId = ref<string | null>(null)
 /** 当前激活（选中）的节点数量，多选时 >1，用于切换「摘要」按钮为「多节点摘要」 */
 const activeNodeCount = ref(0)
+/** 多选时的全部节点 Id 集合（首个为主节点，用于工具栏回显） */
+const activeNodeIds = ref<string[]>([])
 const showToolbar = ref(false)
 
 // 移动端顶部标题/描述/导航栏沉浸折叠状态（Zen 模式，默认开启沉浸式）
@@ -733,6 +735,10 @@ function initMindMap() {
     const count = activeNodeList?.length ?? 0
     activeNodeCount.value = count
     if (count > 0) {
+      // 收集全部选中节点 Id（主节点取第一个，用于工具栏样式回显）
+      activeNodeIds.value = (activeNodeList ?? [])
+        .map((n) => n.nodeData?.id)
+        .filter((id): id is string => !!id)
       const id = activeNodeList![0]?.nodeData?.id
       if (id) {
         selectedNodeId.value = id
@@ -740,6 +746,7 @@ function initMindMap() {
       }
     } else {
       selectedNodeId.value = null
+      activeNodeIds.value = []
       showToolbar.value = false
     }
   })
@@ -949,7 +956,25 @@ async function submitNodeDelete(): Promise<boolean> {
 async function handleUpdateStyle(payload: NodeUpdatePayload) {
   if (!selectedNodeId.value) return
   try {
-    await nodesStore.update(selectedNodeId.value, payload)
+    // 多选（>1）时走批量更新，单次请求 + 单条撤销历史
+    const ids = activeNodeIds.value.length > 1 ? activeNodeIds.value : [selectedNodeId.value]
+    if (ids.length > 1) {
+      const items: NodeBatchItem[] = ids.map((id) => ({
+        id,
+        color: payload.color,
+        fontSize: payload.fontSize,
+        fontFamily: payload.fontFamily,
+        shape: payload.shape,
+        icon: payload.icon,
+        borderColor: payload.borderColor,
+        backgroundColor: payload.backgroundColor,
+        edgeColor: payload.edgeColor,
+        edgeStyle: payload.edgeStyle
+      }))
+      await nodesStore.batchUpdate(items)
+    } else {
+      await nodesStore.update(selectedNodeId.value, payload)
+    }
     reloadMindMap()
   } catch (e) {
     message.error((e as Error).message)

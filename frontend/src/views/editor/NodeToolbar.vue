@@ -198,6 +198,11 @@ function selectEdgeStyle(style: EdgeStyle) {
 
     <!-- 以下样式区域在移动端可折叠 -->
     <div class="style-panel" :class="{ 'mobile-collapsed': !mobileExpanded }">
+      <!-- 多选批量修改提示 -->
+      <div v-if="isMultiSelect" class="batch-tip">
+        已选中 {{ activeNodeCount }} 个节点，修改将应用到全部
+      </div>
+
       <!-- 文字颜色 -->
       <div class="toolbar-section">
         <div class="section-title">文字颜色</div>
@@ -313,6 +318,17 @@ function selectEdgeStyle(style: EdgeStyle) {
   color: var(--app-text-secondary, #666);
   text-transform: uppercase;
   letter-spacing: 0.5px;
+}
+
+.batch-tip {
+  font-size: 12px;
+  font-weight: 500;
+  color: #2080f0;
+  background: rgba(32, 128, 240, 0.1);
+  border: 1px solid rgba(32, 128, 240, 0.3);
+  border-radius: 6px;
+  padding: 6px 10px;
+  text-align: center;
 }
 
 .actions {

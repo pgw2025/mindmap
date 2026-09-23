@@ -131,6 +131,22 @@ public class NodeBatchItem
     public double? X { get; set; }
     public double? Y { get; set; }
     public bool? IsCollapsed { get; set; }
+
+    [StringLength(32)]
+    public string? Color { get; set; }
+    public int? FontSize { get; set; }
+    [StringLength(64)]
+    public string? FontFamily { get; set; }
+    public NodeShape? Shape { get; set; }
+    [StringLength(128)]
+    public string? Icon { get; set; }
+    [StringLength(32)]
+    public string? BorderColor { get; set; }
+    [StringLength(32)]
+    public string? BackgroundColor { get; set; }
+    [StringLength(32)]
+    public string? EdgeColor { get; set; }
+    public EdgeStyle? EdgeStyle { get; set; }
 }
 
 /// <summary>

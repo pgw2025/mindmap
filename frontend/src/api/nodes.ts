@@ -102,6 +102,15 @@ export interface NodeBatchItem {
   x?: number
   y?: number
   isCollapsed?: boolean
+  color?: string
+  fontSize?: number
+  fontFamily?: string
+  shape?: NodeShape
+  icon?: string
+  borderColor?: string
+  backgroundColor?: string
+  edgeColor?: string
+  edgeStyle?: EdgeStyle
 }
 
 export interface NodeBatchPayload {

@@ -350,6 +350,16 @@ public class NodeService : INodeService
             if (item.X.HasValue) node.X = item.X;
             if (item.Y.HasValue) node.Y = item.Y;
             if (item.IsCollapsed.HasValue) node.IsCollapsed = item.IsCollapsed.Value;
+            // 样式字段：沿用 UpdateAsync 的部分更新语义（null 不覆盖，空字符串表示清除）
+            if (item.Color is not null) node.Color = item.Color;
+            if (item.FontSize.HasValue) node.FontSize = item.FontSize;
+            if (item.FontFamily is not null) node.FontFamily = item.FontFamily;
+            if (item.Shape.HasValue) node.Shape = item.Shape;
+            if (item.Icon is not null) node.Icon = item.Icon;
+            if (item.BorderColor is not null) node.BorderColor = item.BorderColor;
+            if (item.BackgroundColor is not null) node.BackgroundColor = item.BackgroundColor;
+            if (item.EdgeColor is not null) node.EdgeColor = item.EdgeColor;
+            if (item.EdgeStyle.HasValue) node.EdgeStyle = item.EdgeStyle;
             node.UpdatedAt = now;
         }
 

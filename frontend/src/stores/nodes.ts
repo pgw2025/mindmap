@@ -240,7 +240,16 @@ export const useNodesStore = defineStore('nodes', () => {
             parentId: n.parentId,
             x: n.x ?? undefined,
             y: n.y ?? undefined,
-            isCollapsed: n.isCollapsed
+            isCollapsed: n.isCollapsed,
+            color: n.color ?? undefined,
+            fontSize: n.fontSize ?? undefined,
+            fontFamily: n.fontFamily ?? undefined,
+            shape: n.shape ?? undefined,
+            icon: n.icon ?? undefined,
+            borderColor: n.borderColor ?? undefined,
+            backgroundColor: n.backgroundColor ?? undefined,
+            edgeColor: n.edgeColor ?? undefined,
+            edgeStyle: n.edgeStyle ?? undefined
           }))
           await nodesApi.batchUpdateNodes(mindMapId.value, { nodes: items })
         }
