@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="A9if01jvbbdposZ4GzJMgf">
+<head data-page-node-id="SqLSNlvCBegCi9pYtWeW0n">
+<meta charset="UTF-8" data-page-node-id="jrMyPYHfgM6emqzjJ5tcXj">
+<meta name="viewport" content="width=device-width, initial-scale=1.0" data-page-node-id="396bL2CAmgwnaNUPN8GUVO">
+<title>性能优化改造方案 · MindMap</title>
+<style>
+  :root {
+    --bg: #0f1216;
+    --card: #171b21;
+    --card-2: #1d232b;
+    --border: #2a313b;
+    --text: #d7dce2;
+    --muted: #8b95a1;
+    --red: #ff6b6b;
+    --orange: #ffa94d;
+    --yellow: #ffd43b;
+    --green: #51cf66;
+    --blue: #4dabf7;
+    --purple: #b197fc;
+    --mono: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; line-height: 1.7; padding: 40px 24px 80px; }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  header { margin-bottom: 32px; }
+  h1 { font-size: 26px; margin: 0 0 8px; }
+  .sub { color: var(--muted); font-size: 14px; }
+  h2 { font-size: 20px; margin: 44px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  h2 .p { font-size: 12px; padding: 2px 10px; border-radius: 12px; vertical-align: middle; margin-left: 8px; font-weight: 700; }
+  .p0 { background: rgba(255,107,107,.18); color: var(--red); }
+  .p1 { background: rgba(255,169,77,.18); color: var(--orange); }
+  .p2 { background: rgba(255,212,59,.15); color: var(--yellow); }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 22px 24px; margin-bottom: 18px; }
+  .card h3 { margin: 0 0 10px; font-size: 16px; }
+  .card p { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
+  .card p b { color: var(--text); }
+  .why { font-size: 13.5px; color: var(--muted); }
+  .why strong { color: var(--orange); }
+  pre {
+    background: #0b0e12; border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px;
+    overflow-x: auto; font-family: var(--mono); font-size: 12.8px; line-height: 1.55; color: #c9d1d9;
+    margin: 14px 0;
+  }
+  pre .cm { color: #6a737d; font-style: italic; }
+  pre .kw { color: #ff7b72; }
+  pre .fn { color: #d2a8ff; }
+  pre .st { color: #a5d6ff; }
+  .tag-inline { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 4px; margin-right: 6px; }
+  .t-front { background: rgba(77,171,247,.18); color: var(--blue); }
+  .t-back { background: rgba(177,151,252,.18); color: var(--purple); }
+  .step { display: flex; gap: 14px; margin: 18px 0; }
+  .step-num { flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%; background: var(--card-2); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; color: var(--blue); }
+  .step-body { flex: 1; }
+  .step-body .t { font-weight: 600; font-size: 14.5px; margin-bottom: 4px; }
+  .step-body .d { color: var(--muted); font-size: 13.5px; }
+  .risk { background: rgba(255,169,77,.08); border-left: 3px solid var(--orange); padding: 12px 16px; border-radius: 6px; font-size: 13.5px; margin: 12px 0; }
+  .risk b { color: var(--orange); }
+</style>
+</head>
+<body data-page-node-id="1PYIVn1Mvv5Es9SoTRzfJw">
+<div class="wrap" data-page-node-id="GPSFDCsTemNn7q69dhbbtI">
+  <header data-page-node-id="5gcuXfsaecuGCa0DNQBGGW">
+    <h1 data-page-node-id="7Nzz6G62oeXevhbveAivTK">性能优化改造方案</h1>
+    <div class="sub" data-page-node-id="hz5vWm6TrAQFKTDi0J1WKR">核心瓶颈「每次编辑触发全量拉取 + 全量重绘」的根治方案 · 含可落地代码 · 未改动仓库</div>
+  </header>
+
+  <div class="card" data-page-node-id="KNn8FwpCTuKTOVt8W0CSYB">
+    <h3 data-page-node-id="kh0N2nbLX41yOitzhHK54J">一句话诊断</h3>
+    <p data-page-node-id="mjIjAhTQc1TDtXgnFiRl2X">瓶颈<b data-page-node-id="K76bISzdjWjicEKIKNbQdZ">不在 simple-mind-map 渲染本身</b>，而在架构层：<b data-page-node-id="PBqspRr0Gpx7OYXjcblCTS">store 每次写操作后 <code data-page-node-id="zHceshB4xhKGdOvnU2FiR1">reloadTree()</code> 全量拉取</b>（且并行发 nodes + tree 两个请求），叠加<b data-page-node-id="6EBAYJJF2JAUsMPgkJvU9h">编辑器写完后 <code data-page-node-id="lIcA2CqVgPQf0Rtkj7sDIg">reloadMindMap()</code> 全量 <code data-page-node-id="RB6bqji2iVZxgphEyB5mYc">setData</code> 重绘</b>。你精心设计的 <code data-page-node-id="MZjfnbMBGGMl1A39LVqaTy">data_change_detail</code> 增量同步，其收益被这两层全量刷新完全抵消。</p>
+  </div>
+
+  <h2 data-page-node-id="GNXJ7fFeSVTwoVbeqctBU8">改造 1：去掉写操作后的全量 reloadTree <span class="p p0" data-page-node-id="6rr6o11UPmYM5gbp3EQ2OG">P0</span></h2>
+  <div class="card" data-page-node-id="ZUBl0SjhjHTf8KFnFhsAO0">
+    <p data-page-node-id="5OZpZ78cyMRZigHyLDw38v">API 的 <code data-page-node-id="j0PPPsHOOL0MpZXzZZMFWN">create/update/move</code> 已经返回最新 <code data-page-node-id="DbgT9kQ750urJXGv3vojFG">NodeDto</code>，<code data-page-node-id="qudFxCQWwkgBMolTkcB8V4">delete</code> 语义明确。store 内直接用返回值维护 <code data-page-node-id="VnAIczUVvp0hXUdx4QAN2z">nodes</code>，把 <code data-page-node-id="8uIp4F2nz6uSIUGlKDwD1B">reloadTree()</code> 从写方法里移除，让增量同步真正生效。</p>
+    <div class="tag-inline t-front" data-page-node-id="FvtfjUFGoEhK8uSi4ijXKV">前端</div><span style="color:var(--muted); font-size:13px;" data-page-node-id="xyO4eFWQF5WhCkliaKMDRs">frontend/src/stores/nodes.ts</span>
+    <pre data-page-node-id="yn7j95gxNuOImTiI6x1DnE"><span class="cm" data-page-node-id="h4K97wy3qHawNZKVwPIrm0">// create：返回值已够，无需全量 reload</span>
+<span class="kw" data-page-node-id="2AZasTMmfTuxecr7Q4DgdH">async function</span> <span class="fn" data-page-node-id="qrZfhuXLtB7ps3uJRbzbkO">create</span>(payload: NodeCreatePayload): <span class="kw" data-page-node-id="IyDlpOxTPwORYa91orWrNh">Promise</span>&lt;NodeDto&gt; {
+  <span class="kw" data-page-node-id="gBEbFxmi9zH3GSx9vav9Ku">const</span> node = <span class="kw" data-page-node-id="v1myyhbriUpPiimDkEtYl2">await</span> nodesApi.<span class="fn" data-page-node-id="zniAhDzOpTss2x5aFx0fpk">createNode</span>(mindMapId.value, payload)
+  nodes.value.<span class="fn" data-page-node-id="OhdGdPf5bEbmqkOP4D1YUc">push</span>(node)
+  <span class="cm" data-page-node-id="Wi1C17FZxV6t7Sruny2S3C">// await reloadTree()  ← 删除</span>
+  <span class="fn" data-page-node-id="F8frTfk82dEQUQsAKSr8u0">pushHistory</span>({ type: <span class="st" data-page-node-id="XMyDjZBgIPtGhoBJsR3dik">'create'</span>, nodeId: node.id, nextData: node })
+  <span class="kw" data-page-node-id="yvEGhfE2dSrfzQpiju4GsG">return</span> node
+}</pre>
+    <pre data-page-node-id="LHMafg0ShGSTU58GM0UzRB"><span class="cm" data-page-node-id="u5ltTGqR4l5pV6F8uvSVk6">// update / move：按返回的 updated 就地替换</span>
+<span class="kw" data-page-node-id="GcCYzjSF1CDGbqKFXtkFIU">const</span> updated = <span class="kw" data-page-node-id="oWf2sGdAFkxx7sveQfuEev">await</span> nodesApi.<span class="fn" data-page-node-id="VDIdcUvEaABImBzrSoubwQ">updateNode</span>(mindMapId.value, nodeId, payload)
+<span class="kw" data-page-node-id="FuLiZ9xWonLMyKh5E98Lwi">const</span> idx = nodes.value.<span class="fn" data-page-node-id="KZCJTk3t6KBASgMSFAatm5">findIndex</span>((n) =&gt; n.id === nodeId)
+<span class="kw" data-page-node-id="HVAHIMA90RmTmRGj1QROOz">if</span> (idx &gt;= 0) nodes.value[idx] = updated
+<span class="cm" data-page-node-id="p8d3KEUlTb3nQbicjzxiSF">// await reloadTree()  ← 删除</span>
+<span class="fn" data-page-node-id="xhOOSTzWixhJraPWFXCwAs">pushHistory</span>({ type: <span class="st" data-page-node-id="XTmatN0KJVA5msE3RVSsUm">'update'</span>, nodeId, prevData, nextData: updated })</pre>
+    <pre data-page-node-id="cKF3rA7PacUUxiqwlFsIpz"><span class="cm" data-page-node-id="Oo4s84foF0o4DRtgF2zBFk">// remove：本地过滤即可（后端已级联删除）</span>
+<span class="kw" data-page-node-id="KilzFXonM3eIJ8zApOQZw8">const</span> allToDelete = [nodeId, ...<span class="fn" data-page-node-id="sHLqSo8li8ZOlQx1srNX1W">collectDescendants</span>(nodeId)]
+<span class="kw" data-page-node-id="4wZE4VHFJUIUM48daDllAn">await</span> nodesApi.<span class="fn" data-page-node-id="bbs024HmpVyg2HgJyXtqXq">deleteNode</span>(mindMapId.value, nodeId)
+nodes.value = nodes.value.<span class="fn" data-page-node-id="umABmojqUIuz4OU7odTmNX">filter</span>((n) =&gt; !allToDelete.<span class="fn" data-page-node-id="NmJ5QzvcHODE0fSN4HfiXc">includes</span>(n.id))
+<span class="cm" data-page-node-id="9W1GF9a6LOR84siIJRboDA">// await reloadTree()  ← 删除</span></pre>
+    <p data-page-node-id="sIEn5ROjgY4qFBcHo9aAJ3"><b data-page-node-id="09WRPEoN6Clz9dj0tjrGjT">undo/redo 的 <code data-page-node-id="VOwNkwl8Py4eRay3YwugG7">applyUndo/applyRedo</code> 里的 <code data-page-node-id="qB8SW6LfEzUIkZOVHkuF3E">reloadTree()</code> 保留</b>——那是整体重建场景，且它们会配合 <code data-page-node-id="gLq8Ojv8K2Cw69zRSSxl9F">reloadMindMap()</code> 一起刷新画布。</p>
+    <div class="risk" data-page-node-id="CIFqiYtBJiruMUlGPJFZ1W"><b data-page-node-id="H5yS3gqQsDSK3I8UdgSabv">注意：</b><code data-page-node-id="I4LBmAXVfBisM2xA9yYTRm">batchUpdate</code> 的返回值是 <code data-page-node-id="sGPWpGx7G4hgGSCdGSSxjL">void</code>，无法就地更新。它目前被拖拽排序 / 批量展开折叠使用，这两种场景随后也会触发 <code data-page-node-id="5dZzQud8Fjj7ngyE9z15MH">reloadMindMap()</code>（见改造 3），因此 <code data-page-node-id="mhBmW9IzbaCn2vd0CBMWpu">batchUpdate</code> 里的 <code data-page-node-id="bOGzCxrmlNqxfQCIbzeNQz">reloadTree()</code> 可一并删除，由调用方的整体重建兜底。</div>
+  </div>
+
+  <h2 data-page-node-id="uqzpGJFGgcbflNV4iAfNZn">改造 2：后端递归删除 / 环检测改为「单查询 + 内存 BFS」<span class="p p1" data-page-node-id="Y2EyvntltcCWkhaq4sSUHX">P1</span></h2>
+  <div class="card" data-page-node-id="0hsWkjzJjdUYhzz9y4d2PC">
+    <p data-page-node-id="ZvUwRjAjRTYi6invri2NBz">把 <code data-page-node-id="NiPO3JvIfFoIAEqt29RErV">CollectDescendantsAsync</code>（逐层查询）与 <code data-page-node-id="kn8ChJpZuQQOE2dQ44zQuH">IsDescendantAsync</code>（逐级向上查）改成<b data-page-node-id="1h4CAbEffZxzF3PtR3ZOs6">一次拉出整张导图的 Id/ParentId，内存里收集</b>，深导图删除从 N 次往返降到 1 次。</p>
+    <div class="tag-inline t-back" data-page-node-id="cyVRGFPmPjwGMYN3gj6prM">后端</div><span style="color:var(--muted); font-size:13px;" data-page-node-id="3pKciXC4lVAUq4SyuTeRCf">backend/.../NodeService.cs</span>
+    <pre data-page-node-id="PBvpqEEcD1A6Eb2yqaSmU6"><span class="cm" data-page-node-id="KPagUWll0WUdC3FqcvLmzD">/// 一次拉全量节点，内存 BFS 收集子孙 Id（替代逐层递归查询）</span>
+<span class="kw" data-page-node-id="GwUwVAwPmMXuTto0FHWukc">private async Task</span>&lt;HashSet&lt;Guid&gt;&gt; <span class="fn" data-page-node-id="wois3igZCFDL5vkNqYsin0">CollectDescendantsOnceAsync</span>(Guid mindMapId, Guid rootId, CancellationToken ct)
+{
+    <span class="kw" data-page-node-id="DfRCKNJgKobpgAevmEN7Vr">var</span> pairs = <span class="kw" data-page-node-id="j2FP177PLZX2pQ6XIiZkDp">await</span> _db.Nodes.AsNoTracking()
+        .<span class="fn" data-page-node-id="0Uu4Hq1FdpvUKkt1SQs2Eh">Where</span>(n =&gt; n.MindMapId == mindMapId)
+        .<span class="fn" data-page-node-id="tFC0NjBm1u8e2bUF5nJyCH">Select</span>(n =&gt; <span class="kw" data-page-node-id="3jvQcN2IY94NborhBN8LmM">new</span> { n.Id, n.ParentId })
+        .<span class="fn" data-page-node-id="8V3ljfomRUO7ncOKw9o8UA">ToListAsync</span>(ct);
+
+    <span class="kw" data-page-node-id="e9zszxWBAsB5tIz0pT7ocU">var</span> childrenByParent = pairs
+        .<span class="fn" data-page-node-id="xSMQB9EmdWYlAqXGHrVdzq">Where</span>(p =&gt; p.ParentId.HasValue)
+        .<span class="fn" data-page-node-id="WfcJXORsOqG8vjkj7p9lVC">ToLookup</span>(p =&gt; p.ParentId!.Value, p =&gt; p.Id);
+
+    <span class="kw" data-page-node-id="m2BCKrXcRUxg7EbxlNURYg">var</span> result = <span class="kw" data-page-node-id="3NfoznQ9yDNKth2x1GnRvC">new</span> HashSet&lt;Guid&gt; { rootId };
+    <span class="kw" data-page-node-id="dK3abriUtFeHlhy8ThAY15">var</span> queue = <span class="kw" data-page-node-id="ZBhma2MiNPusmxTwhGtSwL">new</span> Queue&lt;Guid&gt;();
+    queue.<span class="fn" data-page-node-id="wJMZOFEbpOXV5TnDK08ral">Enqueue</span>(rootId);
+    <span class="kw" data-page-node-id="Gj4wBZz1YCERDhMA4AM8QF">while</span> (queue.Count &gt; 0)
+    {
+        <span class="kw" data-page-node-id="4GwEjnu33YQJnsQBsX1iAk">var</span> cur = queue.<span class="fn" data-page-node-id="3RloBHcRhNqepy4Qxgb2OD">Dequeue</span>();
+        <span class="kw" data-page-node-id="KaBdzL25jYmQoNC1aHwGmw">foreach</span> (<span class="kw" data-page-node-id="olQPBlhW7I7KPrkUpkUOI8">var</span> cid <span class="kw" data-page-node-id="8nbSXwkBR3AtJ8FzBWUehp">in</span> childrenByParent[cur])
+        {
+            <span class="kw" data-page-node-id="TLpwLAT6awO0GSSF14XhiW">if</span> (result.<span class="fn" data-page-node-id="B36sNK1ORmZdpVBD52GAYM">Add</span>(cid)) queue.<span class="fn" data-page-node-id="z0NLgb7DcFC3FGp1ZW6Q7q">Enqueue</span>(cid);
+        }
+    }
+    <span class="kw" data-page-node-id="Hl3FYIyCINmA0iGmGb1wDz">return</span> result;
+}</pre>
+    <pre data-page-node-id="X1qttpGjFpdxiKLTpFDqbG"><span class="cm" data-page-node-id="QbnE1I6yc34iwocoVDCJTw">/// 环检测：由内存父子映射向上找祖先，不再逐级查库</span>
+<span class="kw" data-page-node-id="GAcuKruJntwnDonWVf5bGK">private bool</span> <span class="fn" data-page-node-id="zPoyZgv9OjInSa4UGRbjsJ">IsDescendantInMemory</span>(Dictionary&lt;Guid, Guid?&gt; parentOf, Guid candidateId, Guid ancestorId)
+{
+    <span class="kw" data-page-node-id="CyYPsXFcgCTsfDhoA4TyrC">var</span> current = candidateId;
+    <span class="kw" data-page-node-id="aWcYfO49Zf84h52JosThzf">var</span> visited = <span class="kw" data-page-node-id="HQ8Kke94m9NAz1ywpEhfcg">new</span> HashSet&lt;Guid&gt;();
+    <span class="kw" data-page-node-id="1fEqk2CHQ1MJZnvhwD09Y6">while</span> (current != Guid.Empty &amp;&amp; visited.<span class="fn" data-page-node-id="G1GmRuppKGCNkFgUzuHtVH">Add</span>(current) &amp;&amp; parentOf.<span class="fn" data-page-node-id="R4sjpp9YsbkA4yYqgVL4xz">TryGetValue</span>(current, <span class="kw" data-page-node-id="qZDdhL96cwheUS5th1iT0i">out var</span> parent))
+    {
+        <span class="kw" data-page-node-id="Gwc824mtECdQAk9etxSyjg">if</span> (parent.HasValue &amp;&amp; parent.Value == ancestorId) <span class="kw" data-page-node-id="eP1DJqejypq9wJm8pGKoFM">return true</span>;
+        <span class="kw" data-page-node-id="lYpsokyAUSrSnmTS0SC9oy">if</span> (!parent.HasValue) <span class="kw" data-page-node-id="DPxHS8c9WO2GGqwjZn40hK">return false</span>;
+        current = parent.Value;
+    }
+    <span class="kw" data-page-node-id="MFdfS9nvJQpDt6DgFvBIX2">return false</span>;
+}</pre>
+    <p data-page-node-id="HNtwXCfO5Dqg3QiHFO7XPD">调用处：<code data-page-node-id="MEg1vCnFWw0o14Y2rDdkAN">DeleteAsync</code> 用 <code data-page-node-id="nktFcGs12D9DCG8eX3ER1w">CollectDescendantsOnceAsync</code> 替换递归；<code data-page-node-id="b4gnGfmNSQPI0UdPIRFUhX">MoveAsync</code> 先拉一次父子映射，再用 <code data-page-node-id="BEq10KoyhX299PvJpZAYoK">IsDescendantInMemory</code> 替换 <code data-page-node-id="JflcUOTnD8XiTsG3NIzrX1">IsDescendantAsync</code>。</p>
+  </div>
+
+  <h2 data-page-node-id="OIUgvK14eVWh7zfgzZEctI">改造 3：reloadMindMap 只用于「整体重建」<span class="p p0" data-page-node-id="L0cZyLHVh8MCBAa2Jo5B83">P0</span></h2>
+  <div class="card" data-page-node-id="77rEiIUPb6SMHhmBThTEBR">
+    <p data-page-node-id="r5DMURNRmgGC978ZcX00ML">普通编辑（加节点、删节点、改样式、改内容、粘贴）后不应再 <code data-page-node-id="BrF6YIEvwqGAvRClO8CAcu">setData</code> 整树重绘。这些操作要么已经通过增量同步的 <code data-page-node-id="2J10b4qKTkkTYFGDwAEFMk">data_change_detail</code> 实时反映到画布，要么可以局部更新。</p>
+    <div class="tag-inline t-front" data-page-node-id="szaKdkAJsqcFbOVJUy4AoC">前端</div><span style="color:var(--muted); font-size:13px;" data-page-node-id="MFTe9btlbN38YWiYPrGOI7">frontend/src/views/editor/MindMapEditorView.vue</span>
+    <div class="step" data-page-node-id="zh1lfR0S5pMRo2bBW4v5X9">
+      <div class="step-num" data-page-node-id="u0Ys2EvM9BSFwFkixzjIdA">1</div>
+      <div class="step-body" data-page-node-id="ZLEpl8c0xpEiY8BBUJmoal">
+        <div class="t" data-page-node-id="SgwlJU3AxIulEBecXwX0CD">工具栏「新增子节点/同级」：改为直接操作画布，走增量同步</div>
+        <div class="d" data-page-node-id="Occ5jCSVGh8jA5So6OIon0">当前 <code data-page-node-id="etYzacW5XYBXibkwbTTDrd">handleAddChild</code> 走「store.create → reloadMindMap」全量重建。更优路径：直接调用 simple-mind-map 的 <code data-page-node-id="mjNO0EN92KoD6C24bNvdjg">INSERT_NODE</code> 命令插入节点，让既有的 <code data-page-node-id="hQNeEpvjmvSvvABH3H2uLh">data_change_detail</code> 增量同步负责落库，画布无需整体 setData。这也是库本身设计意图。</div>
+      </div>
+    </div>
+    <div class="step" data-page-node-id="uPmMabATV7pR9sNHmXddyl">
+      <div class="step-num" data-page-node-id="59Wc558kSb06actVTGXdzF">2</div>
+      <div class="step-body" data-page-node-id="kDJC5ZGZHekP4S8ehb7OYW">
+        <div class="t" data-page-node-id="amdqlb1dbIjnzWa5AR6Way">样式/内容更新：改完即已反映，无需 reloadMindMap</div>
+        <div class="d" data-page-node-id="FAwnPyrs4uMB6k4S5cH5sE"><code data-page-node-id="7vQVFEFcbTsvtO7PmqGP6M">handleUpdateStyle</code> / <code data-page-node-id="A0ym3nkT18DPDIHj9EHoc3">handleContentSave</code> 里，样式与内容已经写进渲染节点（工具栏/弹窗直接改节点 data），删掉末尾的 <code data-page-node-id="fXUSW5UXrYXEHFLdSngWPk">reloadMindMap()</code> 即可。节点文字、颜色由库即时重绘。</div>
+      </div>
+    </div>
+    <div class="step" data-page-node-id="prv35ScDijGVdBapS0V0SE">
+      <div class="step-num" data-page-node-id="GcWTOcVhqS42Su9pVOXEt6">3</div>
+      <div class="step-body" data-page-node-id="Km9QkPJjrpjztsUHb6ZYtd">
+        <div class="t" data-page-node-id="oJsBk9iYF8o4mYwFKyJWdB">删除节点：可局部移除</div>
+        <div class="d" data-page-node-id="MEV0zei21Hch4yes1HkqGM"><code data-page-node-id="sC37k1B4WEQ3ljLQkl6xR1">submitNodeDelete</code> 删除后可直接调用库的 <code data-page-node-id="HcmybFHGgAXjxhWpBeLRq1">REMOVE_NODE</code> 或触发一次轻量重绘；若保留 <code data-page-node-id="d55u96O0NPyY00q6L3b32o">reloadMindMap</code>，需接受整树重建的代价。删除频率低，影响小于新增/编辑。</div>
+      </div>
+    </div>
+    <div class="step" data-page-node-id="biol67J3QQ7QQMXCPcFHsJ">
+      <div class="step-num" data-page-node-id="EHNd6j9rWaRfrhJP0gmJoo">4</div>
+      <div class="step-body" data-page-node-id="AHjCWUcY9NE4DwGixG6Awe">
+        <div class="t" data-page-node-id="59kkBX3qoevcxTtDEpqxrV">保留整体重建的场景（不动）</div>
+        <div class="d" data-page-node-id="8E3FpGloILN6KT9leL2FLF"><code data-page-node-id="z2HDi81pgCOjPblVNuSLfW">handleUndo / handleRedo / handleVersionRollback / initEmptyMindMap</code> 这些确实需要后端状态整体覆盖画布，继续走 <code data-page-node-id="T9NEeTFCcSy4sEsa4kZFiS">reloadMindMap()</code>。</div>
+      </div>
+    </div>
+    <div class="risk" data-page-node-id="9E5nP83aaHZXRUCiXmN2WT"><b data-page-node-id="ZHHdtDfAd9msbnB8cKOPKn">风险提示：</b>改造 3 的步骤 1 需要核对 simple-mind-map 的 <code data-page-node-id="eHic3Oh3ciODMLdOSxqkuF">INSERT_NODE</code> 命令参数与当前数据流是否完全兼容（尤其是「新增后立即改文字」的 <code data-page-node-id="ikKH2Nm4kEIVx0GgY6P2aq">pendingCreates</code> 链路）。建议先落地改造 1 + 2（收益大、风险低），改造 3 分步验证后再推进。</div>
+  </div>
+
+  <h2 data-page-node-id="N5AuogtP7wjTdDWb8brT2V">改造 4：前端加索引缓存，消除 O(N²) 隐患 <span class="p p1" data-page-node-id="AGR0fxPMMsQ6zKU8CCD9HC">P1</span></h2>
+  <div class="card" data-page-node-id="N43WbzD3qwIU7QSmmwB6Iq">
+    <p data-page-node-id="rWeZOiAmFJhjp3MB0qKgjH">为 <code data-page-node-id="5IWJglEUMMl6JmD79SINgI">nodes</code> 维护 <code data-page-node-id="CcBV4Vd3lm70EBl5EI9zYQ">Map&lt;id, node&gt;</code> 与 <code data-page-node-id="eeqF0zLgnIgRmahr4u8oSP">Map&lt;parentId, children[]&gt;</code>，把 <code data-page-node-id="kt5bIbYgpAzNBZEpQRhdle">findNode / getChildren / collectDescendants / getDepth</code> 从线性扫描降为 O(1) 查找。缓存随 <code data-page-node-id="yEbqq8uk5ulj26Ll5IGVLJ">nodes</code> 增删同步维护。</p>
+    <div class="tag-inline t-front" data-page-node-id="aUAnBWinvpjDyB3WzkAatD">前端</div><span style="color:var(--muted); font-size:13px;" data-page-node-id="U2bAFFUzsUtqBespEq3dcN">frontend/src/stores/nodes.ts</span>
+    <pre data-page-node-id="RLUOfwHJfPsQ9D1GwNcLFF"><span class="cm" data-page-node-id="AFlFWtLzGFp3ZEawKve1LQ">// 索引缓存，随 nodes 变更同步维护</span>
+<span class="kw" data-page-node-id="ASdiwgOLPylSlP6GuftCjZ">const</span> nodeIndex = <span class="fn" data-page-node-id="EjNCuM1xB2ZHTZ7ehXEFLv">computed</span>(() =&gt; {
+  <span class="kw" data-page-node-id="c7rkarcooBvYscC4zPwqN0">const</span> m = <span class="kw" data-page-node-id="rMxGqUKRDERpVvRzLCsmPs">new</span> Map&lt;<span class="kw" data-page-node-id="DZCR7pvbfcDhdQrUJmQFjQ">string</span>, NodeDto&gt;()
+  <span class="kw" data-page-node-id="tUM29SDKD8GWfxhR3iBkwH">for</span> (<span class="kw" data-page-node-id="CdQF4mXFjhsHlYzKQunY0W">const</span> n <span class="kw" data-page-node-id="2MIAoUTzq1OKkz2IJvzgao">of</span> nodes.value) m.<span class="fn" data-page-node-id="fdFS5AdyONACW7XTMt29Ba">set</span>(n.id, n)
+  <span class="kw" data-page-node-id="irZH0GvUKkgjCtHVQVdUNg">return</span> m
+})
+
+<span class="kw" data-page-node-id="w6FsjSlyU7kZXgyU1t6OWX">function</span> <span class="fn" data-page-node-id="KvdqgFucbtsI9VrAid1Zzs">findNode</span>(id: <span class="kw" data-page-node-id="ChX5FaRnJd3nTR5ZVhcCvx">string</span>): NodeDto | undefined {
+  <span class="kw" data-page-node-id="AuUAaYVfTIiBXUI6dvybNs">return</span> nodeIndex.value.<span class="fn" data-page-node-id="yBOYoUuUEGvwJGPYBpROCl">get</span>(id)
+}
+
+<span class="kw" data-page-node-id="3LViRDndniy44XSRK6fE0B">function</span> <span class="fn" data-page-node-id="xBROBCC7SUfIC37iydNV2R">getChildren</span>(parentId: <span class="kw" data-page-node-id="B7pUYEPUvCMrTV3GXwRbHa">string</span> | <span class="kw" data-page-node-id="OkiokvVEWGK4N1rZMC3Saf">null</span>): NodeDto[] {
+  <span class="kw" data-page-node-id="dIWsgGxzPhHmDcdpG9IeXO">return</span> nodes.value
+    .<span class="fn" data-page-node-id="VeOTDWuO8BpO8HijR8Wrns">filter</span>((n) =&gt; n.parentId === parentId)
+    .<span class="fn" data-page-node-id="LHXHLSgGSom4bjpNbA4lI8">sort</span>((a, b) =&gt; a.sortOrder - b.sortOrder)
+}</pre>
+    <p data-page-node-id="CKkIHPqr2rr3RdX7eSBUfU">其中 <code data-page-node-id="EU45aV9HVUp3NYQ1FvHpK3">collectDescendants</code> 用 <code data-page-node-id="idreQdYGDulBh2j36u2D5z">shift()</code> 是 O(N²)（shift 移动数组），改 <code data-page-node-id="gCYlmgBpTEY4xlUaHzDfMo">queue</code> 数组 + 指针递增，或直接复用上面后端同款 BFS。这类优化在拖拽、<code data-page-node-id="7DQNuBVIveTuBlivzeKtxE">normalizeRootChildDirections</code> 每次 layout 后跑的路径上效果明显。</p>
+  </div>
+
+  <h2 data-page-node-id="16HZQQAs7OaV3GHh2rRfcf">改造 5：列表页封面查询在 SQL 侧收窄 <span class="p p2" data-page-node-id="GOqOZEAd25WZBfmurgDikq">P2</span></h2>
+  <div class="card" data-page-node-id="77AnFxQotEBKcSC2WbRCME">
+    <p data-page-node-id="KF8fhgnkRHC0e3kFi9z2oH">封面只要「根节点 + 前 4 个二级节点」，却查了每个导图的全部节点。把查询限制为根节点和二级节点两种候选行，可显著减少列表页对大树导图的拖累。</p>
+    <div class="tag-inline t-back" data-page-node-id="8aHsQRvPf0jH9amCBSZOkO">后端</div><span style="color:var(--muted); font-size:13px;" data-page-node-id="IdZ6PWIy0On6shJMMvFY1F">backend/.../MindMapService.cs</span>
+    <pre data-page-node-id="TREVTWw7oB508FhzjX6XFX"><span class="cm" data-page-node-id="yOKFxPbIj98LpuPmLueZl9">// 第一步：只取这些导图的根节点 Id</span>
+<span class="kw" data-page-node-id="LVJnGH75yMdPMDlGFYsdK8">var</span> rootIds = <span class="kw" data-page-node-id="gqtcSaHhQVptlIEKQGHnPq">await</span> _db.Nodes
+    .<span class="fn" data-page-node-id="SGYGlX17wBhRAWvJ4jA5Fj">Where</span>(n =&gt; mapIds.<span class="fn" data-page-node-id="NMVUwzjfnLEFXWiXoU0MVD">Contains</span>(n.MindMapId) &amp;&amp; n.ParentId == <span class="kw" data-page-node-id="EXyCS1c1jPYLo7MomRstuh">null</span>)
+    .<span class="fn" data-page-node-id="UbEZZdJVNuuAcmXxaI6Aa4">Select</span>(n =&gt; n.Id)
+    .<span class="fn" data-page-node-id="VAxaB5F2vvEbvRtgNg6IFV">ToListAsync</span>(ct);
+
+<span class="cm" data-page-node-id="r4ouXxJkjcXjkYgUWIilUa">// 第二步：只取根节点 + 二级节点（而非全部节点）</span>
+<span class="kw" data-page-node-id="ovrfQ7aPi88UIondwO494F">var</span> nodes = <span class="kw" data-page-node-id="R0O9TU6TwKUjDCGHNP93Hr">await</span> _db.Nodes
+    .<span class="fn" data-page-node-id="fc7o6vj2hsJBlkLmNsVih6">Where</span>(n =&gt; n.ParentId == <span class="kw" data-page-node-id="a5C3uXkYpNiAEJvOtfWk5O">null</span> || (n.ParentId != <span class="kw" data-page-node-id="pf0Kcl1NPeKeQQMt8a4TIY">null</span> &amp;&amp; rootIds.<span class="fn" data-page-node-id="AqTLBm5inQot8O8ejhnvOF">Contains</span>(n.ParentId.Value)))
+    .<span class="fn" data-page-node-id="lDsO2Dc9Kr73FhqVMQRk3c">Where</span>(n =&gt; mapIds.<span class="fn" data-page-node-id="ERGRNHRJf37IUZmSyP8N3W">Contains</span>(n.MindMapId))
+    .<span class="fn" data-page-node-id="qb7L4hf6ZErGLXktJKn70X">Select</span>(n =&gt; <span class="kw" data-page-node-id="HbiLEs6c3CSLYLXACcgrpN">new</span> { n.MindMapId, n.Id, n.ParentId, n.Title, n.SortOrder })
+    .<span class="fn" data-page-node-id="Ap1wkFeCv9Y46Lz24l3ZMj">ToListAsync</span>(ct);</pre>
+    <p data-page-node-id="6Hn3sUL8OCJl2IGEM6I0GR">其余组装逻辑不变（<code data-page-node-id="cJUdNWBYAFotzJuYEpgSwJ">nodesByMap</code>、<code data-page-node-id="6dfYQl8ZkfzoErH7FDk6bu">SecondLevelCount</code> 等），只是查出来的行数从「整树」降为「根 + 二级」。</p>
+  </div>
+
+  <h2 data-page-node-id="oVAxn9nQmeXn1kqoTqltLX">落地顺序建议</h2>
+  <div class="card" data-page-node-id="enxZdYwE1EoWf6guVrxGz8">
+    <div class="step" data-page-node-id="TIbgrHAdIbmeexUnbmKduF">
+      <div class="step-num" data-page-node-id="jDJ1jqzwLRUHy9Itst4IlC">1</div>
+      <div class="step-body" data-page-node-id="vaQKgIbJwbJ0FtVAoDN3gt"><div class="t" data-page-node-id="yVEZUYsiwZmHeQrEZEnNJy">改造 1（去 reloadTree）</div><div class="d" data-page-node-id="ii6cJd7fCQJvOD6mZBbwk0">收益最大、风险最低，先做。做完后单次编辑的请求量从「3 次全量」降到「1 次增量」，且增量同步真正生效。</div></div>
+    </div>
+    <div class="step" data-page-node-id="nNaI6tXYslCuHKG0hEkSDI">
+      <div class="step-num" data-page-node-id="EO1t5xMI4AH1F5W9b1K0aH">2</div>
+      <div class="step-body" data-page-node-id="Wi2k0ECQsU0NgSEIFkTLxM"><div class="t" data-page-node-id="sMIddZld6u7v3x4CDWGKEg">改造 2（后端内存 BFS）</div><div class="d" data-page-node-id="E2AIccKjs1gAEj6RPQyF3b">深导图删除/移动从 N+1 降到 O(1) 查询，独立后端改动，不影响前端。</div></div>
+    </div>
+    <div class="step" data-page-node-id="hXB1khGzPyteVfFX9QAswo">
+      <div class="step-num" data-page-node-id="JJUvNxRzmIfrju7gVk9I8J">3</div>
+      <div class="step-body" data-page-node-id="7zoOnslgQjUJkEcHNRuUGD"><div class="t" data-page-node-id="089eexXaQlFhF5FxnI0EBy">改造 4（前端索引缓存）</div><div class="d" data-page-node-id="HAJGYHCSFs8HUYl2Rzyuhi">消除高频路径的线性扫描，配合 1 一起验证。</div></div>
+    </div>
+    <div class="step" data-page-node-id="cheCOuKEp3wExjuFrh1HEh">
+      <div class="step-num" data-page-node-id="qvcfMx18gb4BWHEBRk1ufH">4</div>
+      <div class="step-body" data-page-node-id="H7o7J2eJbzPLippulpgWJF"><div class="t" data-page-node-id="2BsleIAAt4mDrEnTwdx421">改造 5（列表页收窄）</div><div class="d" data-page-node-id="PZsNOP6nAnj8JE5QnGOwDw">独立小优化，随时可做。</div></div>
+    </div>
+    <div class="step" data-page-node-id="XyGdqjD2PpiDtJFil0ZDjr">
+      <div class="step-num" data-page-node-id="NFX8H1AORNTIBKdoSCTviQ">5</div>
+      <div class="step-body" data-page-node-id="IOBX8ShVw3T0A8TSk2fBph"><div class="t" data-page-node-id="JiHlhb2tXW80J0YWKyVNnz">改造 3（reloadMindMap 只用于整体重建）</div><div class="d" data-page-node-id="hbKvzrQR2hCiXiT0jX4XSt">收益大但需验证命令兼容性，最后分步推进。</div></div>
+    </div>
+  </div>
+
+  <p style="color:var(--muted); font-size:13px; text-align:center; margin-top:40px;" data-page-node-id="3eIizMvDjw0HVcpSg0iRZE">本方案为改造建议，未改动仓库。等你确认后，我再按你习惯的「先出方案 → 你批准 → 再实现并提交」节奏推进。</p>
+</div>
+</body>
+</html>

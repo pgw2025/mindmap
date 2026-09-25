@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="SBPIkCOovxWBicYChf1bgx">
+<head data-page-node-id="FN5SxGUECdi28girrGKbOw">
+<meta charset="UTF-8" data-page-node-id="J9VamajQIM1qzawTfVBTQj">
+<meta name="viewport" content="width=device-width, initial-scale=1.0" data-page-node-id="ZmFJeN9XijRPEO1p2ZZ0xg">
+<title>逐文件 Code Review 清单 · MindMap</title>
+<style>
+  :root {
+    --bg: #0f1216;
+    --card: #171b21;
+    --card-2: #1d232b;
+    --border: #2a313b;
+    --text: #d7dce2;
+    --muted: #8b95a1;
+    --red: #ff6b6b;
+    --orange: #ffa94d;
+    --yellow: #ffd43b;
+    --green: #51cf66;
+    --blue: #4dabf7;
+    --mono: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    line-height: 1.65;
+    padding: 40px 24px 80px;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  header { margin-bottom: 36px; }
+  h1 { font-size: 26px; margin: 0 0 8px; letter-spacing: .5px; }
+  .sub { color: var(--muted); font-size: 14px; }
+  .legend { display: flex; gap: 20px; flex-wrap: wrap; margin: 18px 0 30px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .file-block {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    margin-bottom: 28px;
+    overflow: hidden;
+  }
+  .file-head {
+    padding: 16px 22px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    background: var(--card-2);
+  }
+  .file-name { font-family: var(--mono); font-size: 15px; font-weight: 600; }
+  .file-meta { color: var(--muted); font-size: 12px; font-family: var(--mono); }
+  .score { font-size: 13px; padding: 3px 12px; border-radius: 20px; font-weight: 600; }
+  .score.good { background: rgba(81,207,102,.15); color: var(--green); }
+  .score.mid { background: rgba(255,212,59,.15); color: var(--yellow); }
+  .issue-list { padding: 8px 0; }
+  .issue { padding: 14px 22px; border-bottom: 1px solid var(--border); }
+  .issue:last-child { border-bottom: none; }
+  .issue-top { display: flex; gap: 10px; align-items: flex-start; }
+  .tag { flex-shrink: 0; font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 4px; letter-spacing: .3px; margin-top: 3px; }
+  .tag.red { background: rgba(255,107,107,.18); color: var(--red); }
+  .tag.orange { background: rgba(255,169,77,.18); color: var(--orange); }
+  .tag.yellow { background: rgba(255,212,59,.15); color: var(--yellow); }
+  .tag.green { background: rgba(81,207,102,.15); color: var(--green); }
+  .issue-body { flex: 1; min-width: 0; }
+  .issue-title { font-weight: 600; font-size: 14.5px; margin-bottom: 3px; }
+  .issue-desc { color: var(--muted); font-size: 13.5px; }
+  .issue-loc { font-family: var(--mono); font-size: 12px; color: var(--blue); margin-top: 6px; }
+  code { font-family: var(--mono); background: rgba(255,255,255,.06); padding: 1px 6px; border-radius: 4px; font-size: 12.5px; }
+  .summary {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px 24px; margin-bottom: 30px;
+  }
+  .summary h2 { margin: 0 0 14px; font-size: 17px; }
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px,1fr)); gap: 12px; }
+  .stat { background: var(--card-2); border-radius: 8px; padding: 12px 16px; }
+  .stat .num { font-size: 24px; font-weight: 700; }
+  .stat .lbl { font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body data-page-node-id="anJYPpe6Rs1h6Pg6vnN7CJ">
+<div class="wrap" data-page-node-id="OtKHfs94H9NzthEHGfFx3w">
+  <header data-page-node-id="oMgy1PO3CEvFO7Y7TqK9wi">
+    <h1 data-page-node-id="jFlHr2eDIHEnRSbBb6mTGQ">逐文件 Code Review 清单</h1>
+    <div class="sub" data-page-node-id="POKl6WYhDGeGNHvB4Bl7Td">MindMap 思维导图项目 · 前端 Vue3 + simple-mind-map / 后端 ASP.NET Core API 8 + EF Core + MySQL · 只读评审，未改任何代码</div>
+    <div class="legend" data-page-node-id="h5SQufuVNZP9iTI9FUuOyU">
+      <span data-page-node-id="LlRtHvqrEAD4rli52mDdgm"><i class="dot" style="background:var(--red)" data-page-node-id="9APslq5qYba8q2734SlN5p"></i> 高（应优先处理）</span>
+      <span data-page-node-id="pnZaXjGmvyDrSomrsqEv5X"><i class="dot" style="background:var(--orange)" data-page-node-id="jyeADlDkDeR8ydB1IUhHlP"></i> 中</span>
+      <span data-page-node-id="ZzY2MdkknVofU1IswMqCwN"><i class="dot" style="background:var(--yellow)" data-page-node-id="kXDPFzU174wuGEyuL8uilI"></i> 低</span>
+      <span data-page-node-id="2Nj5pFzxabcjIwcn7DL5oZ"><i class="dot" style="background:var(--green)" data-page-node-id="1pCBWdIjsyT3TTLZAL7Arl"></i> 表扬点</span>
+    </div>
+  </header>
+
+  <div class="summary" data-page-node-id="L7DogPFsMQIwG1wAB2852P">
+    <h2 data-page-node-id="5H8d9EXr2GgYVNT0cH9Oqw">总体结论</h2>
+    <p style="color:var(--muted); margin:0 0 16px;" data-page-node-id="RPtNejx6jwxWTkDyIaDyIO">整体代码质量<b style="color:var(--green)" data-page-node-id="7xHXFZ0oA0VfFFzHNtU7Wi">较高</b>：注释详尽、职责边界清晰、并发/事务/唯一索引冲突处理专业。主要问题集中在<b style="color:var(--orange)" data-page-node-id="ZZWtVTzYfeCJavn9QpRriB">「增量同步被全量拉取抵消」</b>和<b style="color:var(--orange)" data-page-node-id="TG9ofswQdqmGDc90n2fzQa">「递归 N+1 查询」</b>两类，属性能问题而非正确性问题。</p>
+    <div class="stat-grid" data-page-node-id="LguFUiTCXM6ax8nApLNuDL">
+      <div class="stat" data-page-node-id="C9UC9ngiQbdf25oaPyWMFF"><div class="num" style="color:var(--red)" data-page-node-id="ZF9St8sEFNPXnIgXUk6P0E">0</div><div class="lbl" data-page-node-id="qj0sRbwDypRR546b7uaKd6">P0 正确性缺陷</div></div>
+      <div class="stat" data-page-node-id="Y3odbkumCkCEq6d4I4OEjA"><div class="num" style="color:var(--orange)" data-page-node-id="qLEFl01YWxfwTZGfr40yrn">5</div><div class="lbl" data-page-node-id="lunGSD1BNC3RYG6zn9n26H">中等问题</div></div>
+      <div class="stat" data-page-node-id="YtqJ3zrrfPqPKITeCAGmEV"><div class="num" style="color:var(--yellow)" data-page-node-id="bn2rfhJd87rWo1jMHvAeB4">8</div><div class="lbl" data-page-node-id="cANGMvZiNdquQ2G2ild0wL">低/可读性问题</div></div>
+      <div class="stat" data-page-node-id="Ntjp0exjHUjRKF4cVcaTM3"><div class="num" style="color:var(--green)" data-page-node-id="2oCPyNQLHbBYgnRR4ZZzvE">4</div><div class="lbl" data-page-node-id="uFBS55Mdv6kN3jqELCIb9l">做得好的地方</div></div>
+    </div>
+  </div>
+
+  <!-- 后端 NodeService -->
+  <div class="file-block" data-page-node-id="B0gSo9gPITFSYPzTleD4cz">
+    <div class="file-head" data-page-node-id="YaS9Sr7TcJDvK4MdhE1zhD">
+      <span class="file-name" data-page-node-id="vkO5JshnuwgvkaAQUxNFlU">backend/.../Application/Services/NodeService.cs</span>
+      <span class="file-meta" data-page-node-id="EhG1rMs1TsolM83RtJGQgT">570 行</span>
+      <span class="score mid" data-page-node-id="XUD4aaDFMdvvEZcwTnrkyF">中</span>
+    </div>
+    <div class="issue-list" data-page-node-id="6Hd2Vwcwm01HJZjhIuEYCb">
+      <div class="issue" data-page-node-id="9w3BVPPygJZnFbwct4MrVr">
+        <div class="issue-top" data-page-node-id="0tvwb7Gv6rYMDBswLAHoXS">
+          <span class="tag orange" data-page-node-id="7WdUoyzGQ7rtzIFGG2u3C3">中</span>
+          <div class="issue-body" data-page-node-id="eGi1i3WOxw9uZmARiBMNOq">
+            <div class="issue-title" data-page-node-id="9MK7KJKoy5JBIzrg8mj1xe">GetTreeAsync 重复查询整张表</div>
+            <div class="issue-desc" data-page-node-id="TUcAV9xLMKW5V7pkrbQKf8"><code data-page-node-id="qS3EmBPlnaB6ik4PfCLaru">GetTreeAsync</code> 内部调用 <code data-page-node-id="5KRKY4CYAEYPsEc10za8nM">GetByMindMapAsync</code>（一次全量查询），而前端 <code data-page-node-id="S26ZDVOmhcjbUNJDxM8Sqt">reloadTree()</code> 又并行同时请求了 <code data-page-node-id="GOdcTb2hANqFtbwjaUlVXp">nodes</code> 和 <code data-page-node-id="j18sbAA3zNUDwlidDb2qL7">nodes/tree</code> 两个接口。等于一次编辑在服务端产生 3 次全量节点查询，结果还高度重复。</div>
+            <div class="issue-loc" data-page-node-id="f4XY2D6mSWRxaCaPwaJbtG">NodeService.cs:87-91</div>
+          </div>
+        </div>
+      </div>
+      <div class="issue" data-page-node-id="uKq5SigClRLSF91jAjlS0D">
+        <div class="issue-top" data-page-node-id="GV7JXtl5BEMIoGO5XRGcWj">
+          <span class="tag orange" data-page-node-id="jEmb0TxticwnT67JGzL6Fr">中</span>
+          <div class="issue-body" data-page-node-id="n0Vp5QTC0H6tGMyqad6kBA">
+            <div class="issue-title" data-page-node-id="bYClPn9cJRs0ScB9VEX7mu">递归删除 / 环检测是 N+1 查询</div>
+            <div class="issue-desc" data-page-node-id="VChLle3TjycsgjTXcf9QGS"><code data-page-node-id="yxUzNeTPpYDtfN8MUBHonv">CollectDescendantsAsync</code> 逐层递归 <code data-page-node-id="QXqAdCICWgBIqbjTVkrHsh">WHERE ParentId=x</code>，<code data-page-node-id="LIjheGhrNsK4fRJ4nt2GBG">IsDescendantAsync</code> 逐级向上查 <code data-page-node-id="CbHhgkL9SSZ3ON5bHMHMav">ParentId</code>。深导图删除 / 移动就是 N 次 DB 往返。应改为一次拉全量节点，内存 BFS 收集。</div>
+            <div class="issue-loc" data-page-node-id="daZTnMBTbDvzw2D0GuwIZW">NodeService.cs:433-466</div>
+          </div>
+        </div>
+      </div>
+      <div class="issue" data-page-node-id="QpyCDqA7z7DEcxgkYX2OTR">
+        <div class="issue-top" data-page-node-id="7qOkyHkmxeYJ7Glqf1P8vL">
+          <span class="tag yellow" data-page-node-id="XiNPdwEw45rP5ApCVTzjCV">低</span>
+          <div class="issue-body" data-page-node-id="TDdEn8IFlY0ZnDwzDP0rwt">
+            <div class="issue-title" data-page-node-id="7foOEHDoJXG6Gu3Bcr7Weq">权限校验与主查询未合并</div>
+            <div class="issue-desc" data-page-node-id="pWwAn44nY6iFyvw7Eg6thO"><code data-page-node-id="01zbRat9txlHe46QiA4PAJ">EnsureCanReadAsync</code> / <code data-page-node-id="7YcV5R48Smc5fHaboy5hK5">EnsureCanEditAsync</code> / <code data-page-node-id="GrxfiI7pwokNv93AHbzOFx">GetOwnedNodeAsync</code> 每次各查一次 <code data-page-node-id="R1gde2HvpzbH6DXLyus9LU">MindMaps</code> 表，与主节点查询分属多次往返。高频路径可合并。</div>
+            <div class="issue-loc" data-page-node-id="BH6KrHiVo0Fay95nlPyiNd">NodeService.cs:398-422</div>
+          </div>
+        </div>
+      </div>
+      <div class="issue" data-page-node-id="8SGDJnY4jzV155YvacOOKL">
+        <div class="issue-top" data-page-node-id="B5ONncuLeuAYAMJHuZBw8t">
+          <span class="tag yellow" data-page-node-id="NbXLfWtBOwBrsjhPV4fYEA">低</span>
+          <div class="issue-body" data-page-node-id="0EEwGKOrgtKNEgfwMlpbWs">
+            <div class="issue-title" data-page-node-id="uDFOdKBmEhaL0vGKld6AdJ">nodeCountDelta=0 仍多一次读写</div>
+            <div class="issue-desc" data-page-node-id="kFriqVcNus7fmwzwedOvEl"><code data-page-node-id="AMxDDxxnaoLtFPwoNaaUIh">UpdateAsync</code> / <code data-page-node-id="N8haf6I0pYgDIe9ibOufjA">MoveAsync</code> 在 <code data-page-node-id="9ZX9LkZBrXyajmwVWvGFVY">nodeCountDelta=0</code> 时仍查 <code data-page-node-id="iTeqpy72xQxo0b8cJ6tMTN">MindMaps</code> 并更新 <code data-page-node-id="CHbuEELULbDMh3B2s6MvFC">UpdatedAt</code>/<code data-page-node-id="AxYaevpCuHnyNat9b3RqXV">LastEditedAt</code>，每改一次样式就多一次读。若统计字段可省，可跳过。</div>
+            <div class="issue-loc" data-page-node-id="i4eVa7OvN0G0dVWBmCj7ng">NodeService.cs:468-490</div>
+          </div>
+        </div>
+      </div>
+      <div class="issue" data-page-node-id="iCCaNSBiqA35nwYYHJ520o">
+        <div class="issue-top" data-page-node-id="nShpvxTqx7CL1fRbX8jTzH">
+          <span class="tag green" data-page-node-id="OfqYB04kX5NUkkDytFja5Z">表扬</span>
+          <div class="issue-body" data-page-node-id="PhL55Z3HXpnAeL1K15iXLl">
+            <div class="issue-title" data-page-node-id="M99Tj90y97LfX5FWmafRmH">两阶段平移解决唯一索引冲突</div>
+            <div class="issue-desc" data-page-node-id="qjOaRILtTGyzMfk1NGLwEq"><code data-page-node-id="4r3mRreLRF7pxmd6MGvbu4">MoveAsync</code> / <code data-page-node-id="M2bhbhml1XUMjDDyyRDUPr">BatchUpdateAsync</code> 对 <code data-page-node-id="PDXwWDk6bCbA33aXBEuFSm">(MindMapId, ParentId, SortOrder)</code> 唯一索引的「先整体平移到临时区间、再写最终值」处理专业，且注释把原因讲清楚了。</div>
+            <div class="issue-loc" data-page-node-id="dWcqHUafRvccJo4nkmiEGn">NodeService.cs:224-243, 305-341</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 后端 MindMapService -->
+  <div class="file-block" data-page-node-id="PQ2GsuPGCcCrIJLLcgMfw2">
+    <div class="file-head" data-page-node-id="0OaHnPnGoauhF1wePR23Ps">
+      <span class="file-name" data-page-node-id="PMg9nIMlG58AtLynLBMpFn">backend/.../Application/Services/MindMapService.cs</span>
+      <span class="file-meta" data-page-node-id="PXGoQcOqa6QOq0hTalEteb">569 行</span>
+      <span class="score good" data-page-node-id="Eo2VfuX0Gq0Ub9vabvvWRp">好</span>
+    </div>
+    <div class="issue-list" data-page-node-id="pRTi2TgqnmTTRuZKcG5cPZ">
+      <div class="issue" data-page-node-id="DsVDWTtGFXZfIfLAahEL6u">
+        <div class="issue-top" data-page-node-id="tEoXR53LwQKALhjZta4QO5">
+          <span class="tag yellow" data-page-node-id="tyFnLLk2tJjgot3sy6FxHp">低</span>
+          <div class="issue-body" data-page-node-id="P4jh2ZOOYAJ6rBiLGc0NZJ">
+            <div class="issue-title" data-page-node-id="RyRg03B6W1auxRczheaGvv">列表页封面查询拉全量节点</div>
+            <div class="issue-desc" data-page-node-id="W44wylDZuiHo5iBfIGgwYZ">封面预览只取「根节点 + 前 4 个二级节点」，却对每个 <code data-page-node-id="p7CASVec4NzGFLdEVVHBKy">mapId</code> 查了 <b data-page-node-id="HViLy55KOFSz6VHSpLWpQp">全部节点</b>（<code data-page-node-id="FMstOpKwGtdMBdJdgpOnrV">Where(n => mapIds.Contains(n.MindMapId))</code>）。某导图几千节点时列表页会被拖累。可在 SQL 侧限制：只取 <code data-page-node-id="TyCvjbnxBrp10pOwpEdmFP">ParentId == null</code> 或 <code data-page-node-id="GFg87qdO38WGr8Fofy2IgK">ParentId in (根节点集)</code> 的行。</div>
+            <div class="issue-loc" data-page-node-id="wFCvQeMCEm2ozfN04qhGK9">MindMapService.cs:99-110</div>
+          </div>
+        </div>
+      </div>
+      <div class="issue" data-page-node-id="fuDFiMnnrVmG9nOHH3v128">
+        <div class="issue-top" data-page-node-id="ATuqLBewP1ycteVBBNPvfW">
+          <span class="tag green" data-page-node-id="4ditBfWBgqsG06dCdgfBC0">表扬</span>
+          <div class="issue-body" data-page-node-id="VYRqR1f36SGNZ2yJBoa7ir">
+            <div class="issue-title" data-page-node-id="IFDp9QOfVrRwbXKPOJmeZe">删除/复制的事务与 FK 拓扑处理到位</div>
+            <div class="issue-desc" data-page-node-id="D2AZe3OkCEEGNqlJFCGqXn">删除先清 <code data-page-node-id="FsByiZdpWQ2dbEZ6pg6T2k">RootNodeId</code>、再 <code data-page-node-id="pcuxh6iWrJyacXvspXkTrt">ExecuteUpdate</code> 解除自引用、再批量删，全程事务；复制分三步保存消除循环依赖。用 <code data-page-node-id="bM4BuRtPz0tsHaxTvjml6A">ExecuteDeleteAsync</code> 绕过 ChangeTracker 很到位。</div>
+            <div class="issue-loc" data-page-node-id="MTJSdo9pkv66RJleKPGkSN">MindMapService.cs:382-405, 446-469</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 前端 nodes.ts -->
+  <div class="file-block" data-page-node-id="7bhVadTw33xr871s7jUkXh">
+    <div class="file-head" data-page-node-id="hUZv6DIInIKN86eqr3vHJv">
+      <span class="file-name" data-page-node-id="7o2wMqcjhsXihysqRErFXf">frontend/src/stores/nodes.ts</span>
+      <span class="file-meta" data-page-node-id="Z4WgAdxd0AE3rqsNuhN6S1">348 行</span>
+      <span class="score mid" data-page-node-id="rSkjzI1aAFuHnSZFGQPQUF">中</span>
+    </div>
+    <div class="issue-list" data-page-node-id="NcgQnZ4lQ9cSb4sMTbLBHL">
+      <div class="issue" data-page-node-id="HcoRMKjMSg9TQZZXdCPAZn">
+        <div class="issue-top" data-page-node-id="yolBMlKoZvK4Eo73SJbMIJ">
+          <span class="tag orange" data-page-node-id="aXEnUpaGUjq0aeK9LILnMs">中</span>
+          <div class="issue-body" data-page-node-id="1pwWrRRaoOWSuqwzNOwy02">
+            <div class="issue-title" data-page-node-id="ilWxckkVz55MQ6n9Z6RDcw">写操作后全量 reloadTree 抵消增量同步收益</div>
+            <div class="issue-desc" data-page-node-id="IeCBWtJWZs9CjOJ76E0Udm"><code data-page-node-id="1pwDEIp3HhzkTnrNi5jdoH">create/update/move/batchUpdate/remove</code> 每个方法末尾都 <code data-page-node-id="KpfmCn0stbmwlgIRhrDc3h">await reloadTree()</code>，而 API 已经返回了最新的 <code data-page-node-id="f54EAo5GchAazahfUxBHkD">NodeDto</code>。这一步把「增量同步 + 返回值更新」的双重保障变成了一次冗余的全量拉取（且并行发 2 个请求）。</div>
+            <div class="issue-loc" data-page-node-id="nkk5pI1KTmONO5IFRmHBBG">nodes.ts:106-166</div>
+          </div>
+        </div>
+      </div>
+      <div class="issue" data-page-node-id="qUv1mp77HbVwnpiXPkgqB0">
+        <div class="issue-top" data-page-node-id="IC3kPGD20ZWg0cXg8gPwg9">
+          <span class="tag yellow" data-page-node-id="VIkexy0KeDw8gYMlJTW8ma">低</span>
+          <div class="issue-body" data-page-node-id="RGw1VvAcSDGw45HkTC0t68">
+            <div class="issue-title" data-page-node-id="QBQXdXtF4KXH6BkHPgllci">线性查找无索引缓存</div>
+            <div class="issue-desc" data-page-node-id="INNesITma6QeybMo1Tkn1K"><code data-page-node-id="iFvqj9DQkSa245lViRXWRc">findNode</code> 每次对全数组 <code data-page-node-id="OkQBP7xGPQbGHIi2tpgthu">find</code>，<code data-page-node-id="Vp1AMJ1EheQHHe47rZq9pT">getChildren</code> 每次 <code data-page-node-id="nhkKX8KPNR3zWaOEBSIQ4e">filter</code> + <code data-page-node-id="fR1aYL1m2QjI22o1H7W4F7">sort</code>，<code data-page-node-id="eFd0sZJxLZ64HukVbH0Po9">collectDescendants</code> 用 <code data-page-node-id="9suvJSVs5dVz83p6EWLH9e">shift()</code> + 嵌套 filter。节点数千时，高频调用（如 <code data-page-node-id="0FTKPiYGWoxK2X6DYBYbfD">getDepth</code> 逐层 findNode）会放大。可加 <code data-page-node-id="H9Ih4HsoC72Ju05mlWTmvq">Map&lt;id, node&gt;</code> 与 <code data-page-node-id="zlv2rIARTA1ivqDbp5BHfC">Map&lt;parentId, children[]&gt;</code> 缓存。</div>
+            <div class="issue-loc" data-page-node-id="ZPsaCvZhqyAfXEZ6p5yM3U">nodes.ts:47-55, 168-180, 291-299</div>
+          </div>
+        </div>
+      </div>
+      <div class="issue" data-page-node-id="JhLJUNaasFcwDxDFHEkFMe">
+        <div class="issue-top" data-page-node-id="ZWtl1gBBFkcnvNmsooBvkF">
+          <span class="tag green" data-page-node-id="a4ef2AnkhaFqzVWHdpfBhI">表扬</span>
+          <div class="issue-body" data-page-node-id="tUVWt7hQp2dmVuwCjurxfl">
+            <div class="issue-title" data-page-node-id="gSp2fjv6oSxuzsRjSIi1CT">reloadVersion 防乱序、离线兜底</div>
+            <div class="issue-desc" data-page-node-id="5KD0pt69OMWxZAQpahvJel">用版本号丢弃过期响应，避免旧数据覆盖新数据；离线时读 IndexedDB 快照并在前端组装 tree，思路干净。</div>
+            <div class="issue-loc" data-page-node-id="v1FTaYFG18vHbAwQXQAouI">nodes.ts:33-34, 93-104</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 前端 useMindMapSync.ts -->
+  <div class="file-block" data-page-node-id="K7s2nFOTzOC0VBPmdpcQ7S">
+    <div class="file-head" data-page-node-id="XRVeopSCacVVEJrUkIVNJF">
+      <span class="file-name" data-page-node-id="yjQclGC9jUHYWedUcNMVxl">frontend/src/views/editor/composables/useMindMapSync.ts</span>
+      <span class="file-meta" data-page-node-id="2AvylJjLiSjCcXjufPdx43">1443 行</span>
+      <span class="score mid" data-page-node-id="qGNwnQG8xfmWCnSbJtotJ7">中</span>
+    </div>
+    <div class="issue-list" data-page-node-id="udsr8gSEcY8Hy7BzQHnBUC">
+      <div class="issue" data-page-node-id="MTwip5OS1Ia5zml10FjIGQ">
+        <div class="issue-top" data-page-node-id="yvVtiShNdEIUwylQFEUDt7">
+          <span class="tag orange" data-page-node-id="U6fzBy5ChPxyhJZGGgaSKj">中</span>
+          <div class="issue-body" data-page-node-id="djFqneHAkXs8lWTx5FNLQU">
+            <div class="issue-title" data-page-node-id="U5wLibdJl8FJnD7LMolG3w">多处从根 walk 整棵树，O(N) 在 O(N) 外层</div>
+            <div class="issue-desc" data-page-node-id="gQ35EikI17bhYOtnHl7ZVe"><code data-page-node-id="RVTLXW5jTJqbHAyF9hbKPm">findRenderNodeByUid</code> / <code data-page-node-id="OjCgUov6U4phndBSXRuQ3Q">findNodeParentUid</code> / <code data-page-node-id="CNV2VSvjKVa7eGWQIzpHB4">writeBackendIdToNode</code> / <code data-page-node-id="xB1jfXvFl4TKKEd1RxZqY4">getParentUidFromFullTree</code> 每次都从渲染树根递归遍历。单次尚可，但 <code data-page-node-id="BbJJpX6DSAdXlPeC9ICXvO">normalizeRootChildDirections</code>（每次 layout 后跑）内部又调 <code data-page-node-id="JzGjaBGBwM4D5RBGOXaIrn">findNode</code>，<code data-page-node-id="7KTpJueJ72dy9V0uJDEgBG">computeSortOrderForNewNode</code> 里对 <code data-page-node-id="W8AFtQrMm9petRHrVHHV34">buildRelationalMapsFromRaw</code> 重复调两次。</div>
+            <div class="issue-loc" data-page-node-id="SkZLihtrlB5vSUhEFu5iUl">useMindMapSync.ts:157-181, 1077-1100, 1188-1203, 1290-1305</div>
+          </div>
+        </div>
+      </div>
+      <div class="issue" data-page-node-id="gFAmHLLniNoIyVI6dnxO2Q">
+        <div class="issue-top" data-page-node-id="1Oih2BKfjk89jz5yHfvGWq">
+          <span class="tag yellow" data-page-node-id="ZgpN43dA03iNptR2KJeNQS">低</span>
+          <div class="issue-body" data-page-node-id="pm6JScyrEXVnzNB2F7qOiJ">
+            <div class="issue-title" data-page-node-id="1Yw8Hrl6FRoLqocrCjTZpc">魔法数字 setTimeout 散落</div>
+            <div class="issue-desc" data-page-node-id="gQYCQQfEg7rm5uL3E8urGG"><code data-page-node-id="1xoSUlAi280JaowKH0uhD6">150ms / 400ms / 250ms / 600ms / 500ms / 2000ms / 5000ms</code> 等时序依赖散落各处，部分有注释、部分没有。建议抽成命名常量，集中说明时序依赖。</div>
+            <div class="issue-loc" data-page-node-id="jwVT4JnLSGUzh0F7DQxECI">useMindMapSync.ts:112, 543, 776, 797, 902, 924, 947</div>
+          </div>
+        </div>
+      </div>
+      <div class="issue" data-page-node-id="AC8sFpoaBj0bAhZ9CTdWQq">
+        <div class="issue-top" data-page-node-id="jWLUo7ER2uAkmAWKiLBaNL">
+          <span class="tag yellow" data-page-node-id="Vr95giE4QmAAkVkVJt2QcA">低</span>
+          <div class="issue-body" data-page-node-id="rxMsUyGbcTFOJqGbZ2tL9G">
+            <div class="issue-title" data-page-node-id="lFd98Fjvi33ZFLJ0fCMp1e">extraFields 逐字段 JSON.stringify 比较</div>
+            <div class="issue-desc" data-page-node-id="oQwREufACdUWAFd0CJBDv6"><code data-page-node-id="SdQpNchiqdavuKFwc0SjTR">handleUpdate</code> 里对 7 个 extraData 字段逐个 <code data-page-node-id="tXJ2HRtX8wpakukKVb0Cyd">JSON.stringify</code> 比较，节点多时高频小开销累积。</div>
+            <div class="issue-loc" data-page-node-id="n5zjGZ5gxxg0sdy8zn7JLA">useMindMapSync.ts:712-734</div>
+          </div>
+        </div>
+      </div>
+      <div class="issue" data-page-node-id="yLfZuKEznZvFs7BRuo7eWO">
+        <div class="issue-top" data-page-node-id="wj8szuFCUFXFCEMDhVVnup">
+          <span class="tag green" data-page-node-id="srGPuSPA6XnGjcSGNrdNe4">表扬</span>
+          <div class="issue-body" data-page-node-id="4jiX4Y55wnr8UQlBstomNf">
+            <div class="issue-title" data-page-node-id="PSrIS8sPVA3AePQuZ4kGDI">增量同步并发控制设计周全</div>
+            <div class="issue-desc" data-page-node-id="6xJj6Fv7FTBRhNXqIS19fn"><code data-page-node-id="KRAWoYZZHbfgxamNp64IE4">data_change_detail</code> diff + 节点级 debounce + 串行 opQueue + <code data-page-node-id="R4m123XgEYeKDstGHmDYx3">pendingCreates</code> + 失败重放队列 + 404 作废语义，这套并发/重试模型考虑得很完整，是整份代码最有价值的部分。</div>
+            <div class="issue-loc" data-page-node-id="XfZW2OOfVMZQryTsGOcNLB">useMindMapSync.ts:199-334</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 前端 MindMapEditorView.vue -->
+  <div class="file-block" data-page-node-id="5DBu1iR9uW7YFPT7Wv2loK">
+    <div class="file-head" data-page-node-id="MbCACCwtLniAoOiPerzf1C">
+      <span class="file-name" data-page-node-id="6X6hT2hbfcgWmDgl9S1O1l">frontend/src/views/editor/MindMapEditorView.vue</span>
+      <span class="file-meta" data-page-node-id="nA4MwdBIVsGP3Zg8qBqqoJ">1969 行</span>
+      <span class="score mid" data-page-node-id="osSbPekVinetnEHhHljxhG">中</span>
+    </div>
+    <div class="issue-list" data-page-node-id="2WEwxY4sHq65S0OED7jZD9">
+      <div class="issue" data-page-node-id="zZ0ceVLXIdVfYMMgU9n1b1">
+        <div class="issue-top" data-page-node-id="JDszpo3yNX5dm2FZgmgF3W">
+          <span class="tag orange" data-page-node-id="9d5lPlifz2bVkznuLHGBrF">中</span>
+          <div class="issue-body" data-page-node-id="cfsJMNQMJSZ2sKgHEplSv2">
+            <div class="issue-title" data-page-node-id="ek7qFB5zN27eSTbcUEN4cr">普通编辑后 reloadMindMap() 全量 setData</div>
+            <div class="issue-desc" data-page-node-id="Z5IjjO5dS8zbOIFQUvkhs6"><code data-page-node-id="khW32ujn8qhJSDafXktDf9">handleAddChild / handleAddSibling / submitNodeDelete / handleUpdateStyle / handleContentSave / handlePaste</code> 都在 store 写完后调 <code data-page-node-id="f45WLlhB8xWnxClE3bi2gg">reloadMindMap()</code> → <code data-page-node-id="9hA2LXjplb8dnZtrpZJYcJ">inst.setData()</code>，整树重渲染 + 重建视口。节点多时必然掉帧。应只在 undo/redo、版本回滚这类「整体重建」场景使用。</div>
+            <div class="issue-loc" data-page-node-id="jFs2xxQCuGiEVQOjN0R6OQ">MindMapEditorView.vue:895, 917, 944, 978, 989, 1497</div>
+          </div>
+        </div>
+      </div>
+      <div class="issue" data-page-node-id="ryXOczXW4mYGdSxdVYgpm6">
+        <div class="issue-top" data-page-node-id="BljfGeuZshU9SWqGig5bz4">
+          <span class="tag yellow" data-page-node-id="UYAIq0tA87klnxgdcNRWZ9">低</span>
+          <div class="issue-body" data-page-node-id="xvDGF3X3Y4nI1BeUBQA1xB">
+            <div class="issue-title" data-page-node-id="vL4aEX9YsiKFHG0EpmiBUM">大量 (inst as any) 类型断言</div>
+            <div class="issue-desc" data-page-node-id="pe1qFe6sH3HyIrBDC0bQbj">simple-mind-map 类型缺失导致遍布 <code data-page-node-id="Fq2DSF1uUtJxGk0r0ixg9L">(inst as any)</code> / <code data-page-node-id="IjaLAwSC7KCdfUmZWhcPAr">(renderer as any)</code>，可维护性差。建议建一个 <code data-page-node-id="SQtjebU9e4iL2Qol7v9OcF">MindMapInstance</code> 增强类型或声明文件收敛。</div>
+            <div class="issue-loc" data-page-node-id="XEOVnszHFlJ28C7NYx8Tjq">MindMapEditorView.vue:340-427, 715, 828-889</div>
+          </div>
+        </div>
+      </div>
+      <div class="issue" data-page-node-id="wBqIW61M9OTijYzmLsHcL9">
+        <div class="issue-top" data-page-node-id="UXjqLlD9ZCTk3im0VCKOz8">
+          <span class="tag yellow" data-page-node-id="ZVOU4HEnFfdYx47VvV7QWd">低</span>
+          <div class="issue-body" data-page-node-id="n4JyyI0cneCPpJ6lZLNAKO">
+            <div class="issue-title" data-page-node-id="FkMKkpnoaHIeg0FiLWHax2">三个 onMounted 分散 + 单文件过大</div>
+            <div class="issue-desc" data-page-node-id="AE8RDczP2pI3tRn2WVsegm">存在 3 个 <code data-page-node-id="FfVD8ruXybGiiveioIhV9F">onMounted</code>（1554、1642、1679 行）应合并；单文件 1969 行，脚本 + 模板 + 4 段插件 monkey-patch 耦合，建议把 Drag/TouchEvent/MindMap/AssociativeLine 的 monkey-patch 抽到独立模块。</div>
+            <div class="issue-loc" data-page-node-id="CVULnodkYH3RT6RGsAhmyc">MindMapEditorView.vue:1554, 1642, 1679</div>
+          </div>
+        </div>
+      </div>
+      <div class="issue" data-page-node-id="T9O3fCxZ2QUCpHxAbS3CFP">
+        <div class="issue-top" data-page-node-id="8dX2HPTlf9DNLbAues2lqT">
+          <span class="tag green" data-page-node-id="EheRVugJHPGlBUMNjIsUDi">表扬</span>
+          <div class="issue-body" data-page-node-id="ScXHhzsjADBNGsAng8DdQq">
+            <div class="issue-title" data-page-node-id="YgIIrfmKiaCnvk8rijNf7j">「唯一配色出口」设计克制</div>
+            <div class="issue-desc" data-page-node-id="qvbiusxJebhcNOUA09wVuH"><code data-page-node-id="VloPYFUK6vDKGWTkgQTrCc">applyResolvedTheme</code> 作为全组件唯一配色出口，配合「先解析主题再映射数据」的顺序约束，把主题/模板/明暗三条路径收敛到一处，避免深色下漏路径。</div>
+            <div class="issue-loc" data-page-node-id="F4WLUuvw6ztFF6IdO3YyeT">MindMapEditorView.vue:608-621</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- NodeConfiguration -->
+  <div class="file-block" data-page-node-id="VwuzQDY4aGXLoYOIEib3bv">
+    <div class="file-head" data-page-node-id="XpkKWiOqyhvqqmnisxY3Ih">
+      <span class="file-name" data-page-node-id="PMCJ2XYGRs0CQEjpaDMA9d">backend/.../Data/Configurations/NodeConfiguration.cs</span>
+      <span class="file-meta" data-page-node-id="I8WcSPchFGEkv4868so8hm">61 行</span>
+      <span class="score good" data-page-node-id="W5Ue5xfIZtwvHX83O1sMIF">好</span>
+    </div>
+    <div class="issue-list" data-page-node-id="1tD5eNfiZxbdXmF8cd8oIR">
+      <div class="issue" data-page-node-id="tMV1QwHnds1yeTm9ODfss4">
+        <div class="issue-top" data-page-node-id="23vG4L8ycaLW4M9c4Y43LG">
+          <span class="tag yellow" data-page-node-id="oPzuC1DkIUc3L728zesmpJ">低</span>
+          <div class="issue-body" data-page-node-id="CoqEGEGoS2F7jqFSSoVBYd">
+            <div class="issue-title" data-page-node-id="DmdlrlKvAfXQNUpXeFfTC9">ParentId 无单独索引（环检测/递归查询依赖它）</div>
+            <div class="issue-desc" data-page-node-id="qlad2FHJIHywppwLd6NAsl">已有 <code data-page-node-id="5qRLpjWzh6jpGhKMyXK5xA">MindMapId</code> 索引和 <code data-page-node-id="tnAqBDFATrDVbFdaBLnhMd">(MindMapId, ParentId, SortOrder)</code> 唯一索引，但 <code data-page-node-id="chHd8dkt2ZyCuTL8gM8XDT">IsDescendantAsync</code> 只按 <code data-page-node-id="YZLGRtalyEZRha5B7BzCHe">ParentId</code> 查（不走复合索引前缀 <code data-page-node-id="nsj8R8LLPtL9jDcplCQxGL">MindMapId</code>）。若优化后仍保留逐级查询，可补 <code data-page-node-id="RNEkLV8sUe6WZL3EfDD9zq">ParentId</code> 单列索引；若改为内存 BFS 则无此顾虑。</div>
+            <div class="issue-loc" data-page-node-id="abGgRYJpgKNRZI9LByNwle">NodeConfiguration.cs:46-48</div>
+          </div>
+        </div>
+      </div>
+      <div class="issue" data-page-node-id="lDICuTRgRR0sld4E2UGCoo">
+        <div class="issue-top" data-page-node-id="NdGGoo1WpfGbjzSG7bkFun">
+          <span class="tag green" data-page-node-id="mjDFNddsw0WpdpWb0IORXt">表扬</span>
+          <div class="issue-body" data-page-node-id="DdTsKy7zMJvC1aKf2eAokg">
+            <div class="issue-title" data-page-node-id="QiElpt10B4mZq4oGy6iaI7">索引与 FK 约束设置清晰</div>
+            <div class="issue-desc" data-page-node-id="dBK0uD5GksqfglH1VLvjWp">唯一索引注释说明了 MySQL 对 NULL 不去重的影响；自引用 FK 用 <code data-page-node-id="W2RyhBLykX1NF2x1MViCvx">Restrict</code> 并注释「需手动处理」，与删除逻辑呼应，严谨。</div>
+            <div class="issue-loc" data-page-node-id="COl5tVevb0EfWF74PJkCSY">NodeConfiguration.cs:44-59</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <p style="color:var(--muted); font-size:13px; text-align:center; margin-top:40px;" data-page-node-id="DpJ4fs8jtCYGGqCQsKvss1">本清单为只读评审，未修改任何代码。详细改造方案见 <b data-page-node-id="sRvlPoxJWJ9KDEXn0wGDID">性能优化方案</b> 文档。</p>
+</div>
+</body>
+</html>
