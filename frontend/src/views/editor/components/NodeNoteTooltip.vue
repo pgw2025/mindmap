@@ -1,13 +1,27 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onBeforeUnmount } from 'vue'
 
 const visible = ref(false)
 const content = ref('')
 const left = ref(0)
 const top = ref(0)
 
+/** 关闭延迟定时器 */
+let hideTimer: ReturnType<typeof setTimeout> | null = null
+/** 关闭延迟时间（毫秒），给用户足够时间将鼠标移入气泡 */
+const HIDE_DELAY = 300
+
+/** 清除待执行的关闭定时器 */
+function clearHideTimer() {
+  if (hideTimer) {
+    clearTimeout(hideTimer)
+    hideTimer = null
+  }
+}
+
 /** 展示备注 tooltip（simple-mind-map customNoteContentShow.show 回调） */
 function show(note: string, x: number, y: number) {
+  clearHideTimer()
   content.value = note || ''
   // 在备注图标右下偏移，避免遮挡图标
   left.value = x + 8
@@ -15,18 +29,43 @@ function show(note: string, x: number, y: number) {
   visible.value = content.value.length > 0
 }
 
-/** 隐藏备注 tooltip（simple-mind-map customNoteContentShow.hide 回调） */
+/** 隐藏备注 tooltip（simple-mind-map customNoteContentShow.hide 回调）
+ *  添加延迟关闭，鼠标从图标移到气泡上时不会消失
+ */
 function hide() {
-  visible.value = false
+  clearHideTimer()
+  hideTimer = setTimeout(() => {
+    visible.value = false
+  }, HIDE_DELAY)
 }
+
+/** 鼠标进入气泡时，取消关闭，保持显示 */
+function handleMouseEnter() {
+  clearHideTimer()
+}
+
+/** 鼠标离开气泡时，启动延迟关闭 */
+function handleMouseLeave() {
+  hide()
+}
+
+onBeforeUnmount(() => {
+  clearHideTimer()
+})
 
 defineExpose({ show, hide })
 </script>
 
 <template>
   <Teleport to="body">
-    <div v-if="visible" class="node-note-tooltip" :style="{ left: left + 'px', top: top + 'px' }"
-      v-html="content"></div>
+    <div
+      v-if="visible"
+      class="node-note-tooltip"
+      :style="{ left: left + 'px', top: top + 'px' }"
+      @mouseenter="handleMouseEnter"
+      @mouseleave="handleMouseLeave"
+      v-html="content"
+    ></div>
   </Teleport>
 </template>
 
