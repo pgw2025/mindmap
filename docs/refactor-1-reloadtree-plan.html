@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="pfTLYO2PTUY9w1e5DSppHb">
+<head data-page-node-id="rRb2CmPJELeMVvxe6LDE1N">
+<meta charset="UTF-8" data-page-node-id="SlEkZaPqDU7pcFSludNMfy">
+<meta name="viewport" content="width=device-width, initial-scale=1.0" data-page-node-id="jYInse2JhIEO93DXLv44bC">
+<title>改造 1 精确方案 · 去掉写操作后全量 reloadTree</title>
+<style>
+  :root {
+    --bg: #0f1216; --card: #171b21; --card-2: #1d232b; --border: #2a313b;
+    --text: #d7dce2; --muted: #8b95a1; --red: #ff6b6b; --orange: #ffa94d;
+    --yellow: #ffd43b; --green: #51cf66; --blue: #4dabf7; --purple: #b197fc;
+    --mono: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; line-height: 1.7; padding: 40px 24px 80px; }
+  .wrap { max-width: 960px; margin: 0 auto; }
+  header { margin-bottom: 28px; }
+  h1 { font-size: 25px; margin: 0 0 8px; }
+  .sub { color: var(--muted); font-size: 14px; }
+  h2 { font-size: 19px; margin: 40px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  h2 .n { color: var(--blue); margin-right: 8px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px 24px; margin-bottom: 16px; }
+  .card h3 { margin: 0 0 8px; font-size: 15.5px; }
+  .card p { margin: 0 0 10px; color: var(--muted); font-size: 14px; }
+  .card p b { color: var(--text); }
+  pre { background: #0b0e12; border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; overflow-x: auto; font-family: var(--mono); font-size: 12.6px; line-height: 1.55; color: #c9d1d9; margin: 12px 0; }
+  pre .cm { color: #6a737d; font-style: italic; }
+  pre .kw { color: #ff7b72; }
+  pre .fn { color: #d2a8ff; }
+  pre .st { color: #a5d6ff; }
+  pre .del { background: rgba(255,107,107,.12); }
+  pre .add { background: rgba(81,207,102,.12); }
+  .loc { font-family: var(--mono); font-size: 12px; color: var(--blue); }
+  .tag { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 4px; margin-right: 6px; }
+  .t-file { background: rgba(77,171,247,.18); color: var(--blue); }
+  .t-warn { background: rgba(255,169,77,.18); color: var(--orange); }
+  .t-keep { background: rgba(81,207,102,.15); color: var(--green); }
+  .t-risk { background: rgba(255,107,107,.18); color: var(--red); }
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 13.5px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; background: var(--card-2); }
+  td b { color: var(--text); }
+  .riskbox { background: rgba(255,107,107,.08); border-left: 3px solid var(--red); padding: 12px 16px; border-radius: 6px; font-size: 13.5px; margin: 14px 0; }
+  .riskbox b { color: var(--red); }
+  .okbox { background: rgba(81,207,102,.08); border-left: 3px solid var(--green); padding: 12px 16px; border-radius: 6px; font-size: 13.5px; margin: 14px 0; }
+  .okbox b { color: var(--green); }
+  .step { display: flex; gap: 12px; margin: 14px 0; }
+  .step-num { flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%; background: var(--card-2); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px; color: var(--blue); }
+</style>
+</head>
+<body data-page-node-id="qt2Qk0t7X5hZDZDuOWjRxe">
+<div class="wrap" data-page-node-id="KNKbKrQxRb2lL6JvAS8nif">
+  <header data-page-node-id="783LSLksHGAmT0aiGaBkC5">
+    <h1 data-page-node-id="OMnCSYUvaGzB1UUVVZVtvE">改造 1 精确方案：去掉写操作后的全量 reloadTree</h1>
+    <div class="sub" data-page-node-id="kiaejIu098AcH2uLF6X4Z6">目标文件 <span class="loc" data-page-node-id="YbU2mtHVawMPG3EOm8lWkl">frontend/src/stores/nodes.ts</span> · 精确到行 · 含副作用分析与规避措施</div>
+  </header>
+
+  <div class="card" data-page-node-id="GiJ8KjUVSxdxf9Vj1Z6G8v">
+    <h3 data-page-node-id="bOstBQZSS3iMUODPh9XSZ2">改什么</h3>
+    <p data-page-node-id="IlnADWpnog2tLBw9AiCImd">删除 <code data-page-node-id="VWD7xYDVfDgHDUFRgnfkvM">create / update / move / batchUpdate / remove</code> 五个方法内部的 <code data-page-node-id="75qsM3LnqEKlwUUDJQfCk7">await reloadTree()</code>（共 5 处），同时把 <code data-page-node-id="rMOGUZDswDB8UkTV7Earl2">tree</code> 从「手动 ref」改为「跟随 <code data-page-node-id="29TER3NAHJe7MlVaMoWfLY">nodes</code> 的 computed」，消除「tree 过期」副作用并顺带省掉 <code data-page-node-id="t8QrGLJzqYIH97JO6ZFyZT">GET /nodes/tree</code> 请求。</p>
+  </div>
+
+  <h2 data-page-node-id="ZTDMYwz0f8xtNhvxZnDwKv"><span class="n" data-page-node-id="WNrXUgeyJgLVFCfdqbOute">A</span>删除 5 处 reloadTree 调用</h2>
+
+  <div class="card" data-page-node-id="8LEMryw4N8UuWtAzvpxKzD">
+    <p data-page-node-id="l9IT92YPjMXo8KdWcMHNRN"><span class="tag t-file" data-page-node-id="xFDZ1xL5jRVAVEV5CvGLe9">nodes.ts</span>以下 5 处 <code data-page-node-id="tzaFWLHCmxDqlzF2N8aVZb">await reloadTree()</code> 直接删除（前后逻辑保留）：</p>
+    <table data-page-node-id="D8Cq4HmhSiETPY1ZH50QW5">
+      <tr data-page-node-id="JCUw3LOmNlAvYGyH3IDcUY"><th data-page-node-id="EZtp4FgGbClCzPukItRdqy">方法</th><th data-page-node-id="yaFVy3ogTA5vhKPo4xkFIJ">行号</th><th data-page-node-id="7M7OgD4nN4GgGVLDp2iYL7">删除内容</th><th data-page-node-id="ESamDaSsZYfXxBt8FEJB78">删后 nodes 是否仍正确</th></tr>
+      <tr data-page-node-id="PS72ILBQenGFzPZ8VpfJjG"><td data-page-node-id="xHFtK46dAhBCjAVbKhm1e6"><b data-page-node-id="8Ep38AkJmfVuJ33LLvOYTu">create</b></td><td data-page-node-id="g7k1Ma2lRHYmW3fCdUps7B">109</td><td data-page-node-id="6JWEF8tMAfLNoTkv60GsSJ"><code data-page-node-id="DgAxuHPbsfEyGxLC6zT64E">await reloadTree()</code></td><td data-page-node-id="Ay0chgpLZJx60yK1XitEh5">✅ 上方已 <code data-page-node-id="ATkcCFHhrYg6Kl5LA5KSRR">push(node)</code></td></tr>
+      <tr data-page-node-id="H9egY51DePgL8gRp3TiCZ7"><td data-page-node-id="sE0lSJbtGZSUpmwTtEEMY4"><b data-page-node-id="BtFwM5Z37xCXkjJtyJIBGP">update</b></td><td data-page-node-id="lfzuJWIB7xMbUkcsstdwKY">125</td><td data-page-node-id="6PTY4JUqA6Nki8nfEiD6ME"><code data-page-node-id="r5GCZPKQC1OVxkgPj9Zw0E">await reloadTree()</code></td><td data-page-node-id="5cRZhrkxIAiTS7f3Y8azOB">✅ 上方已 <code data-page-node-id="IiXqUABXX4pgtWAKv93inS">nodes[idx] = updated</code></td></tr>
+      <tr data-page-node-id="daBEzjMoEwG8RuUXc79LD8"><td data-page-node-id="uqUgkqRGZo9WE1rsVSM1yl"><b data-page-node-id="BlRukkvDE9hEMOZ7usMEVn">move</b></td><td data-page-node-id="rBQs6bzF3zvd5mJnut362O">141</td><td data-page-node-id="e3Xxi65EV7NmJgPXrnHWwt"><code data-page-node-id="NJFKW1m1imFq24eIiNrIo7">await reloadTree()</code></td><td data-page-node-id="crNp4Gjco2ddohf9TqMnMG">✅ 上方已 <code data-page-node-id="v4i3x894vxwee8N7Qw7px6">nodes[idx] = moved</code></td></tr>
+      <tr data-page-node-id="VdxQXCAJici87DL8Nicrb9"><td data-page-node-id="zNMMB1P709K4AoGJEELwvM"><b data-page-node-id="nvCBsWkKKHkGk08gM19Mcr">batchUpdate</b></td><td data-page-node-id="bTH2xI6fHJPL7VNSgVPXpo">151</td><td data-page-node-id="xJO4Cu6MoDUtAPbzWkK2w1"><code data-page-node-id="d6pMsTgTv715ez39sioSQJ">await reloadTree()</code></td><td data-page-node-id="vu9uxyRh3O8hIwcdFAwKul">⚠️ 见下方「batchUpdate 特殊处理」</td></tr>
+      <tr data-page-node-id="GBC35ysR3dRIzVpALkcN0r"><td data-page-node-id="6HVPTDEp1sNb9Wg1Ee3rB9"><b data-page-node-id="AxSTpdaGUpfHCVwF7czKn7">remove</b></td><td data-page-node-id="1rTFeFKAH2weEPGsphDeLR">164</td><td data-page-node-id="viEeepU8Z0SrcVT7pjD8Td"><code data-page-node-id="EIvJBcECq9fWq3rCPI2wMP">await reloadTree()</code></td><td data-page-node-id="o6kG9Ev0yBMr3CAjFPjVMi">✅ 上方已 <code data-page-node-id="T4YheC2ZGAWeE5lvB6bcAC">filter</code> 掉被删节点</td></tr>
+    </table>
+    <p data-page-node-id="SsvZtfT5z6x5VTEqTyMJpP"><b data-page-node-id="3zZpGmhIKopg5ELusmrMog">保留不动</b>：<code data-page-node-id="QD8Cf8EORQo49ldPdPl1Wr">applyUndo</code>（258 行）、<code data-page-node-id="pzhXLvDBm1NeG1eSfV5EEX">applyRedo</code>（288 行）末尾的 <code data-page-node-id="6EM5zQWAnXjtLPSN4dqaH3">await reloadTree()</code> —— 它们属于整体重建场景，配合 <code data-page-node-id="5lAdRbb7FSUvethCwIILOH">reloadMindMap()</code> 一起刷新。</p>
+  </div>
+
+  <h2 data-page-node-id="SDvbQ85bAb77Bu1sj6XOvU"><span class="n" data-page-node-id="eSaUbWSV6e8uOhhTJQGXdz">B</span>tree 改为跟随 nodes 的 computed</h2>
+  <div class="card" data-page-node-id="wzCs70zjdryVQfQNqLOCHB">
+    <p data-page-node-id="tqAOUSE8KIcJQN9t9ngVXF">这一步是<b data-page-node-id="zcXBuJBXDCfvZl18AZu8AE">抵消「tree 过期」副作用</b>的关键，也顺带省掉 <code data-page-node-id="rwLCO0yadXNaqckVNlxLAC">GET /nodes/tree</code> 这一路请求。利用已有的 <code data-page-node-id="zhBjDNSjswaxXFLbcA2ORx">offlineDb.buildNodeTree(nodes)</code>（<span class="loc" data-page-node-id="YbamKPYPsEulPTDyCjwkBV">offline/db.ts:201</span>，逻辑与后端 <code data-page-node-id="u59YvTXMqbfoEFQkxA1Nch">BuildTree</code> 一致）。</p>
+    <pre data-page-node-id="zsqOjynwsSzycESytW9ip9"><span class="cm" data-page-node-id="AtJETVvU7VI5cfWOTyatKM">// 原：第 26 行 —— 手动 ref，靠 reloadTree 刷新</span>
+<span class="del" data-page-node-id="aNMtzRL2h7DsVOyJi9Ayd1">const tree = ref&lt;NodeTreeNodeDto[]&gt;([])</span>
+
+<span class="cm" data-page-node-id="t7NBc9SbjnrWC7tXwkIvKw">// 改：computed，自动跟随 nodes</span>
+<span class="add" data-page-node-id="wuX8PGGIQIscqP7tpUYi8L">const tree = computed&lt;NodeTreeNodeDto[]&gt;(() =&gt; offlineDb.buildNodeTree(nodes.value))</span></pre>
+    <p data-page-node-id="XrxWKgd7oGJBvizkdmsInY">连带清理：</p>
+    <ul style="color:var(--muted); font-size:14px; margin:6px 0 0 0;" data-page-node-id="aT1TFSuQDisz8HOEw7jyqz">
+      <li data-page-node-id="OkSotA1yOwf7EWHDC2WLrF"><b data-page-node-id="eFpLQTpGZrxrspUkfvOTZ2">74 行</b> <code data-page-node-id="ExpD0Z4QHxObaiSkB2Le28">tree.value = treeData</code> → 删除（load 里不再需要单独拉 tree）</li>
+      <li data-page-node-id="kMzLdlDLyFKVrrBNjbq755"><b data-page-node-id="74pPbhzNaw7CotE1VuifjF">83 行</b> <code data-page-node-id="QDuR4k4yZ2lqodcC2LsUBm">tree.value = offlineDb.buildNodeTree(snapshot.nodes)</code> → 删除</li>
+      <li data-page-node-id="BT1TSH4IuW7N2R1sVeMAVk"><b data-page-node-id="EOtBUOLUtIuJ6Tt5rlQb1p">308 / 317 行</b> <code data-page-node-id="tElsb6QzRrYeBjbkM1DQC2">tree.value = []</code>（reset / clearAll）→ 删除（computed 不可写）</li>
+      <li data-page-node-id="YyzVDS2IRKQNRffBsShqxM"><b data-page-node-id="cg6lmsFVosrQrf2I7bKhrl">96-99 行</b> <code data-page-node-id="yssDCPEsAjFIqv574npLQY">reloadTree()</code> 内对 <code data-page-node-id="Z7SoHd4DDRNjpe5njY8Mwc">fetchNodeTree</code> 的并行请求 → 可删（tree 已本地化），<code data-page-node-id="BfxTuUlTn6pURxJspXUZuV">reloadTree</code> 退化为只拉 <code data-page-node-id="CRWsQwgUDW5aGw1sBpnWmF">fetchNodes</code>。但 undo/redo 仍调用它，保留函数本身。</li>
+    </ul>
+    <div class="okbox" data-page-node-id="AcWYGIyOce38m4T5AyHV3N"><b data-page-node-id="gnU3FpXTCvU4kuREdIopbv">收益：</b>这一步之后，<code data-page-node-id="kKW9cpEWtvu3qrNAk2GgEl">GET /nodes/tree</code> 在整个在线编辑链路里彻底消失（打开导图 <code data-page-node-id="HBe0agPvb6z9XsYoaGJ8vP">load</code> 也省一次），单次编辑请求量从「3 次全量」降为「1 次增量写」。</div>
+  </div>
+
+  <h2 data-page-node-id="zcgmBD1cPwAfksd6MJ3RnZ"><span class="n" data-page-node-id="djc5Db3bFWzZnG8iEQpmGe">C</span>batchUpdate 的特殊处理（真正的副作用点）</h2>
+  <div class="card" data-page-node-id="eVA7HyHfKIWHgeGRAq1VCU">
+    <p data-page-node-id="4XnpNxmpRDUme27Y4eYoq0"><span class="tag t-warn" data-page-node-id="Durc2u5Xn5JWy6IByeRaCC">核心风险</span><code data-page-node-id="5r8fi9aSTvbKyN9FF36hM1">batchUpdate</code> 返回 <code data-page-node-id="JHoBZ0iwuxLZ0I5zKHElTM">void</code>，且<b data-page-node-id="6qKp1kqGYmH2Dr6Jp0c8dt">不更新本地 <code data-page-node-id="wQEmXlHL4w3Me3qle6sFLI">nodes</code></b>。它有 2 个调用点，都在 <span class="loc" data-page-node-id="KpLmaAdX0hvYgvjgOrKAKi">useMindMapSync.ts</span>：</p>
+    <table data-page-node-id="v9MNriCnIJcUZMyqWupYeH">
+      <tr data-page-node-id="2hTUxhwgH1zRk1INMoD5Kp"><th data-page-node-id="xfjNTeMZUQByBjVSaJoO0Q">调用点</th><th data-page-node-id="7hWcIbH6e5agfp0k00f6Kd">行号</th><th data-page-node-id="G7qTMWfFr9OydtiCFDOpmQ">改了什么字段</th><th data-page-node-id="cvKDLigPKARYDd4vXt9nAy">删 reloadTree 后本地 nodes 会怎样</th></tr>
+      <tr data-page-node-id="CuHtTf2IZg2NTeGA5QvVSl"><td data-page-node-id="PXMAVWnA6Wikhu1B6K8Joa"><b data-page-node-id="efOT8cJ6cCsrrnzanBUWE8">applyExpandCollapse</b>（批量展开/折叠）</td><td data-page-node-id="zjVojGchmawh9CheDvHOe5">896</td><td data-page-node-id="ElPIljrG7d6GXWORi48Gfd"><code data-page-node-id="hDNEZoVkVKuL0goj2Mt0Ng">isCollapsed</code></td><td data-page-node-id="PoxCtpGOKx0Jxr8MVg5kRX">⚠️ <code data-page-node-id="hdDTmGii00nDhtIbt1JPqA">nodes[].isCollapsed</code> 过期</td></tr>
+      <tr data-page-node-id="vmmbHWWstYheZZvhtoJAQG"><td data-page-node-id="FpQAQXy9YO5jQ4YAO4UWst"><b data-page-node-id="tIV0m74I2XPgnoQIccwOwO">handleStructuralChangesBatch</b>（拖拽移动第二遍）</td><td data-page-node-id="oIQIY9yUokDhgQK1BJHmxR">1055</td><td data-page-node-id="RobSnNRaVgw3zqTO202t23"><code data-page-node-id="9GNR9GQ5sKLNHricAq9AsB">sortOrder</code>（parentId 已由第一遍 move 更新）</td><td data-page-node-id="6wBbkyTmjXvE2ATcAyBLAq">⚠️ <code data-page-node-id="Lx3QSEcoR9Bs4jaLPXbtuI">nodes[].sortOrder</code> 过期</td></tr>
+    </table>
+    <p data-page-node-id="47hvrdjKbAlcOdfsNvu1RE"><b data-page-node-id="0i7tEsWPUZeMaOw0maOP9c">为什么这是风险：</b><code data-page-node-id="yfwf3tDOv3HiDCmO4MOsB8">reloadMindMap()</code>（<span class="loc" data-page-node-id="p2pdvCqpRRVKZ4ZEsh5FEF">useMindMapSync.ts:535</span>）读的是 <code data-page-node-id="QTI1zQhMGieCKEebghSimz">nodesStore.nodes</code>，再 <code data-page-node-id="HYBpRUrAPQkmbFDLhvWIeg">setData</code> 覆盖画布。若 <code data-page-node-id="6hNRkxR8lCttPQzW3omEaf">nodes</code> 里 <code data-page-node-id="2gTTlfTBicfGWugbOlv6Hd">isCollapsed / sortOrder</code> 过期，那么<b data-page-node-id="BkE5P9OreWkkPzKjHXuTvC">下一次任何触发 <code data-page-node-id="gogionE2oLVFhuHKk8FfF0">reloadMindMap</code> 的场景（undo/redo、版本回滚）会用过期值覆盖画布</b>——折叠状态回弹、排序错乱。</p>
+    <div class="riskbox" data-page-node-id="C9PidvzZxdRCryNTTlRBJM"><b data-page-node-id="MYbgCzrRTp3QX0fq73hIFn">结论：</b><code data-page-node-id="RTwPvtkGBJPvdlRWNY17S5">batchUpdate</code> 不能简单删掉 <code data-page-node-id="LGmjIv93MQlUYEzrF2vl8k">reloadTree()</code> 了事，必须补上「本地同步」。见下 D 步的三种解法。</div>
+  </div>
+
+  <h2 data-page-node-id="RqxLdTOEDUhlm8w0OaoovL"><span class="n" data-page-node-id="0E81W9r3egUJg0e6dAbJaC">D</span>batchUpdate 的本地同步解法（三选一）</h2>
+  <div class="card" data-page-node-id="PSEAJUzWV3ZkNsNFKj8DMg">
+    <h3 data-page-node-id="sLe368iQwIoxCIC95UaOGb">解法 1（推荐，最小改动）：batchUpdate 内根据 items 就地合并</h3>
+    <p data-page-node-id="puPSIFOhg7Iy4Y0u2LaD2Y"><code data-page-node-id="IGQNPGOA6ehSWHXwHFkX5p">batchUpdate</code> 的 <code data-page-node-id="uWR50cUqpbUrQU1PXmo6bC">items</code> 携带了要改的字段（<code data-page-node-id="3rrboWpsUxhvaiwVWgbHwj">id + sortOrder/parentId/isCollapsed/...</code>），在 API 返回后把这些字段回填到 <code data-page-node-id="B67FajsXDlmGYS9x31Yg1K">nodes</code> 对应节点即可。</p>
+    <pre data-page-node-id="T0dzuXaETZpxjPtrkv2cRI"><span class="kw" data-page-node-id="q8VTieDCTLu2kw5bkEJbIw">async function</span> <span class="fn" data-page-node-id="NmwnSzIFhwgX43WbVK5ujH">batchUpdate</span>(items: NodeBatchItem[]): <span class="kw" data-page-node-id="YpEt4VbNqS2tT7S9GNK9Md">Promise</span>&lt;<span class="kw" data-page-node-id="2bTrpLndbF9YSHXpDC1Axx">void</span>&gt; {
+  <span class="kw" data-page-node-id="Pr1BZeO89jofERVzzv3jqP">const</span> prevData = items.<span class="fn" data-page-node-id="ReYQPPjAxGpCQXtRdx6kYb">map</span>((item) =&gt; nodes.value.<span class="fn" data-page-node-id="gGxZBqlO3tt28QGhKnnCwU">find</span>((n) =&gt; n.id === item.id)).<span class="fn" data-page-node-id="kxuDOjm8M8sr4Mi1uwoFAI">filter</span>(Boolean) <span class="kw" data-page-node-id="HhxYPrFvhB6sD2poGGTzyo">as</span> NodeDto[]
+  <span class="kw" data-page-node-id="RiCwCxN40eiTR8rDWbxfKR">await</span> nodesApi.<span class="fn" data-page-node-id="b90uA4a0OyzDupPYths12M">batchUpdateNodes</span>(mindMapId.value, { nodes: items })
+  <span class="add" data-page-node-id="CpwjjAjaiOX823ZFJMrCRg">// ← 新增：就地回填，替代原来的 reloadTree</span>
+  <span class="add" data-page-node-id="CkBoC9LvEqir74C8WwLbCT">for (const item of items) {</span>
+  <span class="add" data-page-node-id="1U7YxKWTaZIBfzqBgfRBLf">  const node = nodes.value.find((n) => n.id === item.id)</span>
+  <span class="add" data-page-node-id="Zw2GPEJHXL6LSZfywjsKSk">  if (!node) continue</span>
+  <span class="add" data-page-node-id="JwCvWOSFv2OzvIMkRmbjBE">  if (item.sortOrder !== undefined) node.sortOrder = item.sortOrder</span>
+  <span class="add" data-page-node-id="3zmnlJI6pKyBnFS7Lcb2uD">  if (item.parentId !== undefined) node.parentId = item.parentId</span>
+  <span class="add" data-page-node-id="OBfw66dnsU8q3IPeboD0FI">  if (item.isCollapsed !== undefined) node.isCollapsed = item.isCollapsed</span>
+  <span class="add" data-page-node-id="IiidqoaYaNvw7CtO51eUC1">  if (item.direction !== undefined) node.direction = item.direction</span>
+  <span class="add" data-page-node-id="SmSyPHQf7r58S3naqBFk42">  // 其余样式字段同理，按需补 x/y/color/fontSize/... 等</span>
+  <span class="add" data-page-node-id="8YvLCmRLS4WcH9uvjzI176">}</span>
+  <span class="fn" data-page-node-id="cTReJHllH5XIbFafsfuibX">pushHistory</span>({ type: <span class="st" data-page-node-id="i7cC25PE7MnIsxQaidtqNn">'batch'</span>, snapshot: prevData, nextData: items })
+}</pre>
+    <p data-page-node-id="aJbem03j2yaOMeECcbmA3K">注意：<code data-page-node-id="iReIdYjOCzGtiLnTFGvAq2">sortOrder</code> 的重编是<b data-page-node-id="VQmEz0WFHczwlTiBTFqpsY">整组兄弟节点</b>（不是单点），用「逐 item 回填」天然覆盖，因为 <code data-page-node-id="SZoBBeRsOoYRA1169Z7iBG">handleStructuralChangesBatch</code> 已经把受影响父节点下<b data-page-node-id="50h351bLD9XY4JtQLPFeEk">全部兄弟</b>都塞进了 <code data-page-node-id="smmVLPsHCoombbd5KUXJ7r">items</code>。</p>
+  </div>
+
+  <div class="card" data-page-node-id="jEKBYI3S0tj7uNak6N5F25">
+    <h3 data-page-node-id="CleBQ93O1KC6XGsywr5McF">解法 2（更简单）：batchUpdate 后不刷新，但确保调用方随后 reloadMindMap</h3>
+    <p data-page-node-id="JCA82ymMi68y73fEZlOC8u">若调用方本身就会触发 <code data-page-node-id="INCU2g7E9r2K22MYJNzxEL">reloadMindMap()</code>（它会重新从 <code data-page-node-id="2AD06FEteeCu53fak4xu93">nodesStore.nodes</code> 读——但注意读的也是旧 nodes，此路不通）。<b data-page-node-id="SdH8L3droF9GBdEZ68FQw7">此解法不成立</b>，因为 <code data-page-node-id="w9nZg3y2SkOR2GFWM9xhhj">reloadMindMap</code> 读的就是 <code data-page-node-id="btcvtSSZW8CIgUi63Aic5j">nodes</code> 本身，不能自举。故只保留解法 1 或 3。</p>
+  </div>
+
+  <div class="card" data-page-node-id="w4kfHODPaN5txEk573X7KP">
+    <h3 data-page-node-id="h4oDXGXnnclcw40jqxP4Dx">解法 3（更彻底，但要动后端）：让 batchUpdate 返回最新 nodes</h3>
+    <p data-page-node-id="PcKcehAXzsNHgG4moTTkZz">改后端 <code data-page-node-id="JhjID0DAykZyDysu1jNZKe">BatchUpdateAsync</code> 返回受影响节点的完整 <code data-page-node-id="fF480c7tlsa6CGJ00RuH4n">NodeDto</code> 列表，前端用它替换 <code data-page-node-id="trohfPWrHxSq1JmQhGsY2X">nodes</code> 对应项。改动面更大（前后端 + DTO），非必要不选。</p>
+  </div>
+
+  <h2 data-page-node-id="5bFKC1nBkIlPS22AFhKXot"><span class="n" data-page-node-id="mIzNlwCbCsr7KQ9hrl5jQE">E</span>完整改动清单汇总</h2>
+  <div class="card" data-page-node-id="WcERSFKyzDXfBdt4AX4zGe">
+    <table data-page-node-id="Zod1XGakRtEyxpuCmKUYo2">
+      <tr data-page-node-id="5icHa4islvcEfMVeNCRjnf"><th data-page-node-id="xBhAv9U50AZK1FQGYcHx8z">#</th><th data-page-node-id="m6DPnlC6zvlQaRnkeYoSQ2">文件 / 位置</th><th data-page-node-id="OLALggKReCOJI49Emka3HX">改动</th></tr>
+      <tr data-page-node-id="97iTgQgaFO4B2LKYqJphEz"><td data-page-node-id="0LRvlGBEGCoEthAzOCEw6X">1</td><td data-page-node-id="KTMB5cBCWz5VVXOrVIsW0J">nodes.ts:26</td><td data-page-node-id="ZC21XPMTKT6VMBS5770N9J"><code data-page-node-id="7ClQaA1zgzQp4qUusFUKtp">tree</code> 改 computed（依赖 <code data-page-node-id="NYdY0iTgqKt9lEC4ufhbNm">offlineDb.buildNodeTree</code>）</td></tr>
+      <tr data-page-node-id="u1uDxZlmLtpp9QZ5sc6EeS"><td data-page-node-id="YEIrcJ0aFEzyInYFy9CiJT">2</td><td data-page-node-id="e1cKukUkd5MB9sZEeuirH1">nodes.ts:109/125/141/164</td><td data-page-node-id="qYoXeej4YzAtlwi8tXtRaO">删除 <code data-page-node-id="OIllNUgPj4taELxTf5Vmng">create/update/move/remove</code> 内 <code data-page-node-id="8pB1juk3BC4G1jlpZc6TKc">reloadTree()</code></td></tr>
+      <tr data-page-node-id="VULlbbkvzTFFv6E19QB6Tk"><td data-page-node-id="dtcsgZAYkETwvdsKdWnJal">3</td><td data-page-node-id="OBMA9QkdiGsWaSuOgXfsGe">nodes.ts:151</td><td data-page-node-id="USpJqQ6wMrDnrZ96Svu8Au"><code data-page-node-id="2kf3QzxTABElVUgw5wkMkF">batchUpdate</code> 内 <code data-page-node-id="uLUtSHnzWzSItdoGDH8Fxj">reloadTree()</code> → 就地回填 items（解法 1）</td></tr>
+      <tr data-page-node-id="UyQZKEAT501PJ52f6AsCXd"><td data-page-node-id="9i9QU3ANKOM4k6Z5LhQIrt">4</td><td data-page-node-id="t6ekQLRVuiv5QTfzPtGNYg">nodes.ts:74/83/96-99</td><td data-page-node-id="03KSBRRTQyYIhFQk4EHK2k"><code data-page-node-id="BRO0fS5hupWvnG4ongCNNd">load</code> 与 <code data-page-node-id="v0YzEIHpCipMglkF0Cipdk">reloadTree</code> 不再拉 <code data-page-node-id="x4YfYjXEiwJw3zOIdmhNQ0">fetchNodeTree</code></td></tr>
+      <tr data-page-node-id="QNiJyIGQhxl9AJzftiKISC"><td data-page-node-id="KsT1dO5tJNBTN9bxGAeYaf">5</td><td data-page-node-id="uHRnDgx232JHTideoXGxG8">nodes.ts:308/317</td><td data-page-node-id="Uz1rw3beIvjORa61ElmtNK">删除 <code data-page-node-id="lTjIj8Kb6YY2tP5tEA3HGK">tree.value = []</code></td></tr>
+      <tr data-page-node-id="JTCk5vI096CJ6kOOWdvRWv"><td data-page-node-id="VuhcmJsc28DhA3q8KDAuHT">6</td><td data-page-node-id="BB9b7Z6RK2UNelQM73CXvD">nodes.ts:258/288</td><td data-page-node-id="8cRRRyVZ8W1n9IQBOjuAmL"><b data-page-node-id="PvAhNsqLNI4cv4Oen508TC">保留</b> undo/redo 内 <code data-page-node-id="cDWbNlYkxHwMvwAC8w2tCk">reloadTree()</code></td></tr>
+    </table>
+  </div>
+
+  <h2 data-page-node-id="EdorBxe8HnkIEtLVDIIjI5"><span class="n" data-page-node-id="r97Ba4T9Gf2xzFif10FV1a">F</span>剩余副作用与边界确认</h2>
+  <div class="card" data-page-node-id="3ZnrSTlGD6zZO3R1siQlve">
+    <ul style="color:var(--muted); font-size:14px; line-height:1.9;" data-page-node-id="0QBGlfMeNvonHlvHR1iWgO">
+      <li data-page-node-id="hfgID6zy8k0U2H5Bi2iLRA"><b data-page-node-id="32WHCHAZZJvegWcvMjXLs4">undo/redo 仍是全量</b>：<code data-page-node-id="ABuz5B1Los1HXkvst140im">applyUndo/applyRedo</code> 保留 <code data-page-node-id="v2DwCcn0MLVIbzGWn5d6Ah">reloadTree()</code>，且退化为只拉 <code data-page-node-id="qANdMz0KO2VMl044J8CJHk">fetchNodes</code>（tree 已本地化），代价可控，不在本次改造范围。</li>
+      <li data-page-node-id="M4HauEJvoqHiTLWy7ppMUZ"><b data-page-node-id="3FyJi9x8AZG9XSAQrTXktm">tree 变 computed 后</b>：<code data-page-node-id="etghGo2RuLnSTlDMRDs8xT">levelDropdownOptions</code>（MindMapEditorView.vue:1205）读 <code data-page-node-id="s0nia0EnlAXNIs2Quw77wX">nodesStore.tree</code> 仍是响应式的，深度菜单会<b data-page-node-id="keFSG39JfxpcfATWsVKmIN">实时跟随</b>写操作，副作用由「过期」变成「实时正确」。</li>
+      <li data-page-node-id="7gcHACkLNgeWglKcUQl27b"><b data-page-node-id="JUDyhLJSNYFo01u4Ho0yrN">离线兜底不受影响</b>：<code data-page-node-id="c8rJNgapKch0dKgKWHZPEq">load</code> 的 catch 分支（82-83 行）本就用 <code data-page-node-id="7Eg1kYWqyEyCD6O13qbr1Z">buildNodeTree</code>，改 computed 后逻辑更统一。</li>
+      <li data-page-node-id="M2dmtY1xBtsKICVkGnsKQn"><b data-page-node-id="rYioQEhozuqTsWlqhJ99YD">响应乱序保护</b>：<code data-page-node-id="G70NpGmBYOODVpNmI9JK1P">reloadVersion</code>（33-34 行）仍保留，作用于退化的 <code data-page-node-id="phkt0ZOf56po1XVlLmC9KW">reloadTree</code>（undo/redo 路径）。</li>
+      <li data-page-node-id="SA4fwd0bG88BpUYlIH4URP"><b data-page-node-id="8SRTAnXM7yySsuF0C4x57m">需要验证</b>：解法 1 的「就地回填」字段要<b data-page-node-id="Mrhl4d1KAOOcPhbzwJZEEg">与后端 BatchUpdateAsync 实际接受的字段对齐</b>（NodeService.cs:344-364），漏填会导致本地 nodes 与库不一致。建议回填前先把 <code data-page-node-id="2vsJHnxwPrJgBAnZuXRZiD">items</code> 可能出现的字段列全。</li>
+    </ul>
+  </div>
+
+  <p style="color:var(--muted); font-size:13px; text-align:center; margin-top:40px;" data-page-node-id="de4UKWrqWCl4CExh12vh7i">本方案为改造建议，未改动仓库。确认后按「实现 → status → stage → 预览 → 你确认 → commit」节奏落地。</p>
+</div>
+</body>
+</html>
