@@ -23,7 +23,9 @@ interface HistoryCommand {
 export const useNodesStore = defineStore('nodes', () => {
   const mindMapId = ref('')
   const nodes = ref<NodeDto[]>([])
-  const tree = ref<NodeTreeNodeDto[]>([])
+  // tree 由扁平 nodes 前端组装（逻辑与后端 BuildTree 一致），
+  // 不再单独请求 GET /nodes/tree，写操作后自动跟随 nodes 变化。
+  const tree = computed<NodeTreeNodeDto[]>(() => offlineDb.buildNodeTree(nodes.value))
   const loading = ref(false)
   const selectedNodeId = ref<string | null>(null)
 
@@ -66,21 +68,16 @@ export const useNodesStore = defineStore('nodes', () => {
     mindMapId.value = mindMapIdParam
     loading.value = true
     try {
-      const [flat, treeData] = await Promise.all([
-        nodesApi.fetchNodes(mindMapIdParam),
-        nodesApi.fetchNodeTree(mindMapIdParam)
-      ])
+      const flat = await nodesApi.fetchNodes(mindMapIdParam)
       nodes.value = flat
-      tree.value = treeData
       isOfflineSnapshot.value = false
-      // 增量回写：在线打开单图也保持快照新鲜（tree 不落库，读时由 nodes 组装）
+      // 增量回写：在线打开单图也保持快照新鲜（tree 由 nodes 组装，不单独落库）
       offlineDb.updateMapNodes(mindMapIdParam, flat).catch(() => { /* ignore */ })
     } catch (err) {
       // 离线兜底：读单图快照，tree 由扁平 nodes 前端组装
       const snapshot = await offlineDb.getMap(mindMapIdParam)
       if (snapshot?.nodes) {
         nodes.value = snapshot.nodes
-        tree.value = offlineDb.buildNodeTree(snapshot.nodes)
         isOfflineSnapshot.value = true
       } else {
         throw err
@@ -93,20 +90,15 @@ export const useNodesStore = defineStore('nodes', () => {
   async function reloadTree() {
     if (!mindMapId.value) return
     const version = ++reloadVersion
-    const [flat, treeData] = await Promise.all([
-      nodesApi.fetchNodes(mindMapId.value),
-      nodesApi.fetchNodeTree(mindMapId.value)
-    ])
+    const flat = await nodesApi.fetchNodes(mindMapId.value)
     // 响应乱序时只采用最新一次 reloadTree 的结果，丢弃过期响应，避免旧数据覆盖新数据
     if (version !== reloadVersion) return
     nodes.value = flat
-    tree.value = treeData
   }
 
   async function create(payload: NodeCreatePayload): Promise<NodeDto> {
     const node = await nodesApi.createNode(mindMapId.value, payload)
     nodes.value.push(node)
-    await reloadTree()
     pushHistory({ type: 'create', nodeId: node.id, nextData: node })
     return node
   }
@@ -122,7 +114,6 @@ export const useNodesStore = defineStore('nodes', () => {
     if (idx >= 0) {
       nodes.value[idx] = updated
     }
-    await reloadTree()
     pushHistory({ type: 'update', nodeId, prevData, nextData: updated })
     return updated
   }
@@ -138,7 +129,6 @@ export const useNodesStore = defineStore('nodes', () => {
     if (idx >= 0) {
       nodes.value[idx] = moved
     }
-    await reloadTree()
     pushHistory({ type: 'move', nodeId, prevData, nextData: moved })
     return moved
   }
@@ -148,7 +138,27 @@ export const useNodesStore = defineStore('nodes', () => {
       .map((item) => nodes.value.find((n) => n.id === item.id))
       .filter(Boolean) as NodeDto[]
     await nodesApi.batchUpdateNodes(mindMapId.value, { nodes: items })
-    await reloadTree()
+    // 就地回填：batchUpdate 返回 void，本地 nodes 靠 items 回填保持新鲜，
+    // 避免下次 reloadMindMap（读 nodesStore.nodes）用过期值覆盖画布。
+    for (const item of items) {
+      const node = nodes.value.find((n) => n.id === item.id)
+      if (!node) continue
+      if (item.sortOrder !== undefined) node.sortOrder = item.sortOrder
+      if (item.parentId !== undefined) node.parentId = item.parentId
+      if (item.direction !== undefined) node.direction = item.direction
+      if (item.isCollapsed !== undefined) node.isCollapsed = item.isCollapsed
+      if (item.x !== undefined) node.x = item.x
+      if (item.y !== undefined) node.y = item.y
+      if (item.color !== undefined) node.color = item.color
+      if (item.fontSize !== undefined) node.fontSize = item.fontSize
+      if (item.fontFamily !== undefined) node.fontFamily = item.fontFamily
+      if (item.shape !== undefined) node.shape = item.shape
+      if (item.icon !== undefined) node.icon = item.icon
+      if (item.borderColor !== undefined) node.borderColor = item.borderColor
+      if (item.backgroundColor !== undefined) node.backgroundColor = item.backgroundColor
+      if (item.edgeColor !== undefined) node.edgeColor = item.edgeColor
+      if (item.edgeStyle !== undefined) node.edgeStyle = item.edgeStyle
+    }
     pushHistory({ type: 'batch', snapshot: prevData, nextData: items })
   }
 
@@ -161,7 +171,6 @@ export const useNodesStore = defineStore('nodes', () => {
     if (selectedNodeId.value && allToDelete.includes(selectedNodeId.value)) {
       selectedNodeId.value = null
     }
-    await reloadTree()
     pushHistory({ type: 'delete', nodeId, snapshot })
   }
 
@@ -305,7 +314,6 @@ export const useNodesStore = defineStore('nodes', () => {
   function reset() {
     mindMapId.value = ''
     nodes.value = []
-    tree.value = []
     selectedNodeId.value = null
     isOfflineSnapshot.value = false
     undoStack.value = []
@@ -314,7 +322,6 @@ export const useNodesStore = defineStore('nodes', () => {
 
   function clearAll() {
     nodes.value = []
-    tree.value = []
     selectedNodeId.value = null
     undoStack.value = []
     redoStack.value = []
