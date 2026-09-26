@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="HeBuvn5ajsoMFCgpFPN64M">
+<head data-page-node-id="EX9CPnD1SL3XwzhkOwnTBQ">
+<meta charset="UTF-8" data-page-node-id="AfFqbG4R4QacSUo2MCGoKA">
+<meta name="viewport" content="width=device-width, initial-scale=1.0" data-page-node-id="lLY8UTDSnGB3UfxsAWu58N">
+<title>改造 2 最优方案 · 后端递归查询优化</title>
+<style>
+  :root {
+    --bg:#0f1216; --card:#171b21; --card-2:#1d232b; --border:#2a313b;
+    --text:#d7dce2; --muted:#8b95a1; --red:#ff6b6b; --orange:#ffa94d;
+    --yellow:#ffd43b; --green:#51cf66; --blue:#4dabf7; --purple:#b197fc;
+    --mono:'JetBrains Mono','Cascadia Code',Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;line-height:1.7;padding:40px 24px 80px}
+  .wrap{max-width:960px;margin:0 auto}
+  header{margin-bottom:28px}
+  h1{font-size:25px;margin:0 0 8px}
+  .sub{color:var(--muted);font-size:14px}
+  h2{font-size:19px;margin:40px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px 24px;margin-bottom:16px}
+  .card h3{margin:0 0 8px;font-size:15.5px}
+  .card p{margin:0 0 10px;color:var(--muted);font-size:14px}
+  .card p b{color:var(--text)}
+  pre{background:#0b0e12;border:1px solid var(--border);border-radius:10px;padding:14px 18px;overflow-x:auto;font-family:var(--mono);font-size:12.6px;line-height:1.55;color:#c9d1d9;margin:12px 0}
+  pre .cm{color:#6a737d;font-style:italic}
+  pre .kw{color:#ff7b72}
+  pre .fn{color:#d2a8ff}
+  pre .st{color:#a5d6ff}
+  pre .del{background:rgba(255,107,107,.12)}
+  pre .add{background:rgba(81,207,102,.12)}
+  .loc{font-family:var(--mono);font-size:12px;color:var(--blue)}
+  .tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 8px;border-radius:4px;margin-right:6px}
+  .t-best{background:rgba(81,207,102,.15);color:var(--green)}
+  .t-alt{background:rgba(255,212,59,.15);color:var(--yellow)}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13.5px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+  th{color:var(--muted);font-weight:600;background:var(--card-2)}
+  td b{color:var(--text)}
+  .okbox{background:rgba(81,207,102,.08);border-left:3px solid var(--green);padding:12px 16px;border-radius:6px;font-size:13.5px;margin:14px 0}
+  .okbox b{color:var(--green)}
+  .riskbox{background:rgba(255,169,77,.08);border-left:3px solid var(--orange);padding:12px 16px;border-radius:6px;font-size:13.5px;margin:14px 0}
+  .riskbox b{color:var(--orange)}
+  .vs{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:14px 0}
+  .vs .a,.vs .b{background:var(--card-2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;font-size:13px}
+  .vs .a h4{color:var(--red);margin:0 0 8px}
+  .vs .b h4{color:var(--green);margin:0 0 8px}
+</style>
+</head>
+<body data-page-node-id="TnzkHlwZFqb4gD5CtND7ES">
+<div class="wrap" data-page-node-id="rBrkhuk7Ypha3AOLp85xkP">
+  <header data-page-node-id="fKg0yUVYB2TyHVcqfzziDx">
+    <h1 data-page-node-id="6lGdZw40LU0AtWyBmUT71d">改造 2 最优方案：后端递归查询 → 内存索引</h1>
+    <div class="sub" data-page-node-id="pZXQn9hTc1NVk0IZUQv6XL">目标 <span class="loc" data-page-node-id="0B8Hb73YeGA4USLd3DYz3Z">backend/.../Application/Services/NodeService.cs</span> · 不只是「N+1 → 单查询」，而是消除重复递归 + 环检测零额外成本</div>
+  </header>
+
+  <div class="card" data-page-node-id="Ls8smzwGPggyWjNmkPvKrA">
+    <h3 data-page-node-id="s7mrd4G4YdLRKlRKS5LBbb">问题本质</h3>
+    <p data-page-node-id="AlruwjEIoNsBvIQA35R4pu">两处递归查询，都在同一个文件里，且<b data-page-node-id="zS8TB9O27ytx6b6BZ6A7FH">都只需要「某个导图的父子关系」</b>：</p>
+    <table data-page-node-id="PzRSuVkNLAvcmPXB0AHhCL">
+      <tr data-page-node-id="GNXavN2zU56tCzNu9OFf4F"><th data-page-node-id="xFei7b5M5A23seEluwC4Bf">方法</th><th data-page-node-id="WArNpoINvO3e588f7z2xIc">行号</th><th data-page-node-id="hu5TRsiLR2CtHPoCMMVf2C">现在怎么查</th><th data-page-node-id="l3GoGfuDEMkPm2SqtYDa4G">代价</th></tr>
+      <tr data-page-node-id="YwTTEkjLzdtwLOSkOCZUGD"><td data-page-node-id="SBj1WV4gsr1Sv0DD9TEuDJ"><b data-page-node-id="rnUkbf4gGNmvwAEYbHXmEA">CollectDescendantsAsync</b>（删除）</td><td data-page-node-id="5SCN8sE2J7RL31limz2IEg">452-466</td><td data-page-node-id="aPIBoq8rWogqSn3OdhX4pF">逐层 <code data-page-node-id="F9I4xh4XHO47XBw8G3FttG">WHERE ParentId=x</code> 递归</td><td data-page-node-id="Y8Ld0Az70IbaY4KDurS1Qe">深度 = N 次 DB 往返</td></tr>
+      <tr data-page-node-id="MtKbmxZjrPGCpvKH3h4Bpt"><td data-page-node-id="xzNjdR6umIYCcINmA0ewAV"><b data-page-node-id="TgsBXMVkAJZP82cD6yyn5J">IsDescendantAsync</b>（移动环检测）</td><td data-page-node-id="ZuEPOq5FXbD3iLr0DExA70">433-450</td><td data-page-node-id="Kr4XMS6IVQhrqpDbuYE63Z">逐级 <code data-page-node-id="hID3SAqJLFMQg5Nf6o70Am">SELECT ParentId WHERE Id=current</code></td><td data-page-node-id="SknQvPdxlQsetEO1e8BCBC">祖先链长度 = N 次 DB 往返</td></tr>
+    </table>
+    <p data-page-node-id="zZIixwnnYWZrCgo9WtILME">而 <code data-page-node-id="y6s3Lysdj9gUOxZ6OELXNH">MoveAsync</code> 里其实<b data-page-node-id="bQaGRUP43OfFNMU4vrDyw0">已经要拉兄弟节点</b>（229/254/272 行），环检测完全可以在同一次查询里顺带完成。</p>
+  </div>
+
+  <h2 data-page-node-id="fyubnEq74cn3zb45KeAx0j">核心思路：一个共享的内存父子索引</h2>
+  <div class="card" data-page-node-id="w3uCNWUg2cnxZ8RFKNz93C">
+    <p data-page-node-id="bntAnS3aAcD47ks1eStADY">引入一个私有方法，一次性拉出整张导图的 <code data-page-node-id="TblLwQyHpDdPzQRxMDF3cT">(Id, ParentId)</code>，返回 <code data-page-node-id="ikx0lRPWAIPnCT9Q2YZqwM">ToLookup&lt;Guid?, Guid&gt;</code>（childrenByParent）和 <code data-page-node-id="PuCdzISBdjKkhdnC6CVQb1">Dictionary&lt;Guid, Guid?&gt;</code>（parentOf）。这两个结构一个服务删除的「向下收集」，一个服务环检测的「向上回溯」。</p>
+    <p data-page-node-id="aQuyODLbd4Xj7K8iX0yIY6"><b data-page-node-id="EaQ4LIDN4dbMdkjWllzKAG">为什么用 <code data-page-node-id="aUeg3fskfiwACCK4eVscFX">ToLookup</code>：</b>项目里 <code data-page-node-id="t87X2RF6X8rZM2utZ9Luji">NodeService.BuildTree</code>（521 行）和 <code data-page-node-id="LAbIPwKyy61e6ueAaIU1Ds">MindMapVersionService.BuildTree</code>（229 行）已经用 <code data-page-node-id="tvMe63DCVN4rrgkFJAEiLE">ToLookup(n =&gt; n.ParentId)</code> 建树，改造 2 复用同一惯用模式，风格一致、可读性最好。</p>
+  </div>
+
+  <h2 data-page-node-id="pdzlFheLlgIdGw1lgp9eEO"><span data-page-node-id="DktVVWl4qW84URlrj7Yg8E">方案 A（推荐）</span>：共享索引 + 内存 BFS 收集 + 内存回溯环检测</h2>
+  <div class="card" data-page-node-id="QGNs5o7Qe1L906gwEEQgLW">
+    <p data-page-node-id="IEVjHKKEFyONrL80eAD4Hz"><span class="tag t-best" data-page-node-id="pMM8ZfCJPPDxRgrW3Fhler">推荐</span>一次查询，两个方法共用，删除与移动的递归全部消除。</p>
+    <pre data-page-node-id="1dNeDYuNFoH7zHQ10nQBOV"><span class="cm" data-page-node-id="Fyl8K4r722JBG3XsWOPWyE">/// 一次性拉取某导图的父子关系，返回 (childrenByParent, parentOf)。</span>
+<span class="cm" data-page-node-id="OH4bn53WWCjLSjLAaC2Gi0">/// 删除（向下收集子孙）与移动（向上回溯环检测）共用，消除 N+1。</span>
+<span class="kw" data-page-node-id="hxls92BWoGgsCUxAxpaF6H">private async Task</span>&lt;(ILookup&lt;Guid?, Guid&gt; Children, Dictionary&lt;Guid, Guid?&gt; ParentOf)&gt;
+    <span class="fn" data-page-node-id="NDTAI1YLFpEFAnbjWnnVFI">LoadParentRelationsAsync</span>(Guid mindMapId, CancellationToken ct)
+{
+    <span class="kw" data-page-node-id="FuORB4TyXy5BtgT47Sycbn">var</span> pairs = <span class="kw" data-page-node-id="de26cE8Fu1vg4TZbiS6Cno">await</span> _db.Nodes.AsNoTracking()
+        .<span class="fn" data-page-node-id="B0ywEfx2Zk3kVD87C4QPrp">Where</span>(n =&gt; n.MindMapId == mindMapId)
+        .<span class="fn" data-page-node-id="vosEVynd4FUI1C4gLuGywq">Select</span>(n =&gt; <span class="kw" data-page-node-id="krXgAelyuJ9ZNi5GKJYdlq">new</span> { n.Id, n.ParentId })
+        .<span class="fn" data-page-node-id="HdyKof0l55C6FpOavjjG87">ToListAsync</span>(ct);
+
+    <span class="kw" data-page-node-id="Nj3tdDpOrAVfGwhGGYGvey">var</span> children = pairs.<span class="fn" data-page-node-id="ad20elLWrk2VEKKrNZlfNv">ToLookup</span>(p =&gt; p.ParentId, p =&gt; p.Id);
+    <span class="kw" data-page-node-id="JPfPl4UnB2iu6qN33OqV2s">var</span> parentOf = pairs.<span class="fn" data-page-node-id="wMlz2HkcZunXyp8JeoDEMs">ToDictionary</span>(p =&gt; p.Id, p =&gt; p.ParentId);
+    <span class="kw" data-page-node-id="uz6pGFAzSrjJ6SWWcLB66D">return</span> (children, parentOf);
+}
+
+<span class="cm" data-page-node-id="9m5zduwr21G9A6p3smPKUz">/// 内存 BFS 收集子孙 Id（替代逐层递归查询）</span>
+<span class="kw" data-page-node-id="sJoBvcwVwZ0kBMhj48elCe">private static</span> HashSet&lt;Guid&gt; <span class="fn" data-page-node-id="krAfJo7qd5kSrKsozPeooW">CollectDescendants</span>(ILookup&lt;Guid?, Guid&gt; children, Guid rootId)
+{
+    <span class="kw" data-page-node-id="GkjgLHWCt5WdQCzDp2JXhT">var</span> result = <span class="kw" data-page-node-id="EIBqT2s0HGHht0fDM0KCie">new</span> HashSet&lt;Guid&gt; { rootId };
+    <span class="kw" data-page-node-id="Mzqf6ql9YANPKdO5n4N2bI">var</span> queue = <span class="kw" data-page-node-id="ZMq8ieoCnG63V572EV2ECl">new</span> Queue&lt;Guid&gt;();
+    queue.<span class="fn" data-page-node-id="BSWTbE3JVeDMkA7AdqEDzb">Enqueue</span>(rootId);
+    <span class="kw" data-page-node-id="qLPGmOrkw8mAFTfmrAcQdB">while</span> (queue.Count &gt; 0)
+    {
+        <span class="kw" data-page-node-id="hXY0ZBGMd19HKIdNXaaIpu">var</span> cur = queue.<span class="fn" data-page-node-id="sCGV38QJ3kHH5xgnA6xX8Y">Dequeue</span>();
+        <span class="kw" data-page-node-id="R29DZhxeYeF2OCsA7gtOGK">foreach</span> (<span class="kw" data-page-node-id="1fXe8QVh4wRK3n4h7ph6GO">var</span> cid <span class="kw" data-page-node-id="q7smY4Oj4HcYKDZ69E7F7h">in</span> children[cur])
+        {
+            <span class="kw" data-page-node-id="vTt1QFYaQXO7Uq0AseaVCD">if</span> (result.<span class="fn" data-page-node-id="1IaVnWKBgx9o9bnNoTkF3F">Add</span>(cid)) queue.<span class="fn" data-page-node-id="yd5HNLvi9kzMOWAoks1lp1">Enqueue</span>(cid);
+        }
+    }
+    <span class="kw" data-page-node-id="Rq4IJ8Gzc5x4DTt2BlgAnR">return</span> result;
+}
+
+<span class="cm" data-page-node-id="Dn2xSB67gOThfwjkjb1IwC">/// 内存回溯判断 candidate 是否是 ancestor 的子孙（替代逐级查库）</span>
+<span class="kw" data-page-node-id="rcfckv5aiTlhrbMYqTPE8r">private static bool</span> <span class="fn" data-page-node-id="tuMdCipgVHE6GHJEMYJAMu">IsDescendant</span>(Dictionary&lt;Guid, Guid?&gt; parentOf, Guid candidateId, Guid ancestorId)
+{
+    <span class="kw" data-page-node-id="ojHqulPtmcEPr7olzoOieb">var</span> current = candidateId;
+    <span class="kw" data-page-node-id="g9SorBVUMwe92uFevz0pCb">var</span> visited = <span class="kw" data-page-node-id="8YnJw5x3AhD0djZD9oyDcr">new</span> HashSet&lt;Guid&gt;();
+    <span class="kw" data-page-node-id="XRwIulHCgWWDNNHRlm9hz6">while</span> (current != Guid.Empty &amp;&amp; visited.<span class="fn" data-page-node-id="n9NYhms6AZsz6pimYIExy0">Add</span>(current))
+    {
+        <span class="kw" data-page-node-id="kwv7sf7I08VjbMESZuaonM">if</span> (!parentOf.<span class="fn" data-page-node-id="DlxHhgizw25VYy6ufRzwRk">TryGetValue</span>(current, <span class="kw" data-page-node-id="SYPrruceWZpOTNkyGewyPU">out var</span> parent) || !parent.HasValue)
+            <span class="kw" data-page-node-id="WzHRPRf1LNCbHmp9v9PCEq">return false</span>;
+        <span class="kw" data-page-node-id="nlHsy3NcGwaiAsn4UbdhDk">if</span> (parent.Value == ancestorId) <span class="kw" data-page-node-id="AmwViDpEovWyoKNyfEmyy2">return true</span>;
+        current = parent.Value;
+    }
+    <span class="kw" data-page-node-id="DcgrntVOt4TScaTBjs2mAf">return false</span>;
+}</pre>
+  </div>
+
+  <div class="card" data-page-node-id="TdKoobSY7ItieK1zVRLwEe">
+    <h3 data-page-node-id="ZCaDpmAK2eSXIkEDu1CXSU">调用处改造 1：DeleteAsync（372-394 行）</h3>
+    <pre data-page-node-id="cx0efPRIYkbCa1jQgPJejU"><span class="kw" data-page-node-id="J9YFZraG0QfGHaxjdvHKuD">public async Task</span> <span class="fn" data-page-node-id="zV5Dzfo9SqVTBKzgOPhfri">DeleteAsync</span>(Guid userId, Guid id, CancellationToken ct = <span class="kw" data-page-node-id="t52IAsg0oyYFBMFaZ8EYyM">default</span>)
+{
+    <span class="kw" data-page-node-id="EP7M0zHdP02BmPq0RtqzSM">var</span> node = <span class="kw" data-page-node-id="3rl2585Bezfe7WyZItwG2s">await</span> <span class="fn" data-page-node-id="VMKli6zGYMp8ippcEShqLu">GetOwnedNodeAsync</span>(userId, id, ct);
+    <span class="kw" data-page-node-id="BSQFbU3t2dEl8HpsM2IX2Y">var</span> mindMapId = node.MindMapId;
+
+    <span class="del" data-page-node-id="6kJrCLSIAuSNFqVUbkOMMC">// 递归收集所有子孙节点 Id（旧）</span>
+    <span class="del" data-page-node-id="UGPss28XYeprdcTEFLmxeG">var toDelete = new HashSet&lt;Guid&gt; { id };</span>
+    <span class="del" data-page-node-id="jwHoR4fcMM3VkYAuFbmFlF">await CollectDescendantsAsync(id, toDelete, ct);</span>
+    <span class="add" data-page-node-id="Sh9p6pDkjRqOt7FmaOg1r8">// 一次查询 + 内存 BFS（新）</span>
+    <span class="add" data-page-node-id="Oa6kC4KWjbJq9RNKZtkXWC">var (children, _) = await LoadParentRelationsAsync(mindMapId, ct);</span>
+    <span class="add" data-page-node-id="J7MYmrY1TEVHQu92j45IxE">var toDelete = CollectDescendants(children, id);</span>
+
+    <span class="kw" data-page-node-id="jCKCCsP1FYLwUksKYUusjS">var</span> nodesToRemove = <span class="kw" data-page-node-id="1n0SUwSqHALUkybaLY6iHh">await</span> _db.Nodes
+        .<span class="fn" data-page-node-id="hbUykMmRKxKl859h59aEhS">Where</span>(n =&gt; toDelete.<span class="fn" data-page-node-id="2pEgxwnhho3HEvZdcNyFBw">Contains</span>(n.Id))
+        .<span class="fn" data-page-node-id="0vXEAB4LIICEUxN2aBjvuz">ToListAsync</span>(ct);
+    <span class="cm" data-page-node-id="iGHadGDYv2hgMkpuiAc2DN">// 后续不变：RemoveRange / 清 RootNodeId / UpdateMindMapStatsAsync / SaveChanges</span>
+}</pre>
+  </div>
+
+  <div class="card" data-page-node-id="EbIEYjJlwtYApclUYRJhav">
+    <h3 data-page-node-id="2KDwEyzExFFOAlOhbVqHDC">调用处改造 2：MoveAsync 环检测（206-219 行）</h3>
+    <pre data-page-node-id="yAk5StQW5srCoFRcXYDm4j"><span class="kw" data-page-node-id="yvabfclbANsBrMzl2MYY5v">public async Task</span>&lt;NodeDto&gt; <span class="fn" data-page-node-id="CfEoXJSQHzB7aS1lbHWvet">MoveAsync</span>(Guid userId, Guid id, NodeMoveRequest req, CancellationToken ct = <span class="kw" data-page-node-id="XhiErcj4FotpxnXFJhlfil">default</span>)
+{
+    ArgumentNullException.<span class="fn" data-page-node-id="NJ5V59yygd6G1GuyciiNAp">ThrowIfNull</span>(req);
+    <span class="kw" data-page-node-id="rIgmzhKlucoiE4vjdMH2dB">var</span> node = <span class="kw" data-page-node-id="kEASVt8E0C6KNiBWfMKebC">await</span> <span class="fn" data-page-node-id="rqkOFXBpvPILa8NHshNXSz">GetOwnedNodeAsync</span>(userId, id, ct);
+    <span class="kw" data-page-node-id="Zi4HRqXFPLeMOE1TdDmjBj">var</span> oldParentId = node.ParentId;
+
+    <span class="kw" data-page-node-id="Ua6VB54qgDRix8RTxyGNQp">if</span> (req.ParentId.HasValue)
+    {
+        <span class="kw" data-page-node-id="dV7TWFUhxNuToM5ZVqRMLk">if</span> (req.ParentId.Value == id)
+            <span class="kw" data-page-node-id="lwlGQpXkysI11FqW7oLvAA">throw</span> ApiException.<span class="fn" data-page-node-id="fzBZh6wDACfZfTLxbLCavB">Conflict</span>(<span class="st" data-page-node-id="rtU1RCGA2rmgdwTe6M0NW7">"不能将节点作为自身的子节点"</span>);
+
+        <span class="del" data-page-node-id="HVYganjTwNy5nu0N8vq4Hf">// 防止环：新父节点不能是当前节点的子孙（旧，逐级查库）</span>
+        <span class="del" data-page-node-id="7WOjN0k3YIZNC6mqGKT6vH">if (await IsDescendantAsync(req.ParentId.Value, id, ct))</span>
+        <span class="del" data-page-node-id="rDtVCSQvn532dBoDMTkRxP">    throw ApiException.Conflict("不能将节点移动到自身子孙下");</span>
+        <span class="add" data-page-node-id="ncCYwaSWtJuQwWmIwJyWPI">// 防止环：一次拉父子索引，内存回溯（新）</span>
+        <span class="add" data-page-node-id="xY9Dgt1V3yGAIs0iSqhJwS">var (_, parentOf) = await LoadParentRelationsAsync(node.MindMapId, ct);</span>
+        <span class="add" data-page-node-id="p73O3oVVaFzuYoQdyNSDnF">if (IsDescendant(parentOf, req.ParentId.Value, id))</span>
+        <span class="add" data-page-node-id="YTlGOVuKbJBQnJLbQNv9vX">    throw ApiException.Conflict("不能将节点移动到自身子孙下");</span>
+
+        <span class="kw" data-page-node-id="bduMht9NsoF7BNk2ugEk2m">var</span> newParent = <span class="kw" data-page-node-id="F5kEV7Sb8agDFALKepc5Lt">await</span> _db.Nodes.<span class="fn" data-page-node-id="TF1E8pMGU0Bjf4sGSiOGUO">FirstOrDefaultAsync</span>(n =&gt; n.Id == req.ParentId.Value, ct);
+        <span class="kw" data-page-node-id="r3GTOqQf9PeRl31RPjyatu">if</span> (newParent <span class="kw" data-page-node-id="Lv0UvNzy5udTvPy85u51Gx">is null</span>) <span class="kw" data-page-node-id="WAHKn3nsYnBnB0GGr7XqJz">throw</span> ApiException.<span class="fn" data-page-node-id="n9aIuFsDmSv3t9v1DR6d1x">NotFound</span>(<span class="st" data-page-node-id="hTDX29BOrRHpOw1gCuy1JR">"ParentNode"</span>, req.ParentId.Value);
+        <span class="kw" data-page-node-id="EZ36OkfEWJrBDJkfPnsqtH">if</span> (newParent.MindMapId != node.MindMapId)
+            <span class="kw" data-page-node-id="79rwZiWn6cmKiXuBcwZgIb">throw</span> ApiException.<span class="fn" data-page-node-id="TVlzdL26hGt4Gckawx15S8">Conflict</span>(<span class="st" data-page-node-id="S0Hiqij58FYGfJHUtWKH3n">"父节点不属于同一导图"</span>);
+    }
+    <span class="cm" data-page-node-id="6wA9zBp3fYBhUWqn7ZGHwD">// 后续两阶段平移逻辑不变</span>
+}</pre>
+    <p data-page-node-id="drspW0Skf3heHXpUmx1dnx"><b data-page-node-id="9KbRRSPZG7a3WFVLDZye1R">删除</b>旧的两个私有方法：<code data-page-node-id="FDUdRuQhmuKH4yQcG0xCDF">IsDescendantAsync</code>（433-450）和 <code data-page-node-id="mggfYfSntP4FF1TDSJC63I">CollectDescendantsAsync</code>（452-466）。</p>
+  </div>
+
+  <h2 data-page-node-id="0VUuB5xJazivcvxOgpnkwx">对比：三种做法</h2>
+  <div class="vs" data-page-node-id="nDNeuechN2dP8PUhDgbFGl">
+    <div class="a" data-page-node-id="VDlpGqbNIXAUOcJkEuzjTN">
+      <h4 data-page-node-id="AzDPiH3FSYZsLHayXZqWPm">❌ 做法 A：只把递归换成「逐层查 + 参数化」</h4>
+      仍逐层 <code data-page-node-id="MgwCs9bKFyDrnLqidpbAGV">WHERE ParentId</code>，只是加了缓存字典。治标不治本，深度大时仍多次往返。
+    </div>
+    <div class="b" data-page-node-id="qDVcJSoxs8wWuibC4G4q2i">
+      <h4 data-page-node-id="XhcJHqc5m0eApAAxmLAeea">✅ 做法 B（推荐）：共享索引 + 内存 BFS / 回溯</h4>
+      一次查询拉全部父子关系，删除走 BFS 向下、移动走回溯向上。两次往返都降到 1 次。
+    </div>
+  </div>
+  <div class="vs" data-page-node-id="JSUREkVvI0zJyYxx2YVurw">
+    <div class="a" data-page-node-id="fNfcJ13ANyG1B0geWCjp0f">
+      <h4 data-page-node-id="QFgjIfrf5NWHGJ8dkEVidK">⚠️ 做法 C：MoveAsync 复用已查的兄弟节点</h4>
+      环检测只在「兄弟节点」里找，省一次查询，但<b data-page-node-id="2ze9RmVlSRSq7Z2VJBP77l">逻辑脆弱</b>——环可能跨多层，只看兄弟不够。
+    </div>
+    <div class="b" data-page-node-id="U6CXNgW94PCevNV5FrMmDb">
+      <h4 data-page-node-id="qc1hNXhdFD6RR2cw3JoXEl">⭐ 做法 B 的额外收益</h4>
+      后续若加「移动子树前校验子树大小」「复制子树」「批量删除多节点」等功能，<code data-page-node-id="NoM0Z509Wh9CdaJBODF9qN">LoadParentRelationsAsync</code> 可复用，不用再写一套递归。
+    </div>
+  </div>
+
+  <h2 data-page-node-id="Di6Qd6I5T5cklHZVWrqQGc">副作用与边界</h2>
+  <div class="card" data-page-node-id="8J7JB9XSDGLBNjmmM6MMQ7">
+    <ul style="color:var(--muted);font-size:14px;line-height:1.9;" data-page-node-id="MS9zGGhzbYCi2wA7Jdm91D">
+      <li data-page-node-id="9abtssN92iUelO1q7KO3e9"><b data-page-node-id="GPLkrCx7iPu91reJE8ObJP">内存开销</b>：<code data-page-node-id="QZjT85BNIDmOG6InEOncL9">LoadParentRelationsAsync</code> 只投影 <code data-page-node-id="Z4KFvCzgXUbTyfwz9H3xPX">(Id, ParentId)</code> 两个字段（不拉 Title/Content 等大字段），N 个节点只占 N 个 Guid 对，几千节点也就几十 KB，可忽略。</li>
+      <li data-page-node-id="Yt3LLJ6HSQNl9lsAfUwO0R"><b data-page-node-id="hMuW50VsFhZPQGPuZAOyEq">一致性</b>：查询用 <code data-page-node-id="KCDp7onAxxKIvm0mIik59T">AsNoTracking</code>，只读父子关系，不影响后续 <code data-page-node-id="u1o1pUV0hnNLqFA18lq5o6">SaveChanges</code> 的变更追踪。</li>
+      <li data-page-node-id="0khbmyM7TFlKWTie07lCRs"><b data-page-node-id="rypfWygTN1lhaljtdZQ6hS">并发</b>：与现状一致——删除/移动本就不是高并发原子场景，且原代码也无锁，改造不引入新的一致性问题。</li>
+      <li data-page-node-id="6Vm9JZdaSKsgxR4YMx904G"><b data-page-node-id="vrSZmKSRwsxinFZNBz19Qb">索引</b>：查询走 <code data-page-node-id="xdJirJKDQPK1QB4EhOyz20">MindMapId</code> 索引（NodeConfiguration.cs:48），一次扫描即得全量，比逐层 <code data-page-node-id="u0o1uOHVJbopXLvllAFIYW">ParentId</code> 查询更快（<code data-page-node-id="P3y5asp7sa5X3qqZONgt0d">ParentId</code> 本就无单独索引，逐层查其实是全表扫）。</li>
+      <li data-page-node-id="nfmRjNQNdCPJ1xgcm3U2sO"><b data-page-node-id="5DSTruHhGaGvG9yTHc5jMs">环检测正确性</b>：原 <code data-page-node-id="nu4pqDhWM8feO0MuXMAfEz">IsDescendantAsync</code> 用 <code data-page-node-id="wNegUT6BsxfduPeowKuUYT">visited</code> 防死循环，新 <code data-page-node-id="dY5kARSgTbeYCXMVsns4v3">IsDescendant</code> 保留同样保护（即使数据异常成环也不死循环）。</li>
+    </ul>
+    <div class="riskbox" data-page-node-id="rdh6RrW8Ge42OMWh8GxIxl"><b data-page-node-id="HcQGInMnDnyyRDYRjC5PsP">唯一注意点：</b><code data-page-node-id="iagIyxeOgXNcTjVFrz1vSr">IsDescendant</code> 的语义方向。原方法 <code data-page-node-id="XbTyhHpqLdbvFnHD5hoNAl">IsDescendantAsync(candidateId, ancestorId)</code> 是「candidate 是否在 ancestor 的祖先链上」，调用处传的是 <code data-page-node-id="oYZmKeUH8pbCvndZrMIujs">(req.ParentId, id)</code>——即「新父节点是否是被移动节点的后代」。改造务必保持参数顺序一致，否则环检测会判反，导致「移动到子孙下」漏检。建议给新方法加 XML 注释写明参数方向。</div>
+  </div>
+
+  <h2 data-page-node-id="k4AABWGU1r8eNapqnurUau">落地清单</h2>
+  <div class="card" data-page-node-id="SFjzeOsVNFHWwoktEDeYZk">
+    <table data-page-node-id="dxvR5lBq8nVNijq2wd97O6">
+      <tr data-page-node-id="TeB7D8KuOloXWw1oO0708v"><th data-page-node-id="JwGEetlSt4LKPOtOk8i7gF">#</th><th data-page-node-id="NY6BAFWSzggyDX5UmCWRH6">位置</th><th data-page-node-id="6EuLsEXPwRUkFkH4mpnAep">改动</th></tr>
+      <tr data-page-node-id="41XzMhBrPcaCTtHi8JkGaI"><td data-page-node-id="HveSEFZXVTEJ2SVEobHqmH">1</td><td data-page-node-id="gCyJv45r3Kn4tpdTnUpAfe">新增私有方法</td><td data-page-node-id="wjGLHxgYGRyJ4Lk1Rup4r4"><code data-page-node-id="03dspKJTRmmU5P4Mp5cP0C">LoadParentRelationsAsync</code>（一次查询返回 children/parentOf）</td></tr>
+      <tr data-page-node-id="3xQMDaHs1DcQqvrYhJOoFK"><td data-page-node-id="xSsBQxIOzlG7dOPNUkjjrZ">2</td><td data-page-node-id="m1Oa9tPAu0fcZAQtenVl8B">新增私有静态</td><td data-page-node-id="rDkJ4SsFqj3Kyhm4T6cMvr"><code data-page-node-id="PbB7VAqdk8BwFsE6PkH43K">CollectDescendants</code>（内存 BFS）、<code data-page-node-id="CJ4HDhqcMmRV4NzXilypAD">IsDescendant</code>（内存回溯）</td></tr>
+      <tr data-page-node-id="AVoBCFF0NyNz0W3GI3PMP1"><td data-page-node-id="75QvPdtpjNJw8Gbvwwg92n">3</td><td data-page-node-id="tOrLEZZB765qGjpiRHvqew">DeleteAsync:375-377</td><td data-page-node-id="EXoGM4bl2SHvOB7aV6dmVH">改用 <code data-page-node-id="kQD5CIheIKSI3C4H6izArA">LoadParentRelationsAsync</code> + <code data-page-node-id="AvK2igaYAN5k0qbMOKHCCo">CollectDescendants</code></td></tr>
+      <tr data-page-node-id="IqiSklsFxsnN2b6fyfDdUJ"><td data-page-node-id="O4aBj2pBvjGHDmDyxh8rjr">4</td><td data-page-node-id="sk2GfHi8fw6XGKd17bBwUy">MoveAsync:211-213</td><td data-page-node-id="CRMnQ2MNGAho7OFK2nqDYN">改用 <code data-page-node-id="9zZHu6HZKAtYOlOMOnNA3J">LoadParentRelationsAsync</code> + <code data-page-node-id="JMnGcMoOep2Aq2QbqtkBM8">IsDescendant</code></td></tr>
+      <tr data-page-node-id="Z2QF0zzBLntzfP43I0NrDr"><td data-page-node-id="hOZ5ByV5E8gRofXiI0UpI8">5</td><td data-page-node-id="oKNTmZOqt3JsCXGRLTE1Mo">433-466</td><td data-page-node-id="o9iZDehTsYXRCz960o9xzk">删除旧 <code data-page-node-id="uLg78l08dPfOhLXUardiie">IsDescendantAsync</code>、<code data-page-node-id="CdkKMBlZANqune9gw0utBl">CollectDescendantsAsync</code></td></tr>
+    </table>
+    <div class="okbox" data-page-node-id="EHHfMaqO2smFITFmeOO8Z6"><b data-page-node-id="8Y3IvV5RwUgDBetvAu9FAz">改造后：</b>删除/移动的递归 N+1 全部消除，各降到 1 次索引查询 + 内存遍历。与前端改造 1 正交，可独立提交。</div>
+  </div>
+
+  <p style="color:var(--muted);font-size:13px;text-align:center;margin-top:40px;" data-page-node-id="iIXQWGdaYUJ9T4AFl33sPP">本方案为改造建议，未改动仓库。确认后按「实现 → dotnet build 验证 → 你确认 → commit」节奏落地。</p>
+</div>
+</body>
+</html>
