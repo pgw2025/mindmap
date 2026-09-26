@@ -208,8 +208,9 @@ public class NodeService : INodeService
             if (req.ParentId.Value == id)
                 throw ApiException.Conflict("不能将节点作为自身的子节点");
 
-            // 防止环：新父节点不能是当前节点的子孙
-            if (await IsDescendantAsync(req.ParentId.Value, id, ct))
+            // 防止环：新父节点不能是当前节点的子孙（一次拉父子索引 + 内存回溯，避免逐级查库）
+            var (_, parentOf) = await LoadParentRelationsAsync(node.MindMapId, ct);
+            if (IsDescendant(parentOf, req.ParentId.Value, id))
                 throw ApiException.Conflict("不能将节点移动到自身子孙下");
 
             var newParent = await _db.Nodes.FirstOrDefaultAsync(n => n.Id == req.ParentId.Value, ct);
@@ -372,9 +373,9 @@ public class NodeService : INodeService
         var node = await GetOwnedNodeAsync(userId, id, ct);
         var mindMapId = node.MindMapId;
 
-        // 递归收集所有子孙节点 Id
-        var toDelete = new HashSet<Guid> { id };
-        await CollectDescendantsAsync(id, toDelete, ct);
+        // 一次查询拉父子关系 + 内存 BFS 收集所有子孙节点 Id（避免逐层递归 N+1）
+        var (children, _) = await LoadParentRelationsAsync(mindMapId, ct);
+        var toDelete = CollectDescendants(children, id);
 
         // 批量删除
         var nodesToRemove = await _db.Nodes
@@ -430,39 +431,58 @@ public class NodeService : INodeService
         return (max ?? -1) + 1;
     }
 
-    private async Task<bool> IsDescendantAsync(Guid candidateId, Guid ancestorId, CancellationToken ct)
+    /// <summary>
+    /// 一次性拉取某导图的全部父子关系（仅投影 Id/ParentId 两个字段），
+    /// 返回 (childrenByParent, parentOf)。删除（向下收集子孙）与移动（向上回溯环检测）共用，
+    /// 避免逐层递归查询产生的 N+1 往返。
+    /// </summary>
+    private async Task<(ILookup<Guid?, Guid> Children, Dictionary<Guid, Guid?> ParentOf)>
+        LoadParentRelationsAsync(Guid mindMapId, CancellationToken ct)
     {
-        // BFS 向上查找祖先链，看 candidate 是否最终回到 ancestor
+        var pairs = await _db.Nodes.AsNoTracking()
+            .Where(n => n.MindMapId == mindMapId)
+            .Select(n => new { n.Id, n.ParentId })
+            .ToListAsync(ct);
+
+        var children = pairs.ToLookup(p => p.ParentId, p => p.Id);
+        var parentOf = pairs.ToDictionary(p => p.Id, p => p.ParentId);
+        return (children, parentOf);
+    }
+
+    /// <summary>内存 BFS 收集 rootId 及其所有子孙 Id（含 rootId 自身）。</summary>
+    private static HashSet<Guid> CollectDescendants(ILookup<Guid?, Guid> children, Guid rootId)
+    {
+        var result = new HashSet<Guid> { rootId };
+        var queue = new Queue<Guid>();
+        queue.Enqueue(rootId);
+        while (queue.Count > 0)
+        {
+            var current = queue.Dequeue();
+            foreach (var childId in children[current])
+            {
+                if (result.Add(childId)) queue.Enqueue(childId);
+            }
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// 判断 candidateId 是否为 ancestorId 的子孙（沿 ParentId 向上回溯祖先链）。
+    /// 参数方向须与旧 IsDescendantAsync(candidateId, ancestorId) 保持一致：
+    /// 调用处传 (req.ParentId, id)，即「新父节点是否是被移动节点的后代」。
+    /// </summary>
+    private static bool IsDescendant(Dictionary<Guid, Guid?> parentOf, Guid candidateId, Guid ancestorId)
+    {
         var current = candidateId;
         var visited = new HashSet<Guid>();
         while (current != Guid.Empty && visited.Add(current))
         {
-            var parent = await _db.Nodes.AsNoTracking()
-                .Where(n => n.Id == current)
-                .Select(n => n.ParentId)
-                .FirstOrDefaultAsync(ct);
-
-            if (parent is null) return false;
+            if (!parentOf.TryGetValue(current, out var parent) || !parent.HasValue)
+                return false;
             if (parent.Value == ancestorId) return true;
             current = parent.Value;
         }
         return false;
-    }
-
-    private async Task CollectDescendantsAsync(Guid parentId, HashSet<Guid> acc, CancellationToken ct)
-    {
-        var childIds = await _db.Nodes.AsNoTracking()
-            .Where(n => n.ParentId == parentId)
-            .Select(n => n.Id)
-            .ToListAsync(ct);
-
-        foreach (var cid in childIds)
-        {
-            if (acc.Add(cid))
-            {
-                await CollectDescendantsAsync(cid, acc, ct);
-            }
-        }
     }
 
     private async Task UpdateMindMapStatsAsync(Guid mindMapId, int nodeCountDelta, CancellationToken ct)
