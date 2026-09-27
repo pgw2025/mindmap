@@ -473,6 +473,7 @@ const nodesStore = useNodesStore()
 const mapsStore = useMindMapsStore()
 const templatesStore = useTemplatesStore()
 const themeStore = useThemeStore()
+const authStore = useAuthStore()
 
 // 后端约定 Guid.Empty 表示清除引用（JSON null 不会触发 Guid? 更新）
 const EMPTY_GUID = '00000000-0000-0000-0000-000000000000'
@@ -487,6 +488,11 @@ const nodeDeleteSubmitting = ref(false)
 const mindMapId = computed(() => route.params.id as string)
 const readonly = computed(() => route.name === 'mindmap-preview')
 const mapDetail = ref<MindMapDetail | null>(null)
+// 当前用户是否拥有该导图的编辑权限（本人或管理员）
+const canEdit = computed(() => {
+  const me = authStore.user
+  return !!mapDetail.value && (mapDetail.value.ownerId === me?.id || me?.isAdmin === true)
+})
 const loading = ref(true)
 const mindMapRef = ref<HTMLDivElement | null>(null)
 const noteTooltipRef = ref<InstanceType<typeof NodeNoteTooltip> | null>(null)
@@ -1401,6 +1407,39 @@ async function handleBack() {
   router.push({ name: 'home' })
 }
 
+// —— 预览 ↔ 编辑 原地切换（同组件复用，不重载数据）——
+
+/** 切换画布实例的只读/可编辑能力（simple-mind-map 官方 API） */
+function switchMindMapMode(editing: boolean) {
+  if (!mindMapInstance) return
+  mindMapInstance.setMode(editing ? 'edit' : 'readonly')
+  mindMapInstance.updateConfig({
+    contextMenu: editing,
+    enableFreeDrag: editing
+  })
+}
+
+/** 预览 → 编辑：原地解锁画布并同步 URL（replace 不堆历史） */
+function handleEnterEdit() {
+  if (!mindMapInstance || !canEdit.value || isOfflineData.value) return
+  switchMindMapMode(true)
+  router.replace({ name: 'mindmap-edit', params: { id: mindMapId.value } })
+}
+
+/** 编辑 → 预览：先 flush 未保存修改，再锁定画布并同步 URL */
+async function handleEnterPreview() {
+  if (!mindMapInstance) return
+  try {
+    await waitForPendingOps()
+    if (errorCount.value > 0) {
+      message.warning('仍有操作同步失败，请检查网络后再切换预览')
+      return
+    }
+  } catch { /* ignore */ }
+  switchMindMapMode(false)
+  router.replace({ name: 'mindmap-preview', params: { id: mindMapId.value } })
+}
+
 // —— 同步状态 UI 计算 ——
 const syncStatusText = computed(() => {
   switch (syncStatus.value) {
@@ -1941,6 +1980,21 @@ watch(() => route.params.id, () => {
             <span class="btn-icon">🔗</span><span class="btn-label">分享</span>
           </button>
         </div>
+
+        <!-- 预览↔编辑 原地切换：仅拥有编辑权限时显示；离线只读时禁用 -->
+        <button
+          v-if="canEdit"
+          class="btn-action-ghost btn-mode-switch"
+          :class="{ 'is-edit-entry': readonly }"
+          :disabled="isOfflineData"
+          @click="readonly ? handleEnterEdit() : handleEnterPreview()"
+          :title="readonly
+            ? (isOfflineData ? '离线模式下不可编辑' : '直接进入编辑模式，无需返回列表')
+            : (isOfflineData ? '离线模式下不可切换' : '切换为只读预览')"
+        >
+          <span class="btn-icon">{{ readonly ? '✏️' : '👁' }}</span>
+          <span class="btn-label">{{ readonly ? '编辑' : '预览' }}</span>
+        </button>
 
         <!-- 核心导出主操作 -->
         <NDropdown trigger="click" :options="exportOptions" @select="handleExport">
