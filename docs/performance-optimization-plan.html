@@ -142,7 +142,7 @@ nodes.value = nodes.value.<span class="fn" data-page-node-id="umABmojqUIuz4OU7od
     <p data-page-node-id="HNtwXCfO5Dqg3QiHFO7XPD">调用处：<code data-page-node-id="MEg1vCnFWw0o14Y2rDdkAN">DeleteAsync</code> 用 <code data-page-node-id="nktFcGs12D9DCG8eX3ER1w">CollectDescendantsOnceAsync</code> 替换递归；<code data-page-node-id="b4gnGfmNSQPI0UdPIRFUhX">MoveAsync</code> 先拉一次父子映射，再用 <code data-page-node-id="BEq10KoyhX299PvJpZAYoK">IsDescendantInMemory</code> 替换 <code data-page-node-id="JflcUOTnD8XiTsG3NIzrX1">IsDescendantAsync</code>。</p>
   </div>
 
-  <h2 data-page-node-id="OIUgvK14eVWh7zfgzZEctI">改造 3：reloadMindMap 只用于「整体重建」<span class="p p0" data-page-node-id="L0cZyLHVh8MCBAa2Jo5B83">P0</span></h2>
+  <h2 data-page-node-id="OIUgvK14eVWh7zfgzZEctI">改造 3：reloadMindMap 只用于「整体重建」<span class="p p0" data-page-node-id="L0cZyLHVh8MCBAa2Jo5B83">P0</span><span class="tag-inline" style="background:rgba(81,207,102,.18); color:var(--green);" data-page-node-id="done-badge-3">已完成</span></h2>
   <div class="card" data-page-node-id="77rEiIUPb6SMHhmBThTEBR">
     <p data-page-node-id="r5DMURNRmgGC978ZcX00ML">普通编辑（加节点、删节点、改样式、改内容、粘贴）后不应再 <code data-page-node-id="BrF6YIEvwqGAvRClO8CAcu">setData</code> 整树重绘。这些操作要么已经通过增量同步的 <code data-page-node-id="2J10b4qKTkkTYFGDwAEFMk">data_change_detail</code> 实时反映到画布，要么可以局部更新。</p>
     <div class="tag-inline t-front" data-page-node-id="szaKdkAJsqcFbOVJUy4AoC">前端</div><span style="color:var(--muted); font-size:13px;" data-page-node-id="MFTe9btlbN38YWiYPrGOI7">frontend/src/views/editor/MindMapEditorView.vue</span>
