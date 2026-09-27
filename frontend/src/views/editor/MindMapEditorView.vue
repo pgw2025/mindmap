@@ -552,7 +552,14 @@ const {
   flushPendingUpdates,
   waitForPendingOps,
   retryFailedOps,
-  hasPendingWriteOps
+  hasPendingWriteOps,
+  // 阶段 2：画布优先写入（样式面板 / 内容弹窗）
+  findRenderNodeByUid,
+  payloadToLibStyle,
+  beginStyleBatch,
+  endStyleBatch,
+  // 阶段 4：粘贴 appointData 构造（withUid=false，见 handlePaste）
+  dtoToNodeData
 } = useMindMapSync({
   getMindMapInstance: () => mindMapInstance,
   nodesStore,
@@ -685,6 +692,23 @@ function initMindMap() {
     dragOpacityConfig: {
       cloneNodeOpacity: 0.55,
       beingDragNodeOpacity: 0.25
+    },
+    // —— 历史栈归一（改造 3 阶段 0）——
+    // 拦截库内置的 Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z 快捷键（默认绑定库内
+    // BACK/FORWARD 历史栈），统一转发给应用自己的 store 历史栈。
+    // 返回 true 中断库对该快捷键的默认处理（KeyCommand.onKeydown 约定），
+    // 其余快捷键返回 false/undefined 放行库默认行为。
+    beforeShortcutRun: (key: string) => {
+      if (readonly.value) return true // 只读画布：撤销/重做一律禁用
+      if (key === 'Control+z' || key === 'Control+shift+z') {
+        void handleUndo()
+        return true
+      }
+      if (key === 'Control+y') {
+        void handleRedo()
+        return true
+      }
+      return false
     }
   })
 
@@ -868,56 +892,54 @@ function initMindMap() {
   })
 }
 
-function getNextSortOrder(parentId: string | null): number {
-  const children = nodesStore.getChildren(parentId)
-  if (children.length === 0) return 0
-  return Math.max(...children.map((c) => c.sortOrder)) + 1
-}
-
-/** 工具栏操作 */
+/** 工具栏操作：新增子节点（画布命令优先，detail 增量落库，不再 store 直写 + reload） */
 async function handleAddChild() {
-  if (!selectedNodeId.value) return
-  const node = nodesStore.findNode(selectedNodeId.value)
-  const isRootChild = node?.id === nodesStore.rootNode?.id
-  const payload: NodeCreatePayload = {
-    parentId: node?.id ?? null,
-    title: '新子节点',
-    sortOrder: getNextSortOrder(node?.id ?? null),
-    direction: isRootChild ? 1 : undefined
+  if (!selectedNodeId.value || readonly.value) return
+  const inst = mindMapInstance
+  if (!inst) return
+  const id = selectedNodeId.value
+  const storeNode = nodesStore.findNode(id)
+  const parentNode = findRenderNodeByUid(id)
+  if (!storeNode || !parentNode) return
+
+  // 1. 折叠态父节点：先展开（SET_NODE_EXPAND → detail expand 分支落库 isCollapsed）
+  //    注意取反映射：库 expand=true ↔ 后端 isCollapsed=false
+  if (parentNode.getData('expand') === false) {
+    inst.execCommand('SET_NODE_EXPAND', parentNode, true)
   }
-  try {
-    await nodesStore.create(payload)
-    // 折叠态父节点上新增子节点时自动展开父节点（与画布 Tab/右键行为一致），
-    // 避免新节点在 reload 后被折叠隐藏
-    if (node?.isCollapsed) {
-      await nodesStore.update(node.id, { isCollapsed: false })
-    }
-    reloadMindMap()
-  } catch (e) {
-    message.error((e as Error).message)
-  }
+
+  // 2. 根下新增保持「总在右侧」现状：appointData 显式 dir='right'
+  //    （非根子节点不设 dir，继承分支方向 —— 与 convertToMindMapData 策略一致）
+  const isRoot = storeNode.id === nodesStore.rootNode?.id
+  const appointData: Record<string, unknown> = { text: '新子节点' }
+  if (isRoot) appointData.dir = 'right'
+
+  // 3. 画布优先：命令插入 → detail create → handleCreateTree 异步落库（含排序重编闭环）
+  //    openEdit=false 保持现状「新增后不进入编辑」
+  inst.execCommand('INSERT_CHILD_NODE', false, [parentNode], appointData)
+  // ← 无 store.create / getNextSortOrder / reloadMindMap
 }
 
+/** 工具栏操作：新增同级节点（画布命令优先；位置 = 选中节点正下方，与画布 Enter 一致） */
 async function handleAddSibling() {
-  if (!selectedNodeId.value) return
-  const node = nodesStore.findNode(selectedNodeId.value)
-  if (!node?.parentId) {
-    message.warning('根节点没有同级')
+  if (!selectedNodeId.value || readonly.value) return
+  const inst = mindMapInstance
+  if (!inst) return
+  const storeNode = nodesStore.findNode(selectedNodeId.value)
+  if (!storeNode?.parentId) {
+    message.warning('根节点没有同级')   // 保留现状 guard
     return
   }
-  const isRootChild = node.parentId === nodesStore.rootNode?.id
-  const payload: NodeCreatePayload = {
-    parentId: node.parentId,
-    title: '新节点',
-    sortOrder: getNextSortOrder(node.parentId),
-    direction: isRootChild ? 1 : undefined
-  }
-  try {
-    await nodesStore.create(payload)
-    reloadMindMap()
-  } catch (e) {
-    message.error((e as Error).message)
-  }
+  const node = findRenderNodeByUid(selectedNodeId.value)
+  if (!node) return
+
+  // 根直接子节点新增保持右侧现状语义
+  const isRootChild = storeNode.parentId === nodesStore.rootNode?.id
+  const appointData: Record<string, unknown> = { text: '新节点' }
+  if (isRootChild) appointData.dir = 'right'
+
+  // 同级插入位置 = 选中节点正下方（appointNodes 传单节点，工具栏按钮不批量插入）
+  inst.execCommand('INSERT_NODE', false, [node], appointData)
 }
 
 async function handleDelete() {
@@ -934,59 +956,127 @@ async function handleDelete() {
   nodeDeleteConfirmVisible.value = true
 }
 
+/** 确认删除：乐观删除（画布命令优先 + 即时关闭弹窗），落库走 detail delete → opQueue + 重试。
+ *  与画布 Del 键行为一致：失败进全局同步状态提示/重试，不再逐次 message.success。 */
 async function submitNodeDelete(): Promise<boolean> {
   if (!selectedNodeId.value) return true
-  nodeDeleteSubmitting.value = true
-  try {
-    await nodesStore.remove(selectedNodeId.value)
+  const id = selectedNodeId.value
+  const storeNode = nodesStore.findNode(id)
+  const rn = findRenderNodeByUid(id)
+  const inst = mindMapInstance
+
+  // 乐观关闭：不再等待后端 RTT
+  nodeDeleteSubmitting.value = false
+
+  if (!rn || !storeNode) {
+    // 渲染节点不存在（reload 窗口等异常态）→ 清理界面状态，节点删除交由全局同步链路兜底
     selectedNodeId.value = null
     showToolbar.value = false
-    reloadMindMap()
-    message.success('已删除')
     nodeDeleteConfirmVisible.value = false
     return true
-  } catch (e) {
-    message.error((e as Error).message)
-    return false
-  } finally {
-    nodeDeleteSubmitting.value = false
+  }
+  // 画布优先：单节点删除（appointNodes 传单节点，保持「只删确认框针对的节点」语义，
+  // 不删多选的其余节点 —— 库默认 REMOVE_NODE 删整个 activeNodeList，故必须显式传参）
+  inst!.execCommand('REMOVE_NODE', [rn])
+
+  selectedNodeId.value = null
+  showToolbar.value = false
+  nodeDeleteConfirmVisible.value = false
+  return true
+}
+
+/** icon 变更联动：先就地更新 store DTO 的 icon（供 extractTitleFromText 剥离前缀），
+ *  再重写画布 text 前缀。icon 字段本身的落库由调用方的 batchUpdate/update 显式携带。 */
+function applyIconToActiveNodes(ids: string[], icon: string | undefined) {
+  for (const id of ids) {
+    const storeNode = nodesStore.findNode(id)
+    if (!storeNode) continue
+    const target = icon ?? ''                    // undefined → 清空
+    storeNode.icon = target || null              // 就地更新（不调 API）
+    const rn = findRenderNodeByUid(id)
+    if (rn) {
+      rn.setText(target ? `${target} ${storeNode.title}` : storeNode.title)
+    }
   }
 }
 
 async function handleUpdateStyle(payload: NodeUpdatePayload) {
-  if (!selectedNodeId.value) return
+  if (!selectedNodeId.value || readonly.value) return
   try {
-    // 多选（>1）时走批量更新，单次请求 + 单条撤销历史
+    // 多选（>1）时走批量更新，单次请求 + 单条撤销历史（与现状一致）
     const ids = activeNodeIds.value.length > 1 ? activeNodeIds.value : [selectedNodeId.value]
-    if (ids.length > 1) {
-      const items: NodeBatchItem[] = ids.map((id) => ({
-        id,
-        color: payload.color,
-        fontSize: payload.fontSize,
-        fontFamily: payload.fontFamily,
-        shape: payload.shape,
-        icon: payload.icon,
-        borderColor: payload.borderColor,
-        backgroundColor: payload.backgroundColor,
-        edgeColor: payload.edgeColor,
-        edgeStyle: payload.edgeStyle
-      }))
+
+    // 1. 画布优先：对每个激活节点写入渲染数据（node.setStyles = execCommand → detail，
+    //    即时局部重绘，视口/缩放/选中态不动）。抑制窗口内 handleUpdate 样式分支跳过，
+    //    由第 3 步显式单次落库（请求次数与 undo 粒度与现状严格一致）。
+    beginStyleBatch()
+    let wrote = 0
+    for (const id of ids) {
+      const rn = findRenderNodeByUid(id)
+      if (!rn) continue
+      rn.setStyles(payloadToLibStyle(payload))
+      wrote++
+    }
+
+    // 2. icon 前缀联动：icon 变化要同时改画布 text 前缀（否则 title 落库时前缀剥离错乱）
+    if (payload.icon !== undefined) {
+      applyIconToActiveNodes(ids, payload.icon)
+    }
+
+    // 3. 落库（与现状 items 构造逐字段一致）
+    const items: NodeBatchItem[] = ids.map((id) => ({
+      id,
+      color: payload.color,
+      fontSize: payload.fontSize,
+      fontFamily: payload.fontFamily,
+      shape: payload.shape,
+      icon: payload.icon,
+      borderColor: payload.borderColor,
+      backgroundColor: payload.backgroundColor,
+      edgeColor: payload.edgeColor,
+      edgeStyle: payload.edgeStyle
+    }))
+    // 渲染节点没找到（reload 窗口等异常态）→ 不落库，避免写一份画布都没应用的值
+    if (items.length === 0 || wrote === 0) {
+      endStyleBatch()
+      return
+    }
+    if (items.length > 1) {
       await nodesStore.batchUpdate(items)
     } else {
       await nodesStore.update(selectedNodeId.value, payload)
     }
-    reloadMindMap()
+    endStyleBatch()
+    // ← 无 reloadMindMap：画布已在第 1/2 步即时更新
   } catch (e) {
+    endStyleBatch()
     message.error((e as Error).message)
   }
 }
 
-/** 节点内容保存回调（来自 NodeContentModal） */
+/** 节点内容保存回调（来自 NodeContentModal）：
+ *  title 走画布 SET_NODE_TEXT（detail 文本分支防抖落库），content 画布不渲染、直接落库。 */
 async function handleContentSave(payload: NodeUpdatePayload) {
-  if (!selectedNodeId.value) return
+  if (!selectedNodeId.value || readonly.value) return
   try {
-    await nodesStore.update(selectedNodeId.value, payload)
-    reloadMindMap()
+    const id = selectedNodeId.value
+    const storeNode = nodesStore.findNode(id)
+    const rn = findRenderNodeByUid(id)
+    if (!storeNode || !rn) return
+
+    // 1. 画布优先：title 有变化 → SET_NODE_TEXT（带 icon 前缀），即时重绘；
+    //    detail 文本分支 → scheduleTextUpdate → extractTitleFromText 剥离 → update({ title })
+    const newTitle = (payload.title ?? '').trim()
+    if (newTitle && newTitle !== storeNode.title) {
+      const icon = payload.icon ?? storeNode.icon
+      rn.setText(icon ? `${icon} ${newTitle}` : newTitle)
+    }
+
+    // 2. content：画布不渲染，直接落库（不依赖 detail）
+    if (payload.content !== undefined) {
+      await nodesStore.update(id, { content: payload.content })
+    }
+    // ← 无 reloadMindMap
   } catch (e) {
     message.error((e as Error).message || '保存失败')
   }
@@ -1447,13 +1537,22 @@ function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url)
 }
 
-/** 撤销/重做后刷新画布 */
+/** 撤销/重做后刷新画布。
+ *  先排空挂起写入（debounce 窗口 + 串行队列 + pendingCreates），
+ *  否则 create 响应返回后 writeBackendIdToNode 会向已重建的画布写幽灵映射，
+ *  且后端将残留「即将被撤销」的那次操作结果。 */
 async function handleUndo() {
+  if (hasPendingWriteOps()) {
+    await waitForPendingOps()
+  }
   await nodesStore.undo()
   reloadMindMap()
 }
 
 async function handleRedo() {
+  if (hasPendingWriteOps()) {
+    await waitForPendingOps()
+  }
   await nodesStore.redo()
   reloadMindMap()
 }
@@ -1468,37 +1567,41 @@ function handleCopy() {
   }
 }
 
-/** 粘贴节点（创建同级副本） */
+/** 粘贴节点（画布命令优先，detail 增量落库含样式；不再 store 直写 + reload）。
+ *  保持单节点粘贴语义不变：标题加 (副本)，样式/icon/content/note 全量透传。 */
 async function handlePaste() {
-  if (!clipboardNode.value || !selectedNodeId.value) return
-  const sourceNode = clipboardNode.value
-  const targetNode = nodesStore.findNode(selectedNodeId.value)
-  if (!targetNode) return
+  if (!clipboardNode.value || !selectedNodeId.value || readonly.value) return
+  const inst = mindMapInstance
+  if (!inst) return
+  const source = clipboardNode.value
+  const targetStore = nodesStore.findNode(selectedNodeId.value)
+  const targetRender = findRenderNodeByUid(selectedNodeId.value)
+  if (!targetStore || !targetRender) return
 
-  // 根节点不能粘贴为同级，改为粘贴为子节点
-  const parentId = targetNode.parentId ?? targetNode.id
-  const payload: NodeCreatePayload = {
-    parentId,
-    title: `${sourceNode.title} (副本)`,
-    content: sourceNode.content ?? undefined,
-    note: sourceNode.note ?? undefined,
-    sortOrder: getNextSortOrder(parentId),
-    color: sourceNode.color ?? undefined,
-    fontSize: sourceNode.fontSize ?? undefined,
-    shape: sourceNode.shape ?? undefined,
-    icon: sourceNode.icon ?? undefined,
-    backgroundColor: sourceNode.backgroundColor ?? undefined,
-    borderColor: sourceNode.borderColor ?? undefined,
-    edgeColor: sourceNode.edgeColor ?? undefined,
-    edgeStyle: sourceNode.edgeStyle ?? undefined
+  // 1. 构造 appointData：复用 dtoToNodeData（withUid=false —— 不带 uid/id/backendId，
+  //    让库 createUid 生成全新 uid，否则 handleCreateTree 的 uidToBackendId.has 检查
+  //    命中源节点后端 ID 会跳过创建，粘贴无效果）
+  const appointData = dtoToNodeData(
+    { ...source, title: `${source.title} (副本)` },
+    { withUid: false, inkOverrides: new Map(), injectedNodeInk: null }
+  ) as Record<string, unknown>
+
+  // 2. 透传字段：icon 字段值 + 富文本正文（画布不渲染；由 handleCreateTree 读取落库，
+  //    落库后从渲染 data 清除 —— 见 useMindMapSync handleCreateTree）
+  if (source.icon != null) appointData.__pasteIcon = source.icon
+  if (source.content != null) appointData.__pasteContent = source.content
+
+  // 3. 根节点目标 → 粘贴为子节点（现状降级语义）；后端根直接子节点默认右，
+  //    画布同步设 dir 保持 F5 后位置一致（与 handleAddChild 策略一致）
+  if (targetStore.parentId == null) {
+    appointData.dir = 'right'
+    inst.execCommand('INSERT_CHILD_NODE', false, [targetRender], appointData)
+  } else {
+    // 同级粘贴：目标节点正下方（与画布 Enter/阶段 3 新增同级行为一致）
+    inst.execCommand('INSERT_NODE', false, [targetRender], appointData)
   }
-  try {
-    await nodesStore.create(payload)
-    reloadMindMap()
-    message.success('已粘贴节点')
-  } catch (e) {
-    message.error((e as Error).message)
-  }
+  // ← 无 store.create / getNextSortOrder / reloadMindMap
+  message.success('已粘贴节点')   // 乐观提示（画布已即时出现，与现状一致）
 }
 
 async function handleTitleBlur() {

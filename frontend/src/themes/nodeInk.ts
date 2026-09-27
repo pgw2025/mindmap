@@ -87,8 +87,10 @@ export function computeNodeInkOverrides(
  * - 不再需要修正（例如从深色切回浅色）→ 写回候选值（与继承结果一致），并移出 injected
  *
  * 为什么单独做这层补丁、而不是重新 setData：切主题时全量重载会丢视口、
- * 并作废正在挂起的写入。这里 SET_NODE_DATA 不进撤销历史，改文字色也不改变
- * 节点尺寸，因此只重渲受影响的节点，其余节点与视口完全不动。
+ * 并作废正在挂起的写入。这里 SET_NODE_DATA 不产生应用层历史（useMindMapSync
+ * handleUpdate 的 color 分支受 inkPatchActive 抑制，解算墨色不落库）；
+ * 库内命令历史仍会记录，但不参与用户撤销。改文字色也不改变节点尺寸，
+ * 因此只重渲受影响的节点，其余节点与视口完全不动。
  *
  * @returns 本次实际写入的节点数
  */

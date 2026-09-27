@@ -1,6 +1,6 @@
 import { ref, shallowRef, type ComputedRef } from 'vue'
 import type MindMap from 'simple-mind-map'
-import type { NodeDto, NodeBatchItem } from '@/api/nodes'
+import type { NodeDto, NodeBatchItem, NodeUpdatePayload } from '@/api/nodes'
 import { useNodesStore } from '@/stores/nodes'
 import type { MindMapThemeConfig, ResolvedNodeInk } from '@/themes/presets'
 import { computeNodeInkOverrides, patchNodeInkOverrides } from '@/themes/nodeInk'
@@ -26,6 +26,45 @@ const edgeStyleMap: Record<number, string> = {
   1: '6,4',
   2: '2,2',
   3: 'none'
+}
+
+/** simple-mind-map 形状字符串 → 后端 NodeShape 数字（shapeMap 的翻转） */
+const shapeStrToNum: Record<string, number> = Object.fromEntries(
+  Object.entries(shapeMap).map(([k, v]) => [v, Number(k)])
+)
+/** lineDasharray → 后端 EdgeStyle 数字（edgeStyleMap 的翻转）
+ *  edgeStyleMap 中 0 与 3 都映射 'none'，翻转后 'none' → 3；
+ *  与 convertToMindMapData 正向读取（0/3 都映射 'none'，渲染等价）保持序列化语义。 */
+const dashToEdgeStyle: Record<string, number> = Object.fromEntries(
+  Object.entries(edgeStyleMap).map(([k, v]) => [v, Number(k)])
+)
+
+/** 样式字段 lib↔backend 映射表（handleUpdate 样式分支与 handleCreateTree 样式提取共用，
+ *  避免两处映射漂移）。icon 不进 diff 检测（画布上以 text 前缀存在，见 text 分支）。 */
+const styleFieldPairs: Array<{ lib: string; backend: string; convert?: (v: unknown) => unknown }> = [
+  { lib: 'fontSize', backend: 'fontSize' },
+  { lib: 'fontFamily', backend: 'fontFamily' },
+  { lib: 'shape', backend: 'shape', convert: (v) => shapeStrToNum[v as string] },
+  { lib: 'fillColor', backend: 'backgroundColor' },
+  { lib: 'lineColor', backend: 'edgeColor' },
+  { lib: 'lineDasharray', backend: 'edgeStyle', convert: (v) => dashToEdgeStyle[v as string] },
+  { lib: 'borderColor', backend: 'borderColor' }
+]
+
+/** DetailNode.data（库字段）→ create payload 样式字段（后端字段）。
+ *  与 handleUpdate 样式分支共用 styleFieldPairs，避免两处映射漂移；
+ *  color 单独处理（墨色补丁注入值也会出现在 data 中，但粘贴/新建场景的
+ *  appointData 里 color 即源节点的用户自定义文字色，直接透传落库）。 */
+function extractStyleFromDetailData(d: DetailNode['data']): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const f of styleFieldPairs) {
+    const v = d[f.lib]
+    if (v != null) {
+      out[f.backend] = f.convert ? f.convert(v) : v
+    }
+  }
+  if (d.color) out.color = d.color
+  return out
 }
 
 /** ============================================================
@@ -299,6 +338,8 @@ export function useMindMapSync(opts: {
   const noteDebounceTimers = new Map<string, DebounceEntry>()
   /** 节点级 extraData debounce（key = backendId，关联线数据同步用） */
   const extraDataDebounceTimers = new Map<string, DebounceEntry>()
+  /** 节点级样式聚合 debounce（key = backendId，样式面板多字段打包同步用） */
+  const styleDebounceTimers = new Map<string, DebounceEntry>()
 
   /** 是否存在仍未完成写入的操作（防抖窗口中的修改 + 飞行中请求 + 待创建节点）。
    *  用于 beforeunload 判断是否需要拦截刷新/关闭。 */
@@ -310,6 +351,7 @@ export function useMindMapSync(opts: {
     if (collapseDebounceTimers.size > 0) return true
     if (noteDebounceTimers.size > 0) return true
     if (extraDataDebounceTimers.size > 0) return true
+    if (styleDebounceTimers.size > 0) return true
     return false
   }
 
@@ -329,6 +371,9 @@ export function useMindMapSync(opts: {
       const e = extraDataDebounceTimers.get(bid)
       if (e) clearTimeout(e.timer)
       extraDataDebounceTimers.delete(bid)
+      const s = styleDebounceTimers.get(bid)
+      if (s) clearTimeout(s.timer)
+      styleDebounceTimers.delete(bid)
     }
   }
 
@@ -344,6 +389,7 @@ export function useMindMapSync(opts: {
     clearMap(collapseDebounceTimers)
     clearMap(noteDebounceTimers)
     clearMap(extraDataDebounceTimers)
+    clearMap(styleDebounceTimers)
     failedOps.value = []
   }
 
@@ -386,6 +432,87 @@ export function useMindMapSync(opts: {
    *
    *  修复后：uid === backendId === 后端 GUID，三者恒等，映射永不需要重建。
    *  ============================================================ */
+
+  /** 单个后端 DTO → simple-mind-map 渲染 data。
+   *  uid 注入策略由 ctx.withUid 决定：
+   *   - 全量重建（convertToMindMapData）传 true，uid === 后端 ID；
+   *   - 粘贴 appointData 构造传 false，让库 createUid 生成全新 uid，
+   *     否则 handleCreateTree 的 uidToBackendId.has(uid) 检查会命中并跳过创建。
+   *  墨色登记由 ctx.injectedNodeInk 控制（纯构造场景传 null，不登记）。 */
+  function dtoToNodeData(
+    n: NodeDto,
+    ctx: {
+      inkOverrides: Map<string, ResolvedNodeInk>
+      injectedNodeInk: Map<string, string> | null
+      rootId?: string | null
+      withUid?: boolean
+    }
+  ): Record<string, unknown> {
+    const data: Record<string, unknown> = {
+      text: n.icon ? `${n.icon} ${n.title}` : n.title,
+      expand: !n.isCollapsed
+    }
+    if (ctx.withUid) {
+      // ★ 关键：用后端 ID 作为 uid，阻止 simple-mind-map 重新生成
+      data.uid = n.id
+      data.id = n.id
+      data.backendId = n.id
+    }
+    if (n.color) data.color = n.color
+    if (n.fontSize) data.fontSize = n.fontSize
+    if (n.fontFamily) data.fontFamily = n.fontFamily
+    if (n.backgroundColor) data.fillColor = n.backgroundColor
+    if (n.borderColor) data.borderColor = n.borderColor
+    // 墨色解算：节点自定义底色会让「继承来的文字色」失效（深色下亮底 + 亮字看不见，
+    // 浅色下深底 + 深字同样看不见）。按生效底色解算，只写进渲染数据、不落库。
+    const resolvedInk = ctx.inkOverrides.get(String(n.id))
+    if (resolvedInk?.injected) {
+      data.color = resolvedInk.ink
+      ctx.injectedNodeInk?.set(String(n.id), resolvedInk.ink)
+    }
+    if (n.shape != null && n.shape in shapeMap) data.shape = shapeMap[n.shape]
+    if (n.edgeColor) data.lineColor = n.edgeColor
+    if (n.edgeStyle != null && n.edgeStyle in edgeStyleMap) data.lineDasharray = edgeStyleMap[n.edgeStyle]
+    if (n.note) data.note = n.note
+    // 从 ExtraData 还原关联线数据（associativeLine* 系列字段）
+    if (n.extraData) {
+      try {
+        const extra = JSON.parse(n.extraData)
+        if (Array.isArray(extra.associativeLineTargets) && extra.associativeLineTargets.length > 0) {
+          data.associativeLineTargets = extra.associativeLineTargets
+        }
+        if (Array.isArray(extra.associativeLinePoint)) {
+          data.associativeLinePoint = extra.associativeLinePoint
+        }
+        if (Array.isArray(extra.associativeLineTargetControlOffsets)) {
+          data.associativeLineTargetControlOffsets = extra.associativeLineTargetControlOffsets
+        }
+        if (extra.associativeLineText && typeof extra.associativeLineText === 'object') {
+          data.associativeLineText = extra.associativeLineText
+        }
+        if (extra.associativeLineStyle && typeof extra.associativeLineStyle === 'object') {
+          data.associativeLineStyle = extra.associativeLineStyle
+        }
+        // 摘要数据（单节点摘要，数组结构）
+        if (Array.isArray(extra.generalization) && extra.generalization.length > 0) {
+          data.generalization = extra.generalization
+        }
+        // 外框数据（对象，包含 groupId/radius/strokeWidth/strokeColor/strokeDasharray/fill/text 等）
+        if (extra.outerFrame && typeof extra.outerFrame === 'object') {
+          data.outerFrame = extra.outerFrame
+        }
+      } catch {
+        // extraData 不是合法 JSON，忽略
+      }
+    }
+    // 仅根节点的直接子节点设置明确的 dir，非根直接子节点不显式设置 dir，交由 simple-mind-map 向上继承分支方向
+    if (n.parentId && n.parentId === ctx.rootId) {
+      if (n.direction === 0) data.dir = 'left'
+      else data.dir = 'right'
+    }
+    return data
+  }
+
   function convertToMindMapData(nodes: NodeDto[]): unknown {
     if (nodes.length === 0) return null
 
@@ -406,65 +533,12 @@ export function useMindMapSync(opts: {
 
     // 1. 创建节点，uid / id / backendId 三者统一为后端 ID
     for (const n of nodes) {
-      const data: Record<string, unknown> = {
-        text: n.icon ? `${n.icon} ${n.title}` : n.title,
-        expand: !n.isCollapsed,
-        uid: n.id,         // ★ 关键：用后端 ID 作为 uid，阻止 simple-mind-map 重新生成
-        id: n.id,          // simple-mind-map 节点 id
-        backendId: n.id    // 稳定的后端 ID 标记（会随拷贝/序列化保留）
-      }
-      if (n.color) data.color = n.color
-      if (n.fontSize) data.fontSize = n.fontSize
-      if (n.fontFamily) data.fontFamily = n.fontFamily
-      if (n.backgroundColor) data.fillColor = n.backgroundColor
-      if (n.borderColor) data.borderColor = n.borderColor
-      // 墨色解算：节点自定义底色会让「继承来的文字色」失效（深色下亮底 + 亮字看不见，
-      // 浅色下深底 + 深字同样看不见）。按生效底色解算，只写进渲染数据、不落库。
-      const resolvedInk = inkOverrides.get(String(n.id))
-      if (resolvedInk?.injected) {
-        data.color = resolvedInk.ink
-        injectedNodeInk.set(String(n.id), resolvedInk.ink)
-      }
-      if (n.shape != null && n.shape in shapeMap) data.shape = shapeMap[n.shape]
-      if (n.edgeColor) data.lineColor = n.edgeColor
-      if (n.edgeStyle != null && n.edgeStyle in edgeStyleMap) data.lineDasharray = edgeStyleMap[n.edgeStyle]
-      if (n.note) data.note = n.note
-      // 从 ExtraData 还原关联线数据（associativeLine* 系列字段）
-      if (n.extraData) {
-        try {
-          const extra = JSON.parse(n.extraData)
-          if (Array.isArray(extra.associativeLineTargets) && extra.associativeLineTargets.length > 0) {
-            data.associativeLineTargets = extra.associativeLineTargets
-          }
-          if (Array.isArray(extra.associativeLinePoint)) {
-            data.associativeLinePoint = extra.associativeLinePoint
-          }
-          if (Array.isArray(extra.associativeLineTargetControlOffsets)) {
-            data.associativeLineTargetControlOffsets = extra.associativeLineTargetControlOffsets
-          }
-          if (extra.associativeLineText && typeof extra.associativeLineText === 'object') {
-            data.associativeLineText = extra.associativeLineText
-          }
-          if (extra.associativeLineStyle && typeof extra.associativeLineStyle === 'object') {
-            data.associativeLineStyle = extra.associativeLineStyle
-          }
-          // 摘要数据（单节点摘要，数组结构）
-          if (Array.isArray(extra.generalization) && extra.generalization.length > 0) {
-            data.generalization = extra.generalization
-          }
-          // 外框数据（对象，包含 groupId/radius/strokeWidth/strokeColor/strokeDasharray/fill/text 等）
-          if (extra.outerFrame && typeof extra.outerFrame === 'object') {
-            data.outerFrame = extra.outerFrame
-          }
-        } catch {
-          // extraData 不是合法 JSON，忽略
-        }
-      }
-      // 仅根节点的直接子节点设置明确的 dir，非根直接子节点不显式设置 dir，交由 simple-mind-map 向上继承分支方向
-      if (n.parentId && n.parentId === nodesStore.rootNode?.id) {
-        if (n.direction === 0) data.dir = 'left'
-        else data.dir = 'right'
-      }
+      const data = dtoToNodeData(n, {
+        inkOverrides,
+        injectedNodeInk,
+        rootId: nodesStore.rootNode?.id,
+        withUid: true
+      })
 
       const nodeData = {
         id: n.id,
@@ -543,6 +617,13 @@ export function useMindMapSync(opts: {
     }, 150)
   }
 
+  /** 墨色补丁窗口标记：patchNodeInkOverrides 内部的 SET_NODE_DATA({color})
+   *  会触发 data_change_detail，此窗口内 handleUpdate 的 color 分支必须跳过，
+   *  否则主题/明暗切换会把「解算墨色」写进后端 color 字段（数据污染）。
+   *  因 handleUpdate 是 async（首个 await 后此标志可能已复位），实际抑制判定
+   *  在 processDataChangeDetail 入口同步快照并随 diff 传参（inkSuppress）。 */
+  let inkPatchActive = false
+
   /**
    * 主题 / 明暗变化后刷新节点墨色补丁。
    *
@@ -556,7 +637,12 @@ export function useMindMapSync(opts: {
     const renderTheme = opts.getRenderTheme?.() ?? null
     if (!inst || !renderTheme) return
     const overrides = computeNodeInkOverrides(nodesStore.nodes, renderTheme)
-    patchNodeInkOverrides({ instance: inst, overrides, injected: injectedNodeInk })
+    inkPatchActive = true
+    try {
+      patchNodeInkOverrides({ instance: inst, overrides, injected: injectedNodeInk })
+    } finally {
+      inkPatchActive = false
+    }
   }
 
   /** ============================================================
@@ -603,7 +689,10 @@ export function useMindMapSync(opts: {
         continue
       }
 
-      const title = extractTitleFromText(task.node.data.text ?? '')
+      // 粘贴场景透传字段（appointData 由 handlePaste 塞入，见阶段 4 任务 4.1）：
+      // __pasteIcon —— icon 字段值（画布 text 已带前缀，落库时用其剥离 + 写入 icon）
+      const pasteIcon = (task.node.data as any).__pasteIcon
+      const title = extractTitleFromText(task.node.data.text ?? '', undefined, pasteIcon != null ? String(pasteIcon) : undefined)
 
       // 检测是否根节点直接子节点 → 设置 direction
       let direction: 0 | 1 | undefined = undefined
@@ -619,11 +708,26 @@ export function useMindMapSync(opts: {
             title,
             sortOrder: task.sortOrder,
             isCollapsed: task.node.data.expand === false,
-            direction
+            direction,
+            // —— 新增：样式字段提取（detail create 落库样式；修复画布原生粘贴丢样式缺陷）——
+            ...extractStyleFromDetailData(task.node.data),
+            // note：convertToMindMapData 映射链已带（画布原生粘贴/工具栏粘贴均有效）
+            ...(task.node.data.note ? { note: task.node.data.note } : {}),
+            // __pasteContent：工具栏粘贴的正文透传（画布不渲染，只能走 create payload）
+            ...((task.node.data as any).__pasteContent != null
+              ? { content: (task.node.data as any).__pasteContent }
+              : {}),
+            // __pasteIcon：粘贴节点的 icon 字段值
+            ...(pasteIcon != null ? { icon: String(pasteIcon) } : {})
           })
           // 写回渲染节点 + DetailNode + 映射表
           writeBackendIdToNode(uid, created.id)
           writeBackendIdToDetailNode(task.node, created.id)
+          // 清理透传字段（不留在渲染数据，避免序列化/导出污染；
+          // setData 触发 detail 时 __pasteIcon/__pasteContent 不在任何同步分支，无落库副作用）
+          if ((task.node.data as any).__pasteContent != null || pasteIcon != null) {
+            findRenderNodeByUid(uid)?.setData({ __pasteContent: undefined, __pasteIcon: undefined })
+          }
           return created.id
         } finally {
           pendingCreates.delete(uid)
@@ -667,8 +771,12 @@ export function useMindMapSync(opts: {
    *    3. direction 变化 → nodesStore.update(direction)
    *  结构性变化（父节点/同级排序）由 handleStructuralChangesBatch 统一处理，
    *  入口在 processDataChangeDetail（按整批 update diff 合并处理）。
+   *
+   *  @param inkSuppress 墨色补丁窗口标记（processDataChangeDetail 入口同步快照，
+   *   随 diff 传入，避免 handleUpdate 内部 await 后 inkPatchActive 已复位的竞态）。
+   *   为 true 时 color 分支跳过 —— 主题/明暗切换的解算墨色不落库。
    *  ============================================================ */
-  async function handleUpdate(diff: DiffItem) {
+  async function handleUpdate(diff: DiffItem, inkSuppress: boolean) {
     const { data, oldData } = diff
     if (!oldData) return
     const uid = data.data.uid
@@ -731,6 +839,29 @@ export function useMindMapSync(opts: {
         }
       }
       scheduleExtraDataUpdate(backendId, JSON.stringify(extraObj))
+    }
+
+    // ---------- 2.7 样式字段变化（聚合 debounce，key=`style:${backendId}`） ----------
+    // 同节点多字段变化打包进一个 partial、一次请求（与现状 handleUpdateStyle 对齐）。
+    // color 受 inkSuppress 抑制（主题/明暗切换的解算墨色不落库）；
+    // icon 与 text 前缀联动由阶段 2 任务 2.3 显式注入 partial，不在此 diff 检测。
+    if (!styleBatchSyncActive) {
+      const stylePartial: Record<string, unknown> = {}
+      for (const f of styleFieldPairs) {
+        const oldV = (oldData.data as any)[f.lib]
+        const newV = (data.data as any)[f.lib]
+        if (oldV !== newV) {
+          stylePartial[f.backend] = f.convert ? f.convert(newV) : newV
+        }
+      }
+      const oldColor = (oldData.data as any).color
+      const newColor = (data.data as any).color
+      if (oldColor !== newColor && !inkSuppress) {
+        stylePartial.color = newColor
+      }
+      if (Object.keys(stylePartial).length > 0) {
+        scheduleStyleUpdate(backendId, stylePartial)
+      }
     }
 
     // ---------- 3. direction 变化（如果是根节点直接子节点则同步到后端） ----------
@@ -798,6 +929,21 @@ export function useMindMapSync(opts: {
       flush
     })
   }
+
+  /** 多选批量样式同步抑制标记：
+   *  多选改样式会对每个激活节点执行 SET_NODE_STYLES，逐节点触发 update diff
+   *  （N 次 detail = N 次全树 diff + N 个防抖请求）。抑制窗口内由调用方
+   *  （阶段 2 handleUpdateStyle）自行完成单次 batchUpdate 落库，
+   *  样式分支跳过 —— 与 collapseBatchSyncActive + applyExpandCollapse 模式同构。
+   *  本阶段只加判断分支，置位代码在阶段 2（零行为变化）。 */
+  let styleBatchSyncActive = false
+
+  /** 置位多选批量样式窗口：置位期间 handleUpdate 样式分支跳过，由调用方单次落库。
+   *  窗口为同步复位 —— detail emit 是同步的（exec → addHistory → emit），
+   *  调用方 await 落库前所有 diff 已同步派发且 handleUpdate 停在首个 await
+   *  （getBackendIdOrWait），其样式分支读取必然落在窗口内；无需 600ms 保守窗口。 */
+  function beginStyleBatch() { styleBatchSyncActive = true }
+  function endStyleBatch() { styleBatchSyncActive = false }
 
   /** 批量展开/折叠同步抑制标记：
    *  「层级」菜单操作会一次性改变大量节点的 expand 状态，
@@ -945,6 +1091,44 @@ export function useMindMapSync(opts: {
     }
     extraDataDebounceTimers.set(backendId, {
       timer: setTimeout(flush, 500),
+      flush
+    })
+  }
+
+  /** 样式聚合更新核心逻辑（不带同步状态标记，供 flush 与失败重试复用） */
+  async function runStyleUpdate(backendId: string, partial: Record<string, unknown>): Promise<void> {
+    await nodesStore.update(backendId, partial)
+  }
+
+  /** NodeUpdatePayload（后端字段）→ simple-mind-map 样式字段（库字段）。
+   *  与 convertToMindMapData / dtoToNodeData 使用相同的正向映射表
+   *  （shapeMap / edgeStyleMap），样式面板画布优先写入复用，映射表不外泄。 */
+  function payloadToLibStyle(payload: NodeUpdatePayload): Record<string, unknown> {
+    const s: Record<string, unknown> = {}
+    if (payload.color != null) s.color = payload.color
+    if (payload.fontSize != null) s.fontSize = payload.fontSize
+    if (payload.fontFamily != null) s.fontFamily = payload.fontFamily
+    if (payload.shape != null && payload.shape in shapeMap) s.shape = shapeMap[payload.shape]
+    if (payload.backgroundColor != null) s.fillColor = payload.backgroundColor
+    if (payload.borderColor != null) s.borderColor = payload.borderColor
+    if (payload.edgeColor != null) s.lineColor = payload.edgeColor
+    if (payload.edgeStyle != null) s.lineDasharray = edgeStyleMap[payload.edgeStyle]
+    return s
+  }
+
+  /** 样式更新调度（debounce 400ms，key=`style:${backendId}`）
+   *  partial 为一次 diff 的聚合对象；同节点连续触发时 flush 闭包捕获最新 partial。 */
+  function scheduleStyleUpdate(backendId: string, partial: Record<string, unknown>) {
+    const existing = styleDebounceTimers.get(backendId)
+    if (existing) clearTimeout(existing.timer)
+    // 该节点有新的样式修改待同步 → 淘汰该节点之前的样式失败项（前缀隔离字段类型）
+    dropFailedOpsByKey(`style:${backendId}`)
+    const flush = () => {
+      styleDebounceTimers.delete(backendId)
+      return enqueueStructuralOp(() => runStyleUpdate(backendId, partial), `style:${backendId}`)
+    }
+    styleDebounceTimers.set(backendId, {
+      timer: setTimeout(flush, 400),
       flush
     })
   }
@@ -1099,14 +1283,14 @@ export function useMindMapSync(opts: {
     return parentOf.get(uid) ?? null
   }
 
-  /** 从文本中提取 title（去除 icon 前缀） */
-  function extractTitleFromText(text: string, backendId?: string): string {
+  /** 从文本中提取 title（去除 icon 前缀）。
+   *  @param explicitIcon 优先使用的 icon（粘贴场景：新节点 store 尚无记录，
+   *   用 appointData 透传的 __pasteIcon 剥离；缺省时按 backendId 查 store） */
+  function extractTitleFromText(text: string, backendId?: string, explicitIcon?: string | null): string {
     if (!text) return ''
-    if (backendId) {
-      const backendNode = nodesStore.findNode(backendId)
-      if (backendNode?.icon && text.startsWith(backendNode.icon + ' ')) {
-        return text.substring(backendNode.icon.length + 1)
-      }
+    const icon = explicitIcon ?? (backendId ? nodesStore.findNode(backendId)?.icon ?? null : null)
+    if (icon && text.startsWith(icon + ' ')) {
+      return text.substring(icon.length + 1)
     }
     return text
   }
@@ -1146,8 +1330,11 @@ export function useMindMapSync(opts: {
     // update 中纯文本/折叠变化是 debounced 的，不需要排队；
     // 注意：handleUpdate 是 async（内部 await getBackendIdOrWait），不 await 在这里
     //       因为它的结果不影响后续批次；所有副作用最终都流进 opQueue
+    // 墨色补丁窗口内的 detail 由 inkSuppress 拦截（入口同步快照，
+    // 避免 handleUpdate 内部 await 后 inkPatchActive 已复位的 async 竞态）
+    const inkSuppress = inkPatchActive
     for (const u of updates) {
-      handleUpdate(u).catch((e) => console.error('[sync] handleUpdate failed:', e))
+      handleUpdate(u, inkSuppress).catch((e) => console.error('[sync] handleUpdate failed:', e))
     }
 
     // 结构性变化（拖拽移动 / 同级排序）：一次事件的所有 update diff 合并为
@@ -1378,6 +1565,7 @@ export function useMindMapSync(opts: {
     flushMap(collapseDebounceTimers)
     flushMap(noteDebounceTimers)
     flushMap(extraDataDebounceTimers)
+    flushMap(styleDebounceTimers)
     return promises
   }
 
@@ -1437,6 +1625,13 @@ export function useMindMapSync(opts: {
     waitForPendingOps,
     retryFailedOps,
     hasPendingWriteOps,
+    // 阶段 2：画布优先写入（样式面板 / 内容弹窗）
+    findRenderNodeByUid,
+    payloadToLibStyle,
+    beginStyleBatch,
+    endStyleBatch,
+    // 阶段 4：粘贴 appointData 构造（withUid=false，见 handlePaste）
+    dtoToNodeData,
     // 暴露给外部调试
     _debugIdMap: uidToBackendId
   }
