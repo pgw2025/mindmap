@@ -12,10 +12,17 @@ let hideTimer: ReturnType<typeof setTimeout> | null = null
 /** 关闭延迟时间（毫秒），给用户足够时间将鼠标移入气泡 */
 const HIDE_DELAY = 300
 
-/** 是否为触摸设备 */
+/** 是否为触摸设备（仅用于样式判断，不影响交互逻辑） */
 const isTouchDevice = ref(false)
-/** 触摸模式下用户主动点击显示的标记，用于忽略合成 mouseout 导致的 hide */
-let touchModeActive = false
+
+/**
+ * 当前输入方式：'mouse' | 'touch'
+ * 动态检测用户当前正在使用的输入设备，而不是根据设备能力静态判断
+ * 解决触摸屏电脑上用鼠标操作时备注不消失的问题
+ */
+type InputType = 'mouse' | 'touch'
+let currentInputType: InputType = 'mouse'
+
 /** 记录上一次显示的备注内容，用于判断是否点击同一个图标（toggle） */
 let lastNoteContent = ''
 /** 记录上一次显示的位置，辅助判断是否同一个图标 */
@@ -52,36 +59,51 @@ function doShow(note: string, x: number, y: number) {
 function doHide() {
   clearHideTimer()
   visible.value = false
-  touchModeActive = false
+}
+
+/**
+ * 切换为鼠标输入模式
+ * 监听到 mousedown 事件时调用
+ */
+function switchToMouseInput() {
+  currentInputType = 'mouse'
+}
+
+/**
+ * 切换为触摸输入模式
+ * 监听到 touchstart 事件时调用
+ */
+function switchToTouchInput() {
+  currentInputType = 'touch'
 }
 
 /** 展示备注 tooltip（simple-mind-map customNoteContentShow.show 回调） */
 function show(note: string, x: number, y: number) {
-  // 触摸设备：点击切换模式
-  if (isTouchDevice.value) {
+  // 触摸模式：点击切换
+  if (currentInputType === 'touch') {
     // 如果已经显示，且点击的是同一个图标 → toggle 关闭
     if (visible.value && isSameNote(note, x, y)) {
       doHide()
       return
     }
-    // 否则显示，并标记为触摸模式激活，忽略后续的合成 hide
+    // 否则显示
     doShow(note, x, y)
-    touchModeActive = true
     return
   }
 
-  // 桌面端：正常显示
+  // 鼠标模式：正常显示
   doShow(note, x, y)
 }
 
 /** 隐藏备注 tooltip（simple-mind-map customNoteContentShow.hide 回调） */
 function hide() {
-  // 触摸模式下：忽略合成 mouseout 导致的 hide
-  if (isTouchDevice.value && touchModeActive) {
+  // 触摸模式：忽略合成 mouseout 导致的 hide
+  // （触摸后浏览器会合成 mouseover → mouseout，我们不希望气泡自动消失）
+  if (currentInputType === 'touch') {
     return
   }
 
-  // 桌面端：延迟关闭，给用户足够时间将鼠标移入气泡
+  // 鼠标模式：延迟关闭，给用户足够时间将鼠标移入气泡
   clearHideTimer()
   hideTimer = setTimeout(() => {
     visible.value = false
@@ -90,12 +112,18 @@ function hide() {
 
 /** 鼠标进入气泡时，取消关闭，保持显示 */
 function handleMouseEnter() {
-  clearHideTimer()
+  // 只有鼠标模式下才需要处理
+  if (currentInputType === 'mouse') {
+    clearHideTimer()
+  }
 }
 
 /** 鼠标离开气泡时，启动延迟关闭 */
 function handleMouseLeave() {
-  hide()
+  // 只有鼠标模式下才需要处理
+  if (currentInputType === 'mouse') {
+    hide()
+  }
 }
 
 /**
@@ -107,9 +135,10 @@ function stopTouchPropagation(e: TouchEvent) {
 }
 
 /**
- * 点击气泡外部时关闭备注（移动端）
+ * 点击气泡外部时关闭备注（触摸模式下使用）
+ * 鼠标模式下由 mouseout 自动处理，这里作为兜底也可以关闭
  */
-function handleClickOutside(e: TouchEvent) {
+function handleClickOutside(e: Event) {
   if (!visible.value || !tooltipRef.value) return
   // 点击目标不在气泡内，则关闭
   if (!tooltipRef.value.contains(e.target as Node)) {
@@ -122,19 +151,27 @@ function handleClickOutside(e: TouchEvent) {
 }
 
 onMounted(() => {
-  // 检测是否为触摸设备
+  // 检测是否为触摸设备（仅用于样式判断）
   isTouchDevice.value = 'ontouchstart' in window || navigator.maxTouchPoints > 0
-  if (isTouchDevice.value) {
-    // 移动端：只监听 touchstart，点击气泡外关闭备注。
-    // 不能监听 mousedown：点按图标后浏览器会合成 mouseover → mousedown，
-    // mousedown 会把 mouseover 刚打开的气泡误判为"点击外部"立即关闭（闪现消失）
-    document.addEventListener('touchstart', handleClickOutside, true)
-  }
+
+  // 动态检测当前输入方式
+  // 触摸时切换为触摸模式
+  document.addEventListener('touchstart', switchToTouchInput, { passive: true })
+  // 鼠标按下时切换为鼠标模式
+  document.addEventListener('mousedown', switchToMouseInput, { passive: true })
+
+  // 点击外部关闭（触摸模式下的主要关闭方式，鼠标模式下作为兜底）
+  // 使用捕获阶段，确保在事件冒泡到画布之前就能检测到
+  document.addEventListener('touchstart', handleClickOutside, true)
+  document.addEventListener('mousedown', handleClickOutside, true)
 })
 
 onBeforeUnmount(() => {
   clearHideTimer()
+  document.removeEventListener('touchstart', switchToTouchInput)
+  document.removeEventListener('mousedown', switchToMouseInput)
   document.removeEventListener('touchstart', handleClickOutside, true)
+  document.removeEventListener('mousedown', handleClickOutside, true)
 })
 
 defineExpose({ show, hide })
