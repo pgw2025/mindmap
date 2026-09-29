@@ -17,8 +17,10 @@ const isTouchDevice = ref(false)
 
 /**
  * 当前输入方式：'mouse' | 'touch'
- * 动态检测用户当前正在使用的输入设备，而不是根据设备能力静态判断
- * 解决触摸屏电脑上用鼠标操作时备注不消失的问题
+ * 依据 Pointer Events 的 pointerType 判定真实输入源：
+ * 触摸后浏览器合成的兼容鼠标事件（mouseover/mousedown 等）只是 MouseEvent，
+ * 不会派发对应的 pointer 事件，因此以 pointerdown/pointermove 为准不会被合成事件干扰。
+ * 触摸/笔统一走触摸交互（点按切换显示），鼠标走 hover 自动显隐。
  */
 type InputType = 'mouse' | 'touch'
 let currentInputType: InputType = 'mouse'
@@ -62,19 +64,17 @@ function doHide() {
 }
 
 /**
- * 切换为鼠标输入模式
- * 监听到 mousedown 事件时调用
+ * 根据真实指针输入切换交互模式（document 级 pointerdown/pointermove）
+ * - 鼠标：移动或按下即切回鼠标模式（覆盖触屏电脑用鼠标操作的场景）
+ * - 触摸/笔：仅在按下时切入触摸模式，悬停移动不改变模式，
+ *   避免笔悬停（行为类似鼠标 hover）被误判为触摸
  */
-function switchToMouseInput() {
-  currentInputType = 'mouse'
-}
-
-/**
- * 切换为触摸输入模式
- * 监听到 touchstart 事件时调用
- */
-function switchToTouchInput() {
-  currentInputType = 'touch'
+function handlePointerInput(e: PointerEvent) {
+  if (e.pointerType === 'mouse') {
+    currentInputType = 'mouse'
+  } else if (e.type === 'pointerdown') {
+    currentInputType = 'touch'
+  }
 }
 
 /** 展示备注 tooltip（simple-mind-map customNoteContentShow.show 回调） */
@@ -112,7 +112,7 @@ function hide() {
 
 /** 鼠标进入气泡时，取消关闭，保持显示 */
 function handleMouseEnter() {
-  // 只有鼠标模式下才需要处理
+  // 触摸模式下气泡可能覆盖触点，合成 mouseenter 不应触发任何逻辑
   if (currentInputType === 'mouse') {
     clearHideTimer()
   }
@@ -135,10 +135,13 @@ function stopTouchPropagation(e: TouchEvent) {
 }
 
 /**
- * 点击气泡外部时关闭备注（触摸模式下使用）
- * 鼠标模式下由 mouseout 自动处理，这里作为兜底也可以关闭
+ * 按下气泡外部时关闭备注
+ * 必须挂在 pointerdown 而非 mousedown/touchstart：
+ * 触摸后浏览器紧跟合成 mouseover 派发合成 mousedown，
+ * 若监听 mousedown 会把刚打开的气泡误判为"点击外部"导致闪现消失；
+ * 合成鼠标事件不会派发 pointer 事件，pointerdown 只来自真实输入，天然免疫此问题
  */
-function handleClickOutside(e: Event) {
+function handleClickOutside(e: PointerEvent) {
   if (!visible.value || !tooltipRef.value) return
   // 点击目标不在气泡内，则关闭
   if (!tooltipRef.value.contains(e.target as Node)) {
@@ -155,23 +158,18 @@ onMounted(() => {
   isTouchDevice.value = 'ontouchstart' in window || navigator.maxTouchPoints > 0
 
   // 动态检测当前输入方式
-  // 触摸时切换为触摸模式
-  document.addEventListener('touchstart', switchToTouchInput, { passive: true })
-  // 鼠标按下时切换为鼠标模式
-  document.addEventListener('mousedown', switchToMouseInput, { passive: true })
+  document.addEventListener('pointerdown', handlePointerInput)
+  document.addEventListener('pointermove', handlePointerInput)
 
-  // 点击外部关闭（触摸模式下的主要关闭方式，鼠标模式下作为兜底）
-  // 使用捕获阶段，确保在事件冒泡到画布之前就能检测到
-  document.addEventListener('touchstart', handleClickOutside, true)
-  document.addEventListener('mousedown', handleClickOutside, true)
+  // 按下气泡外部时关闭（捕获阶段，先于画布处理）
+  document.addEventListener('pointerdown', handleClickOutside, true)
 })
 
 onBeforeUnmount(() => {
   clearHideTimer()
-  document.removeEventListener('touchstart', switchToTouchInput)
-  document.removeEventListener('mousedown', switchToMouseInput)
-  document.removeEventListener('touchstart', handleClickOutside, true)
-  document.removeEventListener('mousedown', handleClickOutside, true)
+  document.removeEventListener('pointerdown', handlePointerInput)
+  document.removeEventListener('pointermove', handlePointerInput)
+  document.removeEventListener('pointerdown', handleClickOutside, true)
 })
 
 defineExpose({ show, hide })
