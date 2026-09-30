@@ -60,6 +60,16 @@ http.interceptors.response.use(
       return Promise.reject(new Error(message))
     }
 
+    // 认证入口（登录/注册）的 401 属于业务错误（如账号或密码错误），
+    // 不应触发静默刷新，直接透传后端 message。
+    const AUTH_ENTRY_URLS = ['/auth/login', '/auth/register']
+    const isAuthEntry = AUTH_ENTRY_URLS.some((u) => error.config?.url?.includes(u))
+    if (isAuthEntry) {
+      const payload = error.response?.data as { message?: string } | undefined
+      const message = payload?.message || error.message || '网络错误'
+      return Promise.reject(new Error(message))
+    }
+
     const auth = useAuthStore()
     const config = error.config
     const isRefreshRequest = config?.url?.includes('/auth/refresh')
