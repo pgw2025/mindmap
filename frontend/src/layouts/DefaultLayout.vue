@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import {
   NButton,
   NDrawer,
@@ -51,6 +51,8 @@ const message = useMessage()
 const router = useRouter()
 
 const isAdmin = computed(() => authStore.isAdmin)
+const route = useRoute()
+const isHome = computed(() => route.name === 'home')
 
 function goAdmin(): void {
   router.push({ name: 'admin-dashboard' })
@@ -59,6 +61,13 @@ function goAdmin(): void {
 function goRecycleBin(): void {
   drawerVisible.value = false
   router.push({ name: 'recycle-bin' })
+}
+
+/** 切到「我的导图 / 公开广场」：先设 scope，再回到首页，避免停留在回收站等其他路由时页面不切换 */
+function goScope(s: 'mine' | 'public'): void {
+  drawerVisible.value = false
+  mapsStore.setScope(s)
+  router.push({ name: 'home' })
 }
 
 const collapsed = ref(false)
@@ -305,8 +314,8 @@ onMounted(async () => {
             <div class="sider-title">
               <span>视图</span>
             </div>
-            <NButton quaternary block :type="mapsStore.scope === 'mine' ? 'primary' : 'default'"
-              @click="mapsStore.setScope('mine')">
+            <NButton quaternary block :type="isHome && mapsStore.scope === 'mine' ? 'primary' : 'default'"
+              @click="goScope('mine')">
               <template #icon>
                 <NIcon>
                   <FolderOpenOutline />
@@ -314,8 +323,8 @@ onMounted(async () => {
               </template>
               我的导图
             </NButton>
-            <NButton quaternary block :type="mapsStore.scope === 'public' ? 'primary' : 'default'"
-              @click="mapsStore.setScope('public')">
+            <NButton quaternary block :type="isHome && mapsStore.scope === 'public' ? 'primary' : 'default'"
+              @click="goScope('public')">
               <template #icon>
                 <NIcon>
                   <CloudOutline />
@@ -323,7 +332,7 @@ onMounted(async () => {
               </template>
               公开广场
             </NButton>
-            <NButton quaternary block @click="goRecycleBin">
+            <NButton quaternary block :type="route.name === 'recycle-bin' ? 'primary' : 'default'" @click="goRecycleBin">
               <template #icon>
                 <NIcon>
                   <TrashOutline />
@@ -442,15 +451,15 @@ onMounted(async () => {
         <NDrawerContent :title="'侧边栏'" :native-scrollbar="true">
           <div class="sider-inner">
             <div class="sider-section">
-              <NButton quaternary block :type="mapsStore.scope === 'mine' ? 'primary' : 'default'"
-                @click="mapsStore.setScope('mine'); drawerVisible = false">
+              <NButton quaternary block :type="isHome && mapsStore.scope === 'mine' ? 'primary' : 'default'"
+                @click="goScope('mine')">
                 我的导图
               </NButton>
-              <NButton quaternary block :type="mapsStore.scope === 'public' ? 'primary' : 'default'"
-                @click="mapsStore.setScope('public'); drawerVisible = false">
+              <NButton quaternary block :type="isHome && mapsStore.scope === 'public' ? 'primary' : 'default'"
+                @click="goScope('public')">
                 公开广场
               </NButton>
-              <NButton quaternary block @click="goRecycleBin">
+              <NButton quaternary block :type="route.name === 'recycle-bin' ? 'primary' : 'default'" @click="goRecycleBin">
                 回收站
               </NButton>
               <NButton v-if="isAdmin" quaternary block type="error" @click="drawerVisible = false; goAdmin()">
