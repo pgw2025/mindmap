@@ -40,6 +40,9 @@ public class MindMap
     public DateTime? TakenDownAt { get; set; }
     public string? TakenDownReason { get; set; }
 
+    /// <summary>软删除时间（移入回收站）。null = 正常；非空 = 在回收站，到期由后台服务物理清除。</summary>
+    public DateTime? DeletedAt { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public DateTime LastEditedAt { get; set; }

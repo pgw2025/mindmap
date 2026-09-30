@@ -16,6 +16,8 @@ public interface IMindMapService
     Task<MindMapDetailDto> CreateAsync(Guid userId, MindMapCreateRequest req, CancellationToken ct = default);
     Task<MindMapDetailDto> UpdateAsync(Guid userId, Guid id, MindMapUpdateRequest req, CancellationToken ct = default);
     Task DeleteAsync(Guid userId, Guid id, CancellationToken ct = default);
+    /// <summary>物理删除导图（含全部节点），供回收站「彻底删除」与过期清理复用。调用方自行校验归属。</summary>
+    Task HardDeleteAsync(Guid id, CancellationToken ct = default);
     Task<MindMapDetailDto> CopyAsync(Guid userId, Guid id, MindMapCopyRequest req, CancellationToken ct = default);
     Task SetTagsAsync(Guid userId, Guid id, List<Guid> tagIds, CancellationToken ct = default);
 }
@@ -373,12 +375,30 @@ public class MindMapService : IMindMapService
         return (await GetAsync(userId, id, ct))!;
     }
 
+    /// <summary>
+    /// 软删除：置 DeletedAt 移入回收站。节点/版本/标签/文件夹归属原地保留，可无损恢复。
+    /// 已在回收站的导图被全局查询过滤器隐藏，此处查不到（不会重复软删）。
+    /// </summary>
     public async Task DeleteAsync(Guid userId, Guid id, CancellationToken ct = default)
     {
         var map = await _db.MindMaps.FirstOrDefaultAsync(m => m.Id == id && m.OwnerId == userId, ct)
             ?? throw ApiException.NotFound("MindMap", id);
 
+        map.DeletedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// 物理删除导图及其全部节点。整个流程包在事务里，保证原子性，失败时整体回滚，避免中间态。
+    /// </summary>
+    public async Task HardDeleteAsync(Guid id, CancellationToken ct = default)
+    {
+        // IgnoreQueryFilters：导图可能已软删（在回收站），硬删时必须仍能取到。
+        var map = await _db.MindMaps.IgnoreQueryFilters().FirstOrDefaultAsync(m => m.Id == id, ct);
+        if (map is null) return; // 已不存在视为成功（幂等）
+
         // 整个删除流程包在事务里，保证原子性，失败时整体回滚，避免中间态。
+        // （ExecuteUpdate / ExecuteDelete 会自动加入环境事务。）
         await using var tx = await _db.Database.BeginTransactionAsync(ct);
 
         // 1. 先清空 RootNodeId 引用，否则后续删除根节点时会被

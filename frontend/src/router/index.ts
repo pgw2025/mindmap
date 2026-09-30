@@ -23,6 +23,12 @@ const routes: RouteRecordRaw[] = [
         name: 'home',
         component: () => import('@/views/HomeView.vue'),
         meta: { title: '首页' }
+      },
+      {
+        path: 'recycle-bin',
+        name: 'recycle-bin',
+        component: () => import('@/views/home/RecycleBinView.vue'),
+        meta: { title: '回收站' }
       }
     ]
   },

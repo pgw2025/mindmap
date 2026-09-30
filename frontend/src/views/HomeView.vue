@@ -326,7 +326,7 @@ async function submitRemove(): Promise<boolean> {
   removeSubmitting.value = true
   try {
     await mapsStore.remove(removeTargetId.value)
-    message.success('已删除')
+    message.success('已移入回收站，可在侧边栏「回收站」中恢复')
     removeModalVisible.value = false
     return true
   } catch (e) {
@@ -1189,7 +1189,7 @@ onUnmounted(() => {
         size="medium"
       >
         <div style="font-size: 14px; color: #334155; line-height: 1.6;">
-          删除「<b>{{ removeTargetTitle }}</b>」？该操作不可恢复。
+          删除「<b>{{ removeTargetTitle }}</b>」？删除后将移入回收站，可在回收站内恢复；保留期满后自动彻底删除。
         </div>
         <template #footer>
           <div style="display: flex; justify-content: flex-end; gap: 10px;">

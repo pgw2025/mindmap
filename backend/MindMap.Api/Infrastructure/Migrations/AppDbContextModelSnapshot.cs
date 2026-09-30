@@ -73,6 +73,9 @@ namespace MindMap.Api.Infrastructure.Migrations
                     b.Property<int>("DefaultLayout")
                         .HasColumnType("int");
 
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime(3)");
+
                     b.Property<string>("Description")
                         .HasMaxLength(2048)
                         .HasColumnType("varchar(2048)");
@@ -122,6 +125,8 @@ namespace MindMap.Api.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("DeletedAt");
+
                     b.HasIndex("FolderId");
 
                     b.HasIndex("RootNodeId")
@@ -130,6 +135,8 @@ namespace MindMap.Api.Infrastructure.Migrations
                     b.HasIndex("TemplateId");
 
                     b.HasIndex("IsPublic", "LastEditedAt");
+
+                    b.HasIndex("OwnerId", "DeletedAt");
 
                     b.HasIndex("OwnerId", "UpdatedAt");
 
@@ -537,6 +544,9 @@ namespace MindMap.Api.Infrastructure.Migrations
                         .IsRequired()
                         .HasMaxLength(32)
                         .HasColumnType("varchar(32)");
+
+                    b.Property<int?>("RecycleBinRetentionDays")
+                        .HasColumnType("int");
 
                     b.Property<int>("Status")
                         .HasColumnType("int");

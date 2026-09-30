@@ -56,6 +56,11 @@ function goAdmin(): void {
   router.push({ name: 'admin-dashboard' })
 }
 
+function goRecycleBin(): void {
+  drawerVisible.value = false
+  router.push({ name: 'recycle-bin' })
+}
+
 const collapsed = ref(false)
 const drawerVisible = ref(false)
 
@@ -318,6 +323,14 @@ onMounted(async () => {
               </template>
               公开广场
             </NButton>
+            <NButton quaternary block @click="goRecycleBin">
+              <template #icon>
+                <NIcon>
+                  <TrashOutline />
+                </NIcon>
+              </template>
+              回收站
+            </NButton>
             <NButton v-if="isAdmin" quaternary block type="error" @click="goAdmin">
               <template #icon>
                 <NIcon>
@@ -436,6 +449,9 @@ onMounted(async () => {
               <NButton quaternary block :type="mapsStore.scope === 'public' ? 'primary' : 'default'"
                 @click="mapsStore.setScope('public'); drawerVisible = false">
                 公开广场
+              </NButton>
+              <NButton quaternary block @click="goRecycleBin">
+                回收站
               </NButton>
               <NButton v-if="isAdmin" quaternary block type="error" @click="drawerVisible = false; goAdmin()">
                 管理后台

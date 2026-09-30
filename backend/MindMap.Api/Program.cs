@@ -25,6 +25,7 @@ builder.Host.UseSerilog((ctx, cfg) => cfg.ReadFrom.Configuration(ctx.Configurati
 // ---- 选项 ----
 builder.Services.Configure<AppOptions>(builder.Configuration.GetSection("App"));
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
+builder.Services.Configure<RecycleBinOptions>(builder.Configuration.GetSection("RecycleBin"));
 
 // ---- DataProtection：持久化到项目本地目录，避免沙箱权限问题 ----
 var keysDir = Path.Combine(builder.Environment.ContentRootPath, "App_Data", "Keys");
@@ -91,6 +92,10 @@ builder.Services.AddScoped<IImportService, ImportService>();
 builder.Services.AddScoped<IShareService, ShareService>();
 builder.Services.AddScoped<IAdminService, AdminService>();
 builder.Services.AddScoped<ITemplateService, TemplateService>();
+builder.Services.AddScoped<IRecycleBinService, RecycleBinService>();
+
+// 回收站过期清理（软删导图按保留天数物理清除）
+builder.Services.AddHostedService<RecycleBinCleanupService>();
 
 // ---- Controllers + 全局异常 ----
 builder.Services.AddControllers(options => options.Filters.Add<GlobalExceptionFilter>())

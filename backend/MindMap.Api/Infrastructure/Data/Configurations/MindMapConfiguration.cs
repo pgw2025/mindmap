@@ -28,6 +28,17 @@ public class MindMapConfiguration : IEntityTypeConfiguration<MindMapEntity>
         builder.Property(m => m.LastEditedAt).HasColumnType("datetime(3)");
         builder.Property(m => m.TakenDownAt).HasColumnType("datetime(3)");
         builder.Property(m => m.TakenDownReason).HasMaxLength(256);
+        builder.Property(m => m.DeletedAt).HasColumnType("datetime(3)");
+
+        // 软删除全局过滤器：所有常规查询自动排除回收站中的导图。
+        // 回收站相关查询用 IgnoreQueryFilters() 放行；
+        // ExecuteDelete / ExecuteUpdate 不经过过滤器，不受影响。
+        builder.HasQueryFilter(m => m.DeletedAt == null);
+
+        // 回收站列表：按用户 + 删除时间倒序
+        builder.HasIndex(m => new { m.OwnerId, m.DeletedAt });
+        // 过期清理扫描
+        builder.HasIndex(m => m.DeletedAt);
 
         // "我的导图" 列表：按用户倒序
         builder.HasIndex(m => new { m.OwnerId, m.UpdatedAt });
