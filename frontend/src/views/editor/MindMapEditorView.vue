@@ -1247,8 +1247,11 @@ function handleNoteChange(note: string) {
   const uid = selectedNodeId.value
   const walk = (node: any): boolean => {
     if (node.getData?.('uid') === uid) {
-      // 写入 data.note；空串转为 undefined 以清空备注
-      node.setData({ note: note || undefined })
+      // 写入 data.note 并重渲染节点以重建备注图标。
+      // 不能用 node.setData({ note })：它走 SET_NODE_DATA 命令只改数据不 reRender，
+      // 导致备注图标要等到下次增删节点触发全量重绘时才出现。
+      // setNote 走 SET_NODE_NOTE → setNodeDataRender，会 reRenderNodeCheckChange 重建图标。
+      node.setNote(note || '')
       return true
     }
     if (node.children) {
