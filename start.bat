@@ -1,7 +1,7 @@
 ﻿@echo off
 chcp 65001 >nul
 title MindMap 一键启动
-setlocal
+setlocal EnableDelayedExpansion
 
 REM ---- 子窗口分支（勿删）----
 if "%~1"=="--backend" goto :run_backend
@@ -36,6 +36,15 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
+
+REM ---- 0. 端口检测（占用则提示确认后杀掉）----
+echo [0/3] 检测端口占用 ...
+call :check_port 5000 dotnet.exe
+if errorlevel 1 exit /b 1
+call :check_port 5173 node.exe
+if errorlevel 1 exit /b 1
+echo [0/3] 端口检测完成，均可用。
+echo.
 
 REM ---- 1. 启动后端（独立窗口，先 dotnet clean 清理再运行）----
 echo [1/3] 启动后端：先清理项目，再 dotnet run ...
@@ -77,6 +86,61 @@ echo ============================================
 pause
 endlocal
 exit /b
+
+REM ===================== 端口检测子程序 =====================
+REM 用法: call :check_port 端口 进程名白名单
+REM 返回: errorlevel 0 = 端口可用 / 已清理完成；errorlevel 1 = 用户取消或异常
+:check_port
+set "CHK_PORT=%~1"
+set "CHK_PROC=%~2"
+:check_again
+REM 查找该端口的 LISTENING 进程 PID
+set "FOUND_PID="
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr /R /C:":%CHK_PORT% " ^| findstr "LISTENING"') do (
+    set "FOUND_PID=%%p"
+)
+
+if not defined FOUND_PID (
+    echo [OK] 端口 %CHK_PORT% 空闲。
+    exit /b 0
+)
+
+REM 有占用，反查进程名
+set "PROC_NAME="
+for /f "delims=," %%a in ('tasklist /FI "PID eq %FOUND_PID%" /FO CSV /NH') do (
+    set "PROC_NAME=%%~a"
+)
+
+echo [占用] 端口 %CHK_PORT% 被进程占用: %PROC_NAME% (PID %FOUND_PID%)
+
+REM 进程名是否命中白名单
+if /i "%PROC_NAME%"=="%CHK_PROC%" (
+    echo        检测到残留的 %CHK_PROC% 进程。
+    echo.
+    echo        按任意键杀掉该进程并释放端口 ...
+    echo        （按 Ctrl+C 可取消，脚本将退出）
+    pause >nul
+    taskkill /F /PID %FOUND_PID% >nul 2>nul
+    REM 等待端口释放，最多轮询 10 次
+    set /a rel_tries=0
+    :wait_release
+    set /a rel_tries+=1
+    netstat -ano | findstr /R /C:":%CHK_PORT% " | findstr "LISTENING" >nul
+    if errorlevel 1 (
+        echo [OK] 端口 %CHK_PORT% 已释放。
+        exit /b 0
+    )
+    if !rel_tries! gtr 10 (
+        echo [错误] 端口 %CHK_PORT% 杀掉进程后仍未释放，请手动处理。
+        exit /b 1
+    )
+    timeout /t 1 /nobreak >nul
+    goto :wait_release
+) else (
+    echo [错误] 端口 %CHK_PORT% 被非预期程序 "%PROC_NAME%" 占用，已中止启动。
+    echo        请手动关闭该程序后重试。
+    exit /b 1
+)
 
 REM ===================== 后端 =====================
 :run_backend
