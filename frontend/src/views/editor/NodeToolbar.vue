@@ -16,6 +16,7 @@ const emit = defineEmits<{
   (e: 'copy'): void
   (e: 'paste'): void
   (e: 'open-note'): void
+  (e: 'open-image'): void
   (e: 'create-line'): void
   (e: 'add-generalization'): void
   (e: 'add-outer-frame'): void
@@ -46,6 +47,17 @@ const isRoot = computed(() => props.node?.parentId == null)
 
 /** 是否多选状态（用于切换「摘要」→「多节点摘要」） */
 const isMultiSelect = computed(() => (props.activeNodeCount ?? 1) > 1)
+
+/** 节点是否已挂图片（ExtraData.image 存在即视为有图） */
+const hasImage = computed(() => {
+  if (!localNode.value.extraData) return false
+  try {
+    const extra = JSON.parse(localNode.value.extraData)
+    return !!extra.image
+  } catch {
+    return false
+  }
+})
 
 /** 预设颜色 */
 const presetColors = [
@@ -150,6 +162,10 @@ function selectEdgeStyle(style: EdgeStyle) {
       <button class="tool-btn" :class="{ 'has-note': !!localNode.note }" @click="emit('open-note')" title="编辑备注">
         <span class="icon">📝</span>
         <span class="label">备注</span>
+      </button>
+      <button class="tool-btn" :class="{ 'has-image': hasImage }" @click="emit('open-image')" title="添加/编辑图片">
+        <span class="icon">🖼</span>
+        <span class="label">图片</span>
       </button>
       <!-- 移动端：更多/收起 切换按钮 -->
       <button class="tool-btn mobile-only actions-toggle" @click="mobileActionsExpanded = !mobileActionsExpanded"
@@ -376,6 +392,12 @@ function selectEdgeStyle(style: EdgeStyle) {
     background: rgba(24, 160, 88, 0.1);
     border-color: var(--app-primary, #18a058);
     color: var(--app-primary, #18a058);
+  }
+
+  &.has-image {
+    background: rgba(32, 128, 240, 0.12);
+    border-color: #2080f0;
+    color: #2080f0;
   }
 
   &.multi-select {

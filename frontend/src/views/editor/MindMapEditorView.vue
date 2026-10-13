@@ -12,6 +12,7 @@ import Select from 'simple-mind-map/src/plugins/Select.js'
 import TouchEvent from 'simple-mind-map/src/plugins/TouchEvent.js'
 import AssociativeLine from 'simple-mind-map/src/plugins/AssociativeLine.js'
 import OuterFrame from 'simple-mind-map/src/plugins/OuterFrame.js'
+import NodeImgAdjust from 'simple-mind-map/src/plugins/NodeImgAdjust.js'
 import { throttle } from 'simple-mind-map/src/utils'
 
 // 1. 增强 Drag 插件：修复松手后画布漂移 bug，并在松手时即时同步执行重叠检测，防止 300ms 节流导致落位判定失效
@@ -436,6 +437,7 @@ MindMap.usePlugin(Select)
 MindMap.usePlugin(TouchEvent)
 MindMap.usePlugin(AssociativeLine)
 MindMap.usePlugin(OuterFrame)
+MindMap.usePlugin(NodeImgAdjust)
 
 import type { NodeDto, NodeCreatePayload, NodeUpdatePayload, NodeTreeNodeDto, NodeBatchItem } from '@/api/nodes'
 import type { MindMapDetail } from '@/api/mindmaps'
@@ -456,6 +458,8 @@ import NodeContentModal from './components/NodeContentModal.vue'
 import NotePanel from './components/NotePanel.vue'
 import NodeNoteTooltip from './components/NodeNoteTooltip.vue'
 import OuterFrameStylePanel from './components/OuterFrameStylePanel.vue'
+import NodeImageModal, { type NodeImagePayload } from './components/NodeImageModal.vue'
+import { uploadNodeImage, readImageSize, MAX_IMAGE_SIZE_BYTES } from '@/api/uploads'
 import { useMindMapSync } from './composables/useMindMapSync'
 import {
   THEMES,
@@ -477,6 +481,13 @@ const authStore = useAuthStore()
 
 // 后端约定 Guid.Empty 表示清除引用（JSON null 不会触发 Guid? 更新）
 const EMPTY_GUID = '00000000-0000-0000-0000-000000000000'
+
+// 节点图片加载失败时显示的占位图（P2：加载失败占位）
+const IMG_LOAD_FAIL_PLACEHOLDER =
+  'data:image/svg+xml;charset=utf-8,' +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="120"><rect width="160" height="120" rx="8" fill="#f0f0f5"/><text x="50%" y="50%" text-anchor="middle" dominant-baseline="middle" font-size="14" fill="#999">图片加载失败</text></svg>'
+  )
 
 // 根节点不能删除提示弹窗
 const rootDeleteTipVisible = ref(false)
@@ -687,6 +698,8 @@ function initMindMap() {
     scrollbarStyle: 'thin',
     minScale: 0.2,
     maxScale: 2,
+    // 节点图片加载失败时显示占位图（P2）
+    defaultNodeImage: IMG_LOAD_FAIL_PLACEHOLDER,
     customNoteContentShow: {
       show: (note: string, left: number, top: number) =>
         noteTooltipRef.value?.show(note, left, top),
@@ -1106,6 +1119,94 @@ function openContentEditor() {
 function openNotePanel() {
   if (!selectedNodeId.value) return
   notePanelVisible.value = true
+}
+
+// —— 节点图片 ——
+const imageModalVisible = ref(false)
+
+/** 打开节点图片编辑弹窗 */
+function openImageModal() {
+  if (!selectedNodeId.value) return
+  imageModalVisible.value = true
+}
+
+/**
+ * 把图片应用到当前选中节点（画布优先：SET_NODE_IMAGE → data_change_detail
+ * → extraFields 图片分支 → scheduleExtraDataUpdate 落库；无 reloadMindMap）。
+ * payload 为 null 表示移除图片。
+ */
+function handleImageSave(payload: NodeImagePayload | null) {
+  if (!selectedNodeId.value || readonly.value) return
+  const inst = mindMapInstance
+  if (!inst) return
+  const ids = activeNodeIds.value.length > 1 ? activeNodeIds.value : [selectedNodeId.value]
+  for (const id of ids) {
+    const rn = findRenderNodeByUid(id)
+    if (!rn) continue
+    inst.execCommand(
+      'SET_NODE_IMAGE',
+      rn,
+      payload
+        ? {
+            url: payload.url,
+            title: payload.title ?? '',
+            width: payload.width ?? 0,
+            height: payload.height ?? 0,
+            custom: true
+          }
+        : { url: null }
+    )
+  }
+}
+
+/** 从剪贴板读取第一张图片（读不到或未授权返回 null） */
+async function readClipboardImage(): Promise<File | null> {
+  try {
+    if (!navigator.clipboard?.read) return null
+    const items = await navigator.clipboard.read()
+    for (const item of items) {
+      const imgType = item.types.find((t) => t.startsWith('image/'))
+      if (!imgType) continue
+      const blob = await item.getType(imgType)
+      const ext = imgType.split('/')[1].replace('jpeg', 'jpg')
+      return new File([blob], `clipboard.${ext}`, { type: imgType })
+    }
+  } catch {
+    // 无剪贴板权限等：返回 null，走浏览器默认粘贴
+  }
+  return null
+}
+
+/** 上传图片并应用到当前选中节点（P2：剪贴板粘贴 / 拖拽文件） */
+async function applyImageToNode(file: File) {
+  if (readonly.value) return
+  if (!selectedNodeId.value) {
+    message.warning('请先选中一个节点')
+    return
+  }
+  if (!file.type.startsWith('image/')) {
+    message.warning('请拖入图片文件')
+    return
+  }
+  if (file.size > MAX_IMAGE_SIZE_BYTES) {
+    message.warning('图片不能超过 5MB')
+    return
+  }
+  try {
+    const res = await uploadNodeImage(file)
+    // 后端探测失败（宽高为 0）时用浏览器读取兜底
+    let w = res.width
+    let h = res.height
+    if (!w || !h) {
+      const dims = await readImageSize(res.url)
+      w = dims.width
+      h = dims.height
+    }
+    handleImageSave({ url: res.url, width: w, height: h, title: '' })
+    message.success('图片已添加到节点')
+  } catch (err) {
+    message.error((err as Error).message || '图片上传失败')
+  }
 }
 
 /** 从当前选中节点开始创建关联线：进入连线模式后点击目标节点即可 */
@@ -1815,9 +1916,27 @@ function handleKeydown(e: KeyboardEvent) {
     handleCopy()
   }
   // Ctrl+V 粘贴
-  if ((e.ctrlKey || e.metaKey) && e.key === 'v' && clipboardNode.value) {
-    e.preventDefault()
-    handlePaste()
+  if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+    // 复制节点优先（现有语义）；无复制节点时尝试剪贴板图片直接挂到选中节点（P2）
+    if (clipboardNode.value) {
+      e.preventDefault()
+      handlePaste()
+    } else if (selectedNodeId.value) {
+      void readClipboardImage().then((file) => {
+        if (file) {
+          e.preventDefault()
+          void applyImageToNode(file)
+        }
+      })
+    }
+  }
+}
+
+/** 画布拖入图片文件 → 上传并挂到选中节点（P2） */
+function handleCanvasDrop(e: DragEvent) {
+  const file = e.dataTransfer?.files?.[0]
+  if (file) {
+    void applyImageToNode(file)
   }
 }
 
@@ -2045,7 +2164,7 @@ watch(() => route.params.id, () => {
           </span>
         </div>
       </div>
-      <div ref="mindMapRef" class="mindmap-canvas"></div>
+      <div ref="mindMapRef" class="mindmap-canvas" @dragover.prevent @drop.prevent="handleCanvasDrop"></div>
       <NodeNoteTooltip ref="noteTooltipRef" />
       <div v-if="loading" class="loading-wrap">
         <div class="spinner"></div>
@@ -2056,8 +2175,9 @@ watch(() => route.params.id, () => {
       <NodeToolbar v-if="showToolbar && selectedNodeId" :node="nodesStore.findNode(selectedNodeId)"
         :active-node-count="activeNodeCount"
         @add-child="handleAddChild" @add-sibling="handleAddSibling" @delete="handleDelete" @update="handleUpdateStyle"
-        @copy="handleCopy" @paste="handlePaste" @open-note="openNotePanel" @create-line="createAssociativeLine"
-        @add-generalization="addGeneralization" @add-outer-frame="addOuterFrame" />
+        @copy="handleCopy" @paste="handlePaste" @open-note="openNotePanel" @open-image="openImageModal"
+        @create-line="createAssociativeLine" @add-generalization="addGeneralization"
+        @add-outer-frame="addOuterFrame" />
 
       <!-- 外框样式面板：选中外框激活时显示 -->
       <OuterFrameStylePanel :visible="outerFramePanelVisible" :config="outerFrameConfig"
@@ -2089,6 +2209,9 @@ watch(() => route.params.id, () => {
     <!-- 节点备注面板（富文本抽屉） -->
     <NotePanel v-model:show="notePanelVisible" :node="selectedNodeForContent" :readonly="readonly"
       @change="handleNoteChange" />
+
+    <!-- 节点图片编辑弹窗 -->
+    <NodeImageModal v-model:show="imageModalVisible" :node="selectedNodeForContent" @save="handleImageSave" />
 
     <!-- 根节点不能删除提示 -->
     <NModal v-model:show="rootDeleteTipVisible" preset="card" title="无法删除" style="max-width: 420px" :bordered="false"

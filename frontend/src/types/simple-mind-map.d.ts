@@ -43,6 +43,11 @@ declare module 'simple-mind-map/src/plugins/OuterFrame.js' {
   export default OuterFrame
 }
 
+declare module 'simple-mind-map/src/plugins/NodeImgAdjust.js' {
+  const NodeImgAdjust: { instanceName: string }
+  export default NodeImgAdjust
+}
+
 declare module 'simple-mind-map/src/utils' {
   export const throttle: (fn: (...args: any[]) => void, time: number, ctx?: any) => (...args: any[]) => void
   export const debounce: (fn: (...args: any[]) => void, wait: number, ctx?: any) => (...args: any[]) => void

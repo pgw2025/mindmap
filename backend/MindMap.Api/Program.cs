@@ -96,6 +96,8 @@ builder.Services.AddScoped<IRecycleBinService, RecycleBinService>();
 
 // 回收站过期清理（软删导图按保留天数物理清除）
 builder.Services.AddHostedService<RecycleBinCleanupService>();
+// 节点图片孤儿文件清理（未被任何节点引用的旧文件物理删除）
+builder.Services.AddHostedService<NodeImageCleanupService>();
 
 // ---- Controllers + 全局异常 ----
 builder.Services.AddControllers(options => options.Filters.Add<GlobalExceptionFilter>())
@@ -145,6 +147,8 @@ if (app.Environment.IsDevelopment())
 
 app.UseSerilogRequestLogging();
 app.UseCors();
+// 静态文件：提供 /uploads/* 下的上传文件访问（节点图片等）
+app.UseStaticFiles();
 app.UseAuthentication();
 app.UseAuthorization();
 

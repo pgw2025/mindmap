@@ -501,6 +501,13 @@ export function useMindMapSync(opts: {
         if (extra.outerFrame && typeof extra.outerFrame === 'object') {
           data.outerFrame = extra.outerFrame
         }
+        // 节点图片数据（image=url 字符串，imageTitle=标题，imageSize=显示尺寸）
+        // 与 SET_NODE_IMAGE 的写入格式保持一致（imageSize 缺省时兜底空对象，避免渲染抛错）
+        if (extra.image) {
+          data.image = extra.image
+          data.imageTitle = extra.imageTitle ?? ''
+          data.imageSize = extra.imageSize ?? { width: 0, height: 0, custom: false }
+        }
       } catch {
         // extraData 不是合法 JSON，忽略
       }
@@ -814,12 +821,12 @@ export function useMindMapSync(opts: {
       scheduleNoteUpdate(backendId, newNote)
     }
 
-    // ---------- 2.6 关联线 + 摘要数据变化（associativeLine* / generalization，debounced） ----------
-    // 这些字段由 AssociativeLine 插件 / 核心库通过 SET_NODE_DATA 写入，触发 data_change_detail。
+    // ---------- 2.6 关联线 + 摘要 + 图片数据变化（associativeLine* / generalization / image*，debounced） ----------
+    // 这些字段由 AssociativeLine 插件 / NodeImgAdjust 插件 / 核心库通过 SET_NODE_DATA 写入，触发 data_change_detail。
     // 比较序列化后的 JSON 即可判断是否变化，变化时打包所有 extraData 相关字段同步到后端。
     const extraFields = ['associativeLineTargets', 'associativeLinePoint',
       'associativeLineTargetControlOffsets', 'associativeLineText', 'associativeLineStyle',
-      'generalization', 'outerFrame'] as const
+      'generalization', 'outerFrame', 'image', 'imageTitle', 'imageSize'] as const
     let extraChanged = false
     for (const f of extraFields) {
       const oldVal = JSON.stringify((oldData.data as any)[f] ?? null)
