@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using MindMap.Api.Application.Services;
@@ -147,8 +148,24 @@ if (app.Environment.IsDevelopment())
 
 app.UseSerilogRequestLogging();
 app.UseCors();
-// 静态文件：提供 /uploads/* 下的上传文件访问（节点图片等）
-app.UseStaticFiles();
+
+// ---- 静态文件：提供 /uploads/* 下的上传文件访问（节点图片等）----
+// 显式绑定 PhysicalFileProvider + RequestPath，不使用默认的 WebRootFileProvider：
+// 后者在 builder.Build() 时探测 ContentRoot/wwwroot，目录不存在就永久退化为
+// NullFileProvider（运行期不重新探测），表现为「上传 200 但 GET 一律 404」。
+// 上传目录不存在时自动创建，避免 UploadRoot 指向未初始化的路径。
+// 目录解析规则与 UploadsController.ResolveUploadRoot 保持一致（相对 ContentRoot）。
+var uploadRootPath = Path.IsPathRooted(appOpt.UploadRoot)
+    ? appOpt.UploadRoot
+    : Path.Combine(app.Environment.ContentRootPath, appOpt.UploadRoot);
+Directory.CreateDirectory(uploadRootPath);
+app.UseStaticFiles(new StaticFileOptions
+{
+    // provider 根即 uploads 目录本身：URL /uploads/nodes/x.png → {uploads}/nodes/x.png
+    FileProvider = new PhysicalFileProvider(uploadRootPath),
+    RequestPath = "/uploads"
+});
+
 app.UseAuthentication();
 app.UseAuthorization();
 
