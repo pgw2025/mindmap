@@ -28,6 +28,9 @@ const edgeStyleMap: Record<number, string> = {
   3: 'none'
 }
 
+/** 节点图片在画布上渲染为缩略图（小图标）的边长（px），与备注图标的视觉尺寸对齐 */
+export const NODE_IMAGE_THUMB_SIZE = 40
+
 /** simple-mind-map 形状字符串 → 后端 NodeShape 数字（shapeMap 的翻转） */
 const shapeStrToNum: Record<string, number> = Object.fromEntries(
   Object.entries(shapeMap).map(([k, v]) => [v, Number(k)])
@@ -506,7 +509,15 @@ export function useMindMapSync(opts: {
         if (extra.image) {
           data.image = extra.image
           data.imageTitle = extra.imageTitle ?? ''
-          data.imageSize = extra.imageSize ?? { width: 0, height: 0, custom: false }
+          // 图片在节点上渲染为固定小缩略图（custom=true 时 getImgShowSize 直接采用
+          // 存储宽高，绕开主题 imgMaxWidth/imgMaxHeight 的大图上限）。
+          // 原始尺寸另存到 __imageOriginalSize，供悬浮预览等比还原。
+          const origin = extra.imageSize ?? { width: 0, height: 0 }
+          data.__imageOriginalSize = {
+            width: origin.width || 0,
+            height: origin.height || 0
+          }
+          data.imageSize = { width: NODE_IMAGE_THUMB_SIZE, height: NODE_IMAGE_THUMB_SIZE, custom: true }
         }
       } catch {
         // extraData 不是合法 JSON，忽略
@@ -842,6 +853,14 @@ export function useMindMapSync(opts: {
       for (const f of extraFields) {
         const v = (data.data as any)[f]
         if (v !== undefined && v !== null) {
+          // 渲染期 imageSize 被改写为缩略图尺寸（custom=true），直接落库会覆盖原始
+          // 尺寸；落库时从 __imageOriginalSize 还原真实宽高，保持 extraData.imageSize
+          // 语义不变。
+          if (f === 'imageSize') {
+            const origin = (data.data as any).__imageOriginalSize
+            if (origin) extraObj[f] = { width: origin.width, height: origin.height }
+            continue
+          }
           extraObj[f] = v
         }
       }

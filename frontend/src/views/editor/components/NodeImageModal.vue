@@ -32,22 +32,13 @@ const emit = defineEmits<{
 
 const message = useMessage()
 
-/** 展示用最大宽度：超过则等比缩小（避免 custom 尺寸撑爆画布） */
-const MAX_DISPLAY_WIDTH = 500
-
 const url = ref('')
 const title = ref('')
 const width = ref(0)
 const height = ref(0)
-const lockRatio = ref(true)
 const uploading = ref(false)
 
 const hasImage = computed(() => !!url.value)
-
-/** 当前宽高比（锁定比例时按它联动） */
-function currentRatio(): number {
-  return width.value > 0 && height.value > 0 ? width.value / height.value : 0
-}
 
 watch(
   () => props.show,
@@ -58,7 +49,6 @@ watch(
     title.value = info?.title ?? ''
     width.value = info?.width ?? 0
     height.value = info?.height ?? 0
-    lockRatio.value = true
   }
 )
 
@@ -105,36 +95,14 @@ async function handleUpload(e: Event) {
       w = dims.width
       h = dims.height
     }
-    // 超过展示上限等比缩小
-    if (w > MAX_DISPLAY_WIDTH) {
-      h = Math.round((h * MAX_DISPLAY_WIDTH) / w)
-      w = MAX_DISPLAY_WIDTH
-    }
     url.value = res.url
     width.value = w
     height.value = h
-    lockRatio.value = true
     message.success('图片上传成功')
   } catch (err) {
     message.error((err as Error).message || '图片上传失败')
   } finally {
     uploading.value = false
-  }
-}
-
-/** 宽度变化：锁定比例时联动高度 */
-function onWidthChange() {
-  if (lockRatio.value) {
-    const ratio = currentRatio()
-    if (ratio > 0 && width.value > 0) height.value = Math.round(width.value / ratio)
-  }
-}
-
-/** 高度变化：锁定比例时联动宽度 */
-function onHeightChange() {
-  if (lockRatio.value) {
-    const ratio = currentRatio()
-    if (ratio > 0 && height.value > 0) width.value = Math.round(height.value * ratio)
   }
 }
 
@@ -176,20 +144,11 @@ function handleRemove() {
         </div>
 
         <div class="form-row">
-          <span class="row-label">宽</span>
-          <NInputNumber v-model:value="width" :min="1" :max="2000" size="small" style="width: 90px" @update:value="onWidthChange" />
-          <span class="row-label">高</span>
-          <NInputNumber v-model:value="height" :min="1" :max="2000" size="small" style="width: 90px" @update:value="onHeightChange" />
-          <label class="ratio-lock">
-            <NCheckbox v-model:checked="lockRatio" size="small" />
-            <span>锁定比例</span>
-          </label>
-        </div>
-
-        <div class="form-row">
           <span class="row-label">标题</span>
           <NInput v-model:value="title" size="small" placeholder="图片说明（鼠标悬停显示）" clearable />
         </div>
+
+        <p class="thumb-hint">图片会在节点上显示为小缩略图，鼠标悬停可查看原图</p>
       </template>
     </div>
 
@@ -282,14 +241,11 @@ function handleRemove() {
   color: var(--app-text-secondary, #666);
 }
 
-.ratio-lock {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: auto;
-  cursor: pointer;
-  color: var(--app-text-secondary, #666);
+.thumb-hint {
+  margin: 0;
   font-size: 12px;
+  color: var(--app-text-tertiary, #999);
+  line-height: 1.5;
 }
 
 .img-modal-footer {
@@ -305,10 +261,6 @@ function handleRemove() {
 @media (max-width: 767px) {
   .form-row {
     flex-wrap: wrap;
-  }
-
-  .ratio-lock {
-    margin-left: 0;
   }
 }
 </style>

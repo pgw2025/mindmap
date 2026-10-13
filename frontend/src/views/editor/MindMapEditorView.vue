@@ -12,7 +12,6 @@ import Select from 'simple-mind-map/src/plugins/Select.js'
 import TouchEvent from 'simple-mind-map/src/plugins/TouchEvent.js'
 import AssociativeLine from 'simple-mind-map/src/plugins/AssociativeLine.js'
 import OuterFrame from 'simple-mind-map/src/plugins/OuterFrame.js'
-import NodeImgAdjust from 'simple-mind-map/src/plugins/NodeImgAdjust.js'
 import { throttle } from 'simple-mind-map/src/utils'
 
 // 1. 增强 Drag 插件：修复松手后画布漂移 bug，并在松手时即时同步执行重叠检测，防止 300ms 节流导致落位判定失效
@@ -437,7 +436,8 @@ MindMap.usePlugin(Select)
 MindMap.usePlugin(TouchEvent)
 MindMap.usePlugin(AssociativeLine)
 MindMap.usePlugin(OuterFrame)
-MindMap.usePlugin(NodeImgAdjust)
+// 缩略图模式：节点图片固定小缩略图渲染（悬浮预览原图），不再需要拖拽调整尺寸，
+// 因此不注册 NodeImgAdjust（其 resize 逻辑依赖 imageSize 存储原始尺寸，缩略图下会算错）。
 
 import type { NodeDto, NodeCreatePayload, NodeUpdatePayload, NodeTreeNodeDto, NodeBatchItem } from '@/api/nodes'
 import type { MindMapDetail } from '@/api/mindmaps'
@@ -457,10 +457,11 @@ import VersionDrawer from './components/VersionDrawer.vue'
 import NodeContentModal from './components/NodeContentModal.vue'
 import NotePanel from './components/NotePanel.vue'
 import NodeNoteTooltip from './components/NodeNoteTooltip.vue'
+import NodeImageTooltip from './components/NodeImageTooltip.vue'
 import OuterFrameStylePanel from './components/OuterFrameStylePanel.vue'
 import NodeImageModal, { type NodeImagePayload } from './components/NodeImageModal.vue'
 import { uploadNodeImage, readImageSize, MAX_IMAGE_SIZE_BYTES } from '@/api/uploads'
-import { useMindMapSync } from './composables/useMindMapSync'
+import { useMindMapSync, NODE_IMAGE_THUMB_SIZE } from './composables/useMindMapSync'
 import {
   THEMES,
   resolveThemeConfig,
@@ -507,6 +508,7 @@ const canEdit = computed(() => {
 const loading = ref(true)
 const mindMapRef = ref<HTMLDivElement | null>(null)
 const noteTooltipRef = ref<InstanceType<typeof NodeNoteTooltip> | null>(null)
+const imageTooltipRef = ref<InstanceType<typeof NodeImageTooltip> | null>(null)
 let mindMapInstance: MindMap | null = null
 
 // —— 离线快照状态 ——
@@ -909,6 +911,24 @@ function initMindMap() {
     if (readonly.value) return
     setTimeout(() => normalizeRootChildDirections(), 0)
   })
+
+  // 节点图片悬浮预览：hover 缩略图时弹出原始大图（与备注 tooltip 同一交互模式）
+  // node_img_mouseenter 参数为 (node, img, e)，img 是 SVGImage 实例，
+  // img.node.getBoundingClientRect() 拿 viewport 坐标（与库备注定位一致）
+  mindMapInstance.on('node_img_mouseenter', (...args: unknown[]) => {
+    const node = args[0] as any
+    const img = args[1] as any
+    const url = node?.getData?.('image')
+    if (!url) return
+    const title = node.getData('imageTitle') || ''
+    const dom = img?.node
+    if (!dom || typeof dom.getBoundingClientRect !== 'function') return
+    const rect = dom.getBoundingClientRect()
+    imageTooltipRef.value?.show(url, title, rect.right, rect.bottom)
+  })
+  mindMapInstance.on('node_img_mouseleave', () => {
+    imageTooltipRef.value?.hide()
+  })
 }
 
 /** 工具栏操作：新增子节点（画布命令优先，detail 增量落库，不再 store 直写 + reload） */
@@ -1131,9 +1151,13 @@ function openImageModal() {
 }
 
 /**
- * 把图片应用到当前选中节点（画布优先：SET_NODE_IMAGE → data_change_detail
+ * 把图片应用到当前选中节点（画布优先：SET_NODE_DATA → data_change_detail
  * → extraFields 图片分支 → scheduleExtraDataUpdate 落库；无 reloadMindMap）。
  * payload 为 null 表示移除图片。
+ *
+ * 缩略图模式：节点上只渲染固定小缩略图（imageSize 写成 custom=true 的小尺寸），
+ * 原始尺寸存到 __imageOriginalSize 供悬浮预览；落库时 useMindMapSync 会从
+ * __imageOriginalSize 还原 extraData.imageSize，避免原始尺寸被缩略图覆盖。
  */
 function handleImageSave(payload: NodeImagePayload | null) {
   if (!selectedNodeId.value || readonly.value) return
@@ -1143,19 +1167,24 @@ function handleImageSave(payload: NodeImagePayload | null) {
   for (const id of ids) {
     const rn = findRenderNodeByUid(id)
     if (!rn) continue
-    inst.execCommand(
-      'SET_NODE_IMAGE',
-      rn,
-      payload
-        ? {
-            url: payload.url,
-            title: payload.title ?? '',
-            width: payload.width ?? 0,
-            height: payload.height ?? 0,
-            custom: true
-          }
-        : { url: null }
-    )
+    if (payload) {
+      inst.execCommand('SET_NODE_DATA', rn, {
+        image: payload.url,
+        imageTitle: payload.title ?? '',
+        __imageOriginalSize: {
+          width: payload.width ?? 0,
+          height: payload.height ?? 0
+        },
+        imageSize: { width: NODE_IMAGE_THUMB_SIZE, height: NODE_IMAGE_THUMB_SIZE, custom: true }
+      })
+    } else {
+      inst.execCommand('SET_NODE_DATA', rn, {
+        image: null,
+        imageTitle: null,
+        __imageOriginalSize: null,
+        imageSize: null
+      })
+    }
   }
 }
 
@@ -2166,6 +2195,7 @@ watch(() => route.params.id, () => {
       </div>
       <div ref="mindMapRef" class="mindmap-canvas" @dragover.prevent @drop.prevent="handleCanvasDrop"></div>
       <NodeNoteTooltip ref="noteTooltipRef" />
+      <NodeImageTooltip ref="imageTooltipRef" />
       <div v-if="loading" class="loading-wrap">
         <div class="spinner"></div>
         <p>加载中...</p>
