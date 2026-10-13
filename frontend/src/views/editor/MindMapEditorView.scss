@@ -582,13 +582,21 @@
   }
 
   // simple-mind-map 节点双击内联编辑输入框：禁止横向滚动条，自动换行
-  :deep(.smm-text-edit-node),
-  :deep(.smm-node-text-edit-input),
-  :deep(.simple-mind-map-text-edit-input) {
+  // 实际类名是 smm-node-edit-wrap（库 TextEdit.js classList.add 写入）；
+  // 之前这里写的三个选择器均为错误类名，从未命中编辑框。
+  :deep(.smm-node-edit-wrap) {
     overflow-x: hidden !important;
     word-break: break-word !important;
     white-space: pre-wrap !important;
     box-sizing: border-box !important;
+
+    // 三级及以下节点 fillColor=transparent，库的 getBackground() 会兜底成
+    // #fff 或主题里第一个非白非透明色，深色画布上就「白了一块」，且编辑文字
+    // 是派生后的浅色，撞白底几乎看不见。这里把编辑框背景与文字都钉到
+    // 当前画布卡片配色（跟随 --app-bg / --app-text 明暗切换），二者一致可读。
+    background: var(--app-card-bg, #181c22) !important;
+    color: var(--app-text, #e5e7eb) !important;
+    caret-color: var(--app-text, #e5e7eb);
   }
 }
 
