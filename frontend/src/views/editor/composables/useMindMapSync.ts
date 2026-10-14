@@ -1532,6 +1532,40 @@ export function useMindMapSync(opts: {
 
     const rootUid = root.getData?.('uid')
 
+    // —— 拖到空白换边兜底（方案 A）——
+    // enableFreeDrag:false 下，根的直接子节点拖到空白（overlap/prev/next 全空）
+    // 库会静默回弹：左侧没有兄弟可挂载，用户无从换边。此处兜底：按鼠标与根
+    // 中心 X 比较定方向，写 dir + 记快照后用 execCommand('MOVE_NODE_TO') 把节点
+    // 「移到」根下，借此触发：①命令历史（可撤销）②render 按 dir 重新布局
+    // ③data_change_detail → handleUpdate 消费快照落库 direction。
+    // 副作用：节点排到 root children 末尾（即目标侧队列末尾），符合换边直觉。
+    if (!info.overlapNodeUid && !info.prevNodeUid && !info.nextNodeUid) {
+      const draggedRootChildren = info.beingDragNodeList.filter(n => n.parent?.isRoot)
+      if (draggedRootChildren.length > 0) {
+        const { x: mouseCanvasX } = inst.toPos(lastMouseClientX, lastMouseClientY)
+        const { scaleX = 1, translateX = 0 } = inst.draw.transform()
+        const rootCanvasCenterX = (root.left + (root.width || 0) / 2) * scaleX + translateX
+        const targetDir: 'left' | 'right' = mouseCanvasX < rootCanvasCenterX ? 'left' : 'right'
+
+        recordDragDirSnapshot(
+          draggedRootChildren
+            .map(n => ({ uid: n.getData?.('uid') as string | undefined, dir: targetDir }))
+            .filter((e): e is { uid: string; dir: 'left' | 'right' } => !!e.uid)
+        )
+        for (const node of draggedRootChildren) {
+          node.setData({ dir: targetDir })
+          cleanDescendantDirs(node)
+        }
+        // moveNodeTo 内部 removeFromParent + push 回根 + render()；
+        // 走 execCommand 才能进命令历史（可撤销），裸调 render 会 clearHistory。
+        inst.execCommand('MOVE_NODE_TO', draggedRootChildren as any, root)
+        // 返回 undefined 让库继续走 onMouseup 剩余逻辑：overlap/prev/next 全空 +
+        // enableFreeDrag=false → 库不执行任何命令，仅 emit node_dragend（显示
+        // 「已移动 + 撤销」提示）+ reset()。结构已被 moveNodeTo 改过，库无二次操作。
+        return
+      }
+    }
+
     const willBeRootChild =
       info.overlapNodeUid === rootUid ||
       (info.prevNodeUid && findNodeParentUid(info.prevNodeUid) === rootUid) ||
