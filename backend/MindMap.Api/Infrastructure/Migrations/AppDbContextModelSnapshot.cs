@@ -343,8 +343,8 @@ namespace MindMap.Api.Infrastructure.Migrations
                         .HasColumnType("char(36)");
 
                     b.Property<string>("Note")
-                        .HasMaxLength(4096)
-                        .HasColumnType("varchar(4096)");
+                        .HasMaxLength(16384)
+                        .HasColumnType("longtext");
 
                     b.Property<Guid?>("ParentId")
                         .HasColumnType("char(36)");

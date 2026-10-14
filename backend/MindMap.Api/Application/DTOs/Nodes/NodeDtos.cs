@@ -16,7 +16,7 @@ public class NodeCreateRequest
     [StringLength(16384)]
     public string? Content { get; set; }
 
-    [StringLength(4096)]
+    [StringLength(16384)]
     public string? Note { get; set; }
 
     /// <summary>同级排序，0 = 第一个；省略时追加到末尾。</summary>
@@ -64,7 +64,7 @@ public class NodeUpdateRequest
     [StringLength(16384)]
     public string? Content { get; set; }
 
-    [StringLength(4096)]
+    [StringLength(16384)]
     public string? Note { get; set; }
 
     public int? SortOrder { get; set; }

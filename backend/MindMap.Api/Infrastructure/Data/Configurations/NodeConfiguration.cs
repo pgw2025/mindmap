@@ -18,7 +18,8 @@ public class NodeConfiguration : IEntityTypeConfiguration<Node>
 
         builder.Property(n => n.Title).HasMaxLength(512).IsRequired();
         builder.Property(n => n.Content).HasMaxLength(16384);
-        builder.Property(n => n.Note).HasMaxLength(4096);
+        // Note 为富文本 HTML，4K 字符极易被富文本标签撑爆 → 与 Content 一致按 longtext 落库
+        builder.Property(n => n.Note).HasMaxLength(16384);
         builder.Property(n => n.SortOrder).IsRequired();
         builder.Property(n => n.IsCollapsed).IsRequired();
 

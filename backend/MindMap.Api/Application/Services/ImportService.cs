@@ -182,7 +182,7 @@ public class ImportService : IImportService
             ParentId = parentId,
             Title = title,
             Content = TrimToMax(p.Content, 8000),
-            Note = TrimToMax(p.Note, 4000),
+            Note = TrimToMax(p.Note, 16000),
             SortOrder = sortOrder,
             IsCollapsed = p.IsCollapsed,
             Color = TrimToMax(p.Color, 32),
