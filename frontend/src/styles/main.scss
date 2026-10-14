@@ -6,3 +6,28 @@
   height: 100%;
   width: 100%;
 }
+
+/* ------------------------------------------------------------------
+ * simple-mind-map 节点双击内联编辑框（全局覆盖，勿移回 scoped 样式）
+ *
+ * 为什么必须放全局：库 TextEdit.js 把编辑框 append 到
+ * `customInnerElsAppendTo || document.body`，本项目未配置该项，
+ * 所以 .smm-node-edit-wrap 是 <body> 的直接子元素、在组件树外。
+ * scoped 样式编译后要求「带 data-v 的祖先」，对该元素永不命中，
+ * 写在组件内（哪怕加 :deep + !important）也是死代码 —— 626be03
+ * 那版修复即因此失效。
+ *
+ * 背景/文字钉到应用级 CSS 变量（:root / .dark 定义于 _theme.scss，
+ * body 子元素可继承），明暗自动切换；!important 用于盖过库在
+ * TextEdit.getBackground() 里硬写的内联 style.background
+ * （transparent 底 + 非纯白字时兜底 '#fff'，深色画布上白块刺眼）。
+ * ------------------------------------------------------------------ */
+.smm-node-edit-wrap {
+  overflow-x: hidden !important;
+  word-break: break-word !important;
+  white-space: pre-wrap !important;
+  box-sizing: border-box !important;
+  background: var(--app-card-bg, #181c22) !important;
+  color: var(--app-text, #e5e7eb) !important;
+  caret-color: var(--app-text, #e5e7eb);
+}
