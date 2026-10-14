@@ -328,10 +328,6 @@ namespace MindMap.Api.Infrastructure.Migrations
                     b.Property<int?>("FontSize")
                         .HasColumnType("int");
 
-                    b.Property<double?>("Height")
-                        .HasPrecision(8, 2)
-                        .HasColumnType("double");
-
                     b.Property<string>("Icon")
                         .HasMaxLength(128)
                         .HasColumnType("varchar(128)");
@@ -368,10 +364,6 @@ namespace MindMap.Api.Infrastructure.Migrations
                         .HasColumnType("double");
 
                     b.Property<double?>("X")
-                        .HasPrecision(12, 4)
-                        .HasColumnType("double");
-
-                    b.Property<double?>("Y")
                         .HasPrecision(12, 4)
                         .HasColumnType("double");
 

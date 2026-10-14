@@ -24,11 +24,6 @@ public class NodeCreateRequest
 
     public bool IsCollapsed { get; set; }
 
-    public double? X { get; set; }
-    public double? Y { get; set; }
-    public double? Width { get; set; }
-    public double? Height { get; set; }
-
     [StringLength(32)]
     public string? Color { get; set; }
     public int? FontSize { get; set; }
@@ -128,8 +123,6 @@ public class NodeBatchItem
 
     public int? SortOrder { get; set; }
     public Guid? ParentId { get; set; }
-    public double? X { get; set; }
-    public double? Y { get; set; }
     public bool? IsCollapsed { get; set; }
 
     [StringLength(32)]
@@ -162,10 +155,6 @@ public class NodeDto
     public string? Note { get; set; }
     public int SortOrder { get; set; }
     public bool IsCollapsed { get; set; }
-    public double? X { get; set; }
-    public double? Y { get; set; }
-    public double? Width { get; set; }
-    public double? Height { get; set; }
     public string? Color { get; set; }
     public int? FontSize { get; set; }
     public string? FontFamily { get; set; }

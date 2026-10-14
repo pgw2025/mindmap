@@ -23,11 +23,6 @@ public class NodeConfiguration : IEntityTypeConfiguration<Node>
         builder.Property(n => n.SortOrder).IsRequired();
         builder.Property(n => n.IsCollapsed).IsRequired();
 
-        builder.Property(n => n.X).HasPrecision(12, 4);
-        builder.Property(n => n.Y).HasPrecision(12, 4);
-        builder.Property(n => n.Width).HasPrecision(8, 2);
-        builder.Property(n => n.Height).HasPrecision(8, 2);
-
         builder.Property(n => n.Color).HasMaxLength(32);
         builder.Property(n => n.FontSize);
         builder.Property(n => n.FontFamily).HasMaxLength(64);

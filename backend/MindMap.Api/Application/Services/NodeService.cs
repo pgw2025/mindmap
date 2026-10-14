@@ -61,10 +61,6 @@ public class NodeService : INodeService
                 Note = n.Note,
                 SortOrder = n.SortOrder,
                 IsCollapsed = n.IsCollapsed,
-                X = n.X,
-                Y = n.Y,
-                Width = n.Width,
-                Height = n.Height,
                 Color = n.Color,
                 FontSize = n.FontSize,
                 FontFamily = n.FontFamily,
@@ -126,10 +122,6 @@ public class NodeService : INodeService
             Note = req.Note,
             SortOrder = sortOrder,
             IsCollapsed = req.IsCollapsed,
-            X = req.X,
-            Y = req.Y,
-            Width = req.Width,
-            Height = req.Height,
             Color = req.Color,
             FontSize = req.FontSize,
             FontFamily = req.FontFamily,
@@ -172,10 +164,6 @@ public class NodeService : INodeService
         if (req.Note is not null) node.Note = req.Note;
         if (req.SortOrder.HasValue) node.SortOrder = req.SortOrder.Value;
         if (req.IsCollapsed.HasValue) node.IsCollapsed = req.IsCollapsed.Value;
-        if (req.X.HasValue) node.X = req.X;
-        if (req.Y.HasValue) node.Y = req.Y;
-        if (req.Width.HasValue) node.Width = req.Width;
-        if (req.Height.HasValue) node.Height = req.Height;
         if (req.Color is not null) node.Color = req.Color;
         if (req.FontSize.HasValue) node.FontSize = req.FontSize;
         if (req.FontFamily is not null) node.FontFamily = req.FontFamily;
@@ -348,8 +336,6 @@ public class NodeService : INodeService
 
             if (item.SortOrder.HasValue) node.SortOrder = item.SortOrder.Value;
             if (item.ParentId.HasValue) node.ParentId = item.ParentId;
-            if (item.X.HasValue) node.X = item.X;
-            if (item.Y.HasValue) node.Y = item.Y;
             if (item.IsCollapsed.HasValue) node.IsCollapsed = item.IsCollapsed.Value;
             // 样式字段：沿用 UpdateAsync 的部分更新语义（null 不覆盖，空字符串表示清除）
             if (item.Color is not null) node.Color = item.Color;
@@ -519,10 +505,6 @@ public class NodeService : INodeService
         Note = n.Note,
         SortOrder = n.SortOrder,
         IsCollapsed = n.IsCollapsed,
-        X = n.X,
-        Y = n.Y,
-        Width = n.Width,
-        Height = n.Height,
         Color = n.Color,
         FontSize = n.FontSize,
         FontFamily = n.FontFamily,
@@ -568,10 +550,6 @@ public class NodeService : INodeService
         Note = n.Note,
         SortOrder = n.SortOrder,
         IsCollapsed = n.IsCollapsed,
-        X = n.X,
-        Y = n.Y,
-        Width = n.Width,
-        Height = n.Height,
         Color = n.Color,
         FontSize = n.FontSize,
         FontFamily = n.FontFamily,

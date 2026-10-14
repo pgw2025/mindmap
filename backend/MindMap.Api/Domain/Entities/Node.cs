@@ -31,18 +31,6 @@ public class Node
     /// <summary>是否折叠子节点。</summary>
     public bool IsCollapsed { get; set; }
 
-    /// <summary>自由画布坐标 X。</summary>
-    public double? X { get; set; }
-
-    /// <summary>自由画布坐标 Y。</summary>
-    public double? Y { get; set; }
-
-    /// <summary>节点宽度（自适应时为 null）。</summary>
-    public double? Width { get; set; }
-
-    /// <summary>节点高度（自适应时为 null）。</summary>
-    public double? Height { get; set; }
-
     /// <summary>节点文字颜色。</summary>
     public string? Color { get; set; }
 
