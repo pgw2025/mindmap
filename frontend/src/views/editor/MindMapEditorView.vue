@@ -76,6 +76,26 @@ if (Drag && (Drag as any).prototype) {
   dragProto.handleVerticalCheck = wrapDragCheck(dragProto.handleVerticalCheck, 'originHeight')
   dragProto.handleHorizontalCheck = wrapDragCheck(dragProto.handleHorizontalCheck, 'originWidth')
 
+  // —— 边缘节点外侧热区增强 ——
+  // 原版对没有上/下（或左/右）兄弟的节点，外侧热区固定为 minOffset(10px)，
+  // 导致最上方节点的上面、最下方节点的下面很难触发「插入为同级」，这里扩大到固定像素
+  const EDGE_SIBLING_ZONE_DESKTOP = 64  // 桌面端：外侧热区 64px
+  const EDGE_SIBLING_ZONE_MOBILE = 90   // 移动端：触屏精度低，扩大到 90px
+
+  const origGetNodeDistanceToSiblingNode = dragProto.getNodeDistanceToSiblingNode
+  dragProto.getNodeDistanceToSiblingNode = function (this: any, ...args: any[]) {
+    const result = origGetNodeDistanceToSiblingNode.apply(this, args)
+    const edgeZone = isMobileDrag() ? EDGE_SIBLING_ZONE_MOBILE : EDGE_SIBLING_ZONE_DESKTOP
+    // 仅对没有相邻兄弟的边缘节点生效，不影响普通兄弟节点之间的间距判定
+    if (!result.prevBrother) {
+      result.prevBrotherOffset = Math.max(result.prevBrotherOffset, edgeZone)
+    }
+    if (!result.nextBrother) {
+      result.nextBrotherOffset = Math.max(result.nextBrotherOffset, edgeZone)
+    }
+    return result
+  }
+
   // —— P0-2：降低重叠检测节流时间（300ms → 120ms），让拖拽更跟手 ——
   // 重写 bindEvent，在原始绑定完成后用更短的节流时间重新包装 checkOverlapNode
   const origBindEvent = dragProto.bindEvent
