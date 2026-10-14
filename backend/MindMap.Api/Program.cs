@@ -204,6 +204,34 @@ using (var scope = app.Services.CreateScope())
 
         // 初始化内置模板（仅当模板表为空时写入）
         await TemplateSeedData.EnsureTemplatesAsync(db);
+
+        // ---- 历史数据归一（幂等，可安全重复执行）----
+        // 早期版本新建根子节点未写 Direction（NULL），前端加载时统一按右侧处理，
+        // 导致部分节点实际显示在左侧、库中却为 NULL，刷新后跳边。
+        // 按画布同款奇偶规则（根子节点按 SortOrder 排序的索引 % 2 == 0 → 右）补齐。
+        // 注：不走 EF migration —— 当前模型与 snapshot 存在无关漂移（Width/X 列），
+        // scaffolding 会误生成 DropColumn；此处裸 SQL 幂等归一不触碰 schema。
+        try
+        {
+            var normalized = await db.Database.ExecuteSqlRawAsync(@"
+UPDATE nodes n
+JOIN (
+    SELECT c.Id,
+           ROW_NUMBER() OVER (PARTITION BY c.ParentId ORDER BY c.SortOrder, c.Id) - 1 AS idx
+    FROM nodes c
+    JOIN mindmaps m ON m.RootNodeId = c.ParentId
+) t ON t.Id = n.Id
+SET n.Direction = CASE WHEN t.idx % 2 = 0 THEN 1 ELSE 0 END
+WHERE n.Direction IS NULL");
+            if (normalized > 0)
+            {
+                Log.Information("已按奇偶规则归一 {Count} 个 Direction 为 NULL 的历史根子节点", normalized);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Direction 历史数据归一失败（不影响应用启动）");
+        }
     }
     catch (Exception ex)
     {

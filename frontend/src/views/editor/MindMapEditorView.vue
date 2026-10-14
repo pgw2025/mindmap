@@ -695,7 +695,10 @@ function initMindMap() {
     contextMenu: !readonly.value,
     toolBar: !readonly.value,
     nodeLineDash: false,
-    enableFreeDrag: !readonly.value,
+    // P1 修复 3：关闭自由拖拽。customLeft/customTop 不持久化（后端无对应字段，刷新即丢），
+    // 且「拖到空白处固定位置」会与结构化拖拽的落点判定抢跑（如拖到根节点左侧空白
+    // 时既不换边也不落库，方向数据反而被清脏）。关闭后拖到空白 = 取消拖拽回原位。
+    enableFreeDrag: false,
     scrollbarStyle: 'thin',
     minScale: 0.2,
     maxScale: 2,
@@ -1560,7 +1563,8 @@ function switchMindMapMode(editing: boolean) {
   mindMapInstance.setMode(editing ? 'edit' : 'readonly')
   mindMapInstance.updateConfig({
     contextMenu: editing,
-    enableFreeDrag: editing
+    // 自由拖拽保持关闭（P1 修复 3）：显式写 false，防止随编辑态恢复
+    enableFreeDrag: false
   })
 }
 

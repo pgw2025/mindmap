@@ -177,6 +177,32 @@ export function useMindMapSync(opts: {
   let lastMouseClientY = 0
 
   /** ============================================================
+   *  拖拽方向快照（P0 修复 1）
+   *  beforeDragEnd 判定的最终方向（uid → 'left' | 'right'）。
+   *  data_change_detail 受 Command.addHistory 节流（addHistoryTime=100ms），
+   *  在松手约 100ms 后才触发，届时全局鼠标坐标可能已漂移；
+   *  handleStructuralChangesBatch 优先消费快照而非重算鼠标位置，
+   *  保证落库方向与画布当场写入的 dir 恒等。
+   *  生命周期：写入前清旧（防快速连拖污染）+ 请求成功即删 + 5s TTL 兜底；
+   *  请求失败时保留，供 failedOps 重放时精确恢复方向。
+   *  ============================================================ */
+  const dragDirSnapshot = new Map<string, 'left' | 'right'>()
+  let dragDirSnapshotTtl: ReturnType<typeof setTimeout> | null = null
+
+  /** 写入拖拽方向快照（整体覆盖旧值并重置 TTL） */
+  function recordDragDirSnapshot(entries: Array<{ uid: string; dir: 'left' | 'right' }>) {
+    dragDirSnapshot.clear()
+    if (dragDirSnapshotTtl) clearTimeout(dragDirSnapshotTtl)
+    dragDirSnapshotTtl = setTimeout(() => {
+      dragDirSnapshot.clear()
+      dragDirSnapshotTtl = null
+    }, 5000)
+    for (const e of entries) {
+      if (e.uid) dragDirSnapshot.set(e.uid, e.dir)
+    }
+  }
+
+  /** ============================================================
    *  ID 映射：simple-mind-map 内部 uid → 后端数据库 ID
    *  这是增量同步最核心的状态
    *  ============================================================ */
@@ -713,9 +739,27 @@ export function useMindMapSync(opts: {
       const title = extractTitleFromText(task.node.data.text ?? '', undefined, pasteIcon != null ? String(pasteIcon) : undefined)
 
       // 检测是否根节点直接子节点 → 设置 direction
+      // P2 修复 5：simple-mind-map 新建节点不带 data.dir，布局按「children 索引
+      // 奇偶」分边（index%2===0 → 右）。原先无 dir 时恒写 1(右)，导致偶数索引的
+      // 新建根子节点画布显示在左、库里存右，刷新后跳边。现按布局实际分边写入：
+      // 1) data.dir 显式存在 → 直接用；
+      // 2) 否则读渲染（布局）节点上布局已算出的实际方向；
+      // 3) 渲染树不可达时，按布局同款奇偶规则用 children 索引兜底
+      //    （task.sortOrder 即新节点在父 children 中的索引）。
       let direction: 0 | 1 | undefined = undefined
       if (pId && pId === nodesStore.rootNode?.id) {
-        direction = task.node.data.dir === 'left' ? 0 : 1
+        const dataDir = task.node.data.dir
+        if (dataDir === 'left' || dataDir === 'right') {
+          direction = dataDir === 'left' ? 0 : 1
+        } else {
+          const uid = task.node.data.uid
+          const renderedDir = uid ? findRenderNodeByUid(uid)?.dir : undefined
+          if (renderedDir === 'left' || renderedDir === 'right') {
+            direction = renderedDir === 'left' ? 0 : 1
+          } else {
+            direction = task.sortOrder % 2 === 1 ? 0 : 1
+          }
+        }
       }
 
       // ★ 先把 create Promise 注册到 pendingCreates，让后续 handleUpdate 能 await
@@ -1199,6 +1243,8 @@ export function useMindMapSync(opts: {
     // 2. 第一遍：父节点变化的节点执行 move。
     //    必须先移动再做排序修正，否则旧父节点兄弟压缩排序时会与
     //    尚未移走的节点发生 (MindMapId, ParentId, SortOrder) 唯一索引冲突。
+    //    P0 修复 2：父节点未变但拖拽换边的根节点直接子节点，原逻辑直接 continue
+    //    导致 direction 永远不同步（刷新后弹回原方向）；现改为单独走 update 同步。
     for (const uid of targetUids) {
       const backendId = await getBackendIdOrWait(uid)
       if (!backendId) continue
@@ -1209,17 +1255,41 @@ export function useMindMapSync(opts: {
       const newParentBackendId = newParentUid
         ? await getBackendIdOrWait(newParentUid) ?? null
         : null
-      if (newParentBackendId === (backendNode.parentId ?? null)) continue
+
+      if (newParentBackendId === (backendNode.parentId ?? null)) {
+        // 父节点未变：仅当「根节点直接子节点 + 拖拽快照记录了方向」时单独同步。
+        // 只改方向走 update（move 会做两阶段 sortOrder 临时平移，对纯方向变更过重）。
+        // 快照在请求成功后才删除：失败时随 failedOps 重放可精确恢复方向。
+        const snapshotDir = dragDirSnapshot.get(uid)
+        if (
+          newParentBackendId === nodesStore.rootNode?.id &&
+          (snapshotDir === 'left' || snapshotDir === 'right')
+        ) {
+          const dirValue: 0 | 1 = snapshotDir === 'left' ? 0 : 1
+          if ((backendNode.direction ?? null) !== dirValue) {
+            await nodesStore.update(backendId, { direction: dirValue })
+          }
+          dragDirSnapshot.delete(uid)
+        }
+        continue
+      }
 
       const newSortOrder = sortOrderOf.get(uid) ?? 0
       const isNewParentRoot = newParentBackendId === nodesStore.rootNode?.id
       let newDirection: 0 | 1 | undefined = undefined
       if (isNewParentRoot) {
-        const { x: mouseCanvasX } = inst.toPos(lastMouseClientX, lastMouseClientY)
-        const { scaleX = 1, translateX = 0 } = inst.draw.transform()
-        const rootCanvasCenterX = (renderRoot.left + (renderRoot.width || 0) / 2) * scaleX + translateX
-        const targetDir = mouseCanvasX < rootCanvasCenterX ? 'left' : 'right'
-        newDirection = targetDir === 'left' ? 0 : 1
+        // P0 修复 1：优先消费拖拽方向快照，消除 100ms 节流窗口内的鼠标漂移；
+        // 无快照（非拖拽触发的结构变化，如撤销恢复）保留原鼠标位置兜底。
+        const snapshotDir = dragDirSnapshot.get(uid)
+        if (snapshotDir === 'left' || snapshotDir === 'right') {
+          newDirection = snapshotDir === 'left' ? 0 : 1
+        } else {
+          const { x: mouseCanvasX } = inst.toPos(lastMouseClientX, lastMouseClientY)
+          const { scaleX = 1, translateX = 0 } = inst.draw.transform()
+          const rootCanvasCenterX = (renderRoot.left + (renderRoot.width || 0) / 2) * scaleX + translateX
+          const targetDir = mouseCanvasX < rootCanvasCenterX ? 'left' : 'right'
+          newDirection = targetDir === 'left' ? 0 : 1
+        }
       }
 
       await nodesStore.move(backendId, {
@@ -1227,6 +1297,9 @@ export function useMindMapSync(opts: {
         sortOrder: newSortOrder,
         direction: newDirection
       })
+      // move 成功后才消费快照：失败重放时 parentOf 已重建、父已一致，
+      // 会落入上方「父节点未变」分支用快照补发方向，天然自愈
+      if (newDirection !== undefined) dragDirSnapshot.delete(uid)
     }
 
     // 3. 第二遍：提交「受影响父节点下完整兄弟集合」的 sortOrder。
@@ -1479,26 +1552,40 @@ export function useMindMapSync(opts: {
       targetDir = mouseCanvasX < rootCanvasCenterX ? 'left' : 'right'
     } else if (info.prevNodeUid || info.nextNodeUid) {
       // 拖到兄弟节点旁边 → 继承兄弟节点的方向
-      // 兜底：兄弟 dir 与鼠标释放位置矛盾时（兄弟自身可能脏），改用鼠标位置定 dir
+      // P1 修复 4：插入位置在哪侧、方向就跟哪侧，杜绝「插在左侧序列却
+      // 渲染到右侧」的自相矛盾（原先鼠标位置会无条件覆盖兄弟方向）；
+      // 仅当兄弟自身 dir 缺失/非法（脏数据）时，才退回鼠标位置判定。
       const siblingUid = info.prevNodeUid || info.nextNodeUid
       const siblingNode = siblingUid ? findRenderNodeByUid(siblingUid) : null
       const siblingDir = siblingNode?.getData?.('dir')
-      let dir: 'left' | 'right' = siblingDir === 'left' ? 'left' : 'right'
-      const { x: mouseCanvasX } = inst.toPos(lastMouseClientX, lastMouseClientY)
-      const { scaleX = 1, translateX = 0 } = inst.draw.transform()
-      const rootCanvasCenterX = (root.left + (root.width || 0) / 2) * scaleX + translateX
-      const mouseDir: 'left' | 'right' = mouseCanvasX < rootCanvasCenterX ? 'left' : 'right'
-      if (dir !== mouseDir) dir = mouseDir
-      targetDir = dir
+      if (siblingDir === 'left' || siblingDir === 'right') {
+        targetDir = siblingDir
+      } else {
+        const { x: mouseCanvasX } = inst.toPos(lastMouseClientX, lastMouseClientY)
+        const { scaleX = 1, translateX = 0 } = inst.draw.transform()
+        const rootCanvasCenterX = (root.left + (root.width || 0) / 2) * scaleX + translateX
+        targetDir = mouseCanvasX < rootCanvasCenterX ? 'left' : 'right'
+      }
     }
 
     if (willBeRootChild) {
+      // P0 修复 1：写入方向快照，供 ~100ms 后的结构同步消费
+      // （父节点变化 → move 携带 direction；父节点未变换边 → 单独 update direction）
+      recordDragDirSnapshot(
+        info.beingDragNodeList
+          .map((node) => ({
+            uid: node.getData?.('uid') as string | undefined,
+            dir: targetDir
+          }))
+          .filter((e): e is { uid: string; dir: 'left' | 'right' } => !!e.uid)
+      )
       for (const node of info.beingDragNodeList) {
         node.setData({ dir: targetDir })
         cleanDescendantDirs(node)
       }
     } else {
       // 成为非根节点子节点时，清除自身及后代的显式 dir，使之完全继承分支方向
+      // （后端残留的旧 direction 无害：加载时仅对根节点直接子节点应用 dir）
       for (const node of info.beingDragNodeList) {
         node.setData({ dir: undefined })
         cleanDescendantDirs(node)
