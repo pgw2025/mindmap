@@ -1479,10 +1479,17 @@ export function useMindMapSync(opts: {
       targetDir = mouseCanvasX < rootCanvasCenterX ? 'left' : 'right'
     } else if (info.prevNodeUid || info.nextNodeUid) {
       // 拖到兄弟节点旁边 → 继承兄弟节点的方向
+      // 兜底：兄弟 dir 与鼠标释放位置矛盾时（兄弟自身可能脏），改用鼠标位置定 dir
       const siblingUid = info.prevNodeUid || info.nextNodeUid
       const siblingNode = siblingUid ? findRenderNodeByUid(siblingUid) : null
       const siblingDir = siblingNode?.getData?.('dir')
-      targetDir = siblingDir === 'left' ? 'left' : 'right'
+      let dir: 'left' | 'right' = siblingDir === 'left' ? 'left' : 'right'
+      const { x: mouseCanvasX } = inst.toPos(lastMouseClientX, lastMouseClientY)
+      const { scaleX = 1, translateX = 0 } = inst.draw.transform()
+      const rootCanvasCenterX = (root.left + (root.width || 0) / 2) * scaleX + translateX
+      const mouseDir: 'left' | 'right' = mouseCanvasX < rootCanvasCenterX ? 'left' : 'right'
+      if (dir !== mouseDir) dir = mouseDir
+      targetDir = dir
     }
 
     if (willBeRootChild) {
@@ -1515,63 +1522,6 @@ export function useMindMapSync(opts: {
     }
     walk(root)
     return result
-  }
-
-  /** ============================================================
-   *  每次 layout 完成后扫描根节点直接子节点方向（保持原有逻辑）
-   *  ============================================================ */
-  async function normalizeRootChildDirections() {
-    const inst = getMindMapInstance()
-    if (!inst || readonly.value) return
-    const root = inst.renderer.root
-    if (!root) return
-
-    const rootCenterX = root.left + (root.width || 0) / 2
-    const updates: Array<{
-      node: { setData: (d: Record<string, unknown>) => void; getData: (k?: string) => unknown }
-      uid: string
-      targetDir: 'left' | 'right'
-      backendDir: 0 | 1
-    }> = []
-
-    const scan = (node: any) => {
-      if (node.isRoot) {
-        node.children?.forEach(scan)
-        return
-      }
-      if (!node.parent || !node.parent.isRoot) return
-      const uid = node.getData?.('uid') as string | undefined
-      if (!uid) return
-      const id = getBackendId(uid)
-      if (!id) return
-      const centerX = node.left + (node.width || 0) / 2
-      const targetDir: 'left' | 'right' = centerX < rootCenterX ? 'left' : 'right'
-      const backendDir: 0 | 1 = targetDir === 'left' ? 0 : 1
-      const currentBackend = nodesStore.findNode(id)?.direction
-      const currentDataDir = node.getData?.('dir')
-      if (currentDataDir !== targetDir || currentBackend !== backendDir) {
-        updates.push({ node, uid, targetDir, backendDir })
-      }
-    }
-    scan(root)
-
-    if (updates.length === 0) return
-
-    for (const u of updates) {
-      u.node.setData({ dir: u.targetDir })
-    }
-
-    enqueueStructuralOp(async () => {
-      for (const u of updates) {
-        const backendId = getBackendId(u.uid)
-        if (!backendId) continue
-        try {
-          await nodesStore.update(backendId, { direction: u.backendDir })
-        } catch {
-          // 单个失败忽略
-        }
-      }
-    })
   }
 
   /** ============================================================
@@ -1645,7 +1595,6 @@ export function useMindMapSync(opts: {
     applyNodeInkOverrides,
     applyExpandCollapse,
     handleDragEnd,
-    normalizeRootChildDirections,
     bindIncrementalSyncHandlers,
     flushPendingUpdates,
     waitForPendingOps,

@@ -566,7 +566,6 @@ const {
   applyNodeInkOverrides,
   applyExpandCollapse,
   handleDragEnd,
-  normalizeRootChildDirections,
   bindIncrementalSyncHandlers,
   flushPendingUpdates,
   waitForPendingOps,
@@ -906,12 +905,6 @@ function initMindMap() {
     searchCurrentIndex.value = searchMatchCount.value > 0 ? 1 : 0
   })
 
-  // 兜底：每次 layout 完成后，扫描根节点直接子节点
-  mindMapInstance.on('node_tree_render_end', () => {
-    if (readonly.value) return
-    setTimeout(() => normalizeRootChildDirections(), 0)
-  })
-
   // 节点图片悬浮预览：hover 缩略图时弹出原始大图（与备注 tooltip 同一交互模式）
   // node_img_mouseenter 参数为 (node, img, e)，img 是 SVGImage 实例，
   // img.node.getBoundingClientRect() 拿 viewport 坐标（与库备注定位一致）
@@ -931,6 +924,25 @@ function initMindMap() {
   })
 }
 
+/**
+ * 为「根节点新增直接子节点」挑选方向：取子节点较少的一侧，相等或无子节点时默认 right。
+ * dir 在产生节点这一刻就定对，位置交给 simple-mind-map 按 dir 分边派生，无需事后 normalize。
+ */
+function pickDirForNewRootChild(): 'left' | 'right' {
+  const root = mindMapInstance?.renderer?.root
+  const children = root?.children
+  if (!children?.length) return 'right'
+  let left = 0
+  let right = 0
+  for (const child of children) {
+    const d = child.getData?.('dir')
+    if (d === 'left') left++
+    else right++ // 显式 right 或无显式 dir（库默认 + convertToMindMapData 兜底均按右）
+  }
+  if (left < right) return 'left'
+  return 'right'
+}
+
 /** 工具栏操作：新增子节点（画布命令优先，detail 增量落库，不再 store 直写 + reload） */
 async function handleAddChild() {
   if (!selectedNodeId.value || readonly.value) return
@@ -947,11 +959,11 @@ async function handleAddChild() {
     inst.execCommand('SET_NODE_EXPAND', parentNode, true)
   }
 
-  // 2. 根下新增保持「总在右侧」现状：appointData 显式 dir='right'
+  // 2. 根下新增：按当前子节点分布平衡左右（dir 在产生时定对，位置由库派生）
   //    （非根子节点不设 dir，继承分支方向 —— 与 convertToMindMapData 策略一致）
   const isRoot = storeNode.id === nodesStore.rootNode?.id
   const appointData: Record<string, unknown> = { text: '新子节点' }
-  if (isRoot) appointData.dir = 'right'
+  if (isRoot) appointData.dir = pickDirForNewRootChild()
 
   // 3. 画布优先：命令插入 → detail create → handleCreateTree 异步落库（含排序重编闭环）
   //    openEdit=false 保持现状「新增后不进入编辑」
@@ -972,10 +984,10 @@ async function handleAddSibling() {
   const node = findRenderNodeByUid(selectedNodeId.value)
   if (!node) return
 
-  // 根直接子节点新增保持右侧现状语义
+  // 根直接子节点新增同级 → 继承选中节点方向（紧挨同侧）；direction 为 null 时兜底右
   const isRootChild = storeNode.parentId === nodesStore.rootNode?.id
   const appointData: Record<string, unknown> = { text: '新节点' }
-  if (isRootChild) appointData.dir = 'right'
+  if (isRootChild) appointData.dir = storeNode.direction === 0 ? 'left' : 'right'
 
   // 同级插入位置 = 选中节点正下方（appointNodes 传单节点，工具栏按钮不批量插入）
   inst.execCommand('INSERT_NODE', false, [node], appointData)
@@ -1763,10 +1775,10 @@ async function handlePaste() {
   if (source.icon != null) appointData.__pasteIcon = source.icon
   if (source.content != null) appointData.__pasteContent = source.content
 
-  // 3. 根节点目标 → 粘贴为子节点（现状降级语义）；后端根直接子节点默认右，
+  // 3. 根节点目标 → 粘贴为子节点（现状降级语义）；按当前子节点分布平衡左右，
   //    画布同步设 dir 保持 F5 后位置一致（与 handleAddChild 策略一致）
   if (targetStore.parentId == null) {
-    appointData.dir = 'right'
+    appointData.dir = pickDirForNewRootChild()
     inst.execCommand('INSERT_CHILD_NODE', false, [targetRender], appointData)
   } else {
     // 同级粘贴：目标节点正下方（与画布 Enter/阶段 3 新增同级行为一致）
