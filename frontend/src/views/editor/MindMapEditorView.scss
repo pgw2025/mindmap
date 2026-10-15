@@ -852,7 +852,8 @@
   .btn-action-share .btn-label,
   .btn-action-export .btn-label,
   .btn-action-template .btn-label,
-  .btn-action-theme .btn-label {
+  .btn-action-theme .btn-label,
+  .btn-action-mode .btn-label {
     display: none;
   }
 
@@ -861,7 +862,8 @@
   .btn-action-share,
   .btn-action-export,
   .btn-action-template,
-  .btn-action-theme {
+  .btn-action-theme,
+  .btn-action-mode {
     padding: 8px 12px;
     font-size: 18px;
     min-width: 38px;

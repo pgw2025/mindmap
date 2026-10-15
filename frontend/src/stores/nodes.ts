@@ -18,8 +18,19 @@ interface HistoryCommand {
   snapshot?: NodeDto | NodeDto[]
   prevData?: unknown
   nextData?: unknown
+  /** 人类可读标签，供历史记录面板展示（如「新增节点」「删除节点」「移动节点」） */
+  label?: string
   /** type === 'compound' 时承载被合并的子命令（如一次拖拽产生的 update/move/batch） */
   subCommands?: HistoryCommand[]
+}
+
+/** 历史面板条目：把 undo/redo 两个栈投影成一条带「当前位置」标记的线性列表 */
+interface HistoryEntry {
+  /** 在合并列表中的序号（0 = 最早） */
+  index: number
+  cmd: HistoryCommand
+  /** 该条当前位于撤销栈（可回退）还是重做栈（可前进） */
+  side: 'undo' | 'redo'
 }
 
 export const useNodesStore = defineStore('nodes', () => {
@@ -47,6 +58,24 @@ export const useNodesStore = defineStore('nodes', () => {
 
   const canUndo = computed(() => undoStack.value.length > 0)
   const canRedo = computed(() => redoStack.value.length > 0)
+
+  /** 历史面板线性视图：undo 栈（旧→新）在前，redo 栈（旧→新）在后。
+   *  「当前位置」即 undo 栈顶与 redo 栈底之间的分界，无需额外分隔标记。 */
+  const historyList = computed<HistoryEntry[]>(() => {
+    const entries: HistoryEntry[] = []
+    undoStack.value.forEach((cmd, i) => {
+      entries.push({ index: i, cmd, side: 'undo' })
+    })
+    redoStack.value.forEach((cmd, i) => {
+      // redo 栈是「后弹出的先重做」，栈顶 = 下一步重做；合并列表里按「旧→新」应是栈底在前
+      entries.push({ index: undoStack.value.length + i, cmd, side: 'redo' })
+    })
+    return entries
+  })
+
+  /** 当前历史指针：undo 栈条数即「已落定的操作数」。
+   *  historyList 中 index < cursor 为已应用（undo 侧），index >= cursor 为可重做（redo 侧）。 */
+  const historyCursor = computed(() => undoStack.value.length)
 
   function findNode(id: string): NodeDto | undefined {
     return nodes.value.find((n) => n.id === id)
@@ -129,7 +158,7 @@ export const useNodesStore = defineStore('nodes', () => {
   async function create(payload: NodeCreatePayload): Promise<NodeDto> {
     const node = await nodesApi.createNode(mindMapId.value, payload)
     nodes.value.push(node)
-    pushHistory({ type: 'create', nodeId: node.id, nextData: node })
+    pushHistory({ type: 'create', nodeId: node.id, nextData: node, label: `新增节点「${node.title}」` })
     return node
   }
 
@@ -144,7 +173,7 @@ export const useNodesStore = defineStore('nodes', () => {
     if (idx >= 0) {
       nodes.value[idx] = updated
     }
-    pushHistory({ type: 'update', nodeId, prevData, nextData: updated })
+    pushHistory({ type: 'update', nodeId, prevData, nextData: updated, label: `编辑节点「${updated.title}」` })
     return updated
   }
 
@@ -159,11 +188,11 @@ export const useNodesStore = defineStore('nodes', () => {
     if (idx >= 0) {
       nodes.value[idx] = moved
     }
-    pushHistory({ type: 'move', nodeId, prevData, nextData: moved })
+    pushHistory({ type: 'move', nodeId, prevData, nextData: moved, label: `移动节点「${moved.title}」` })
     return moved
   }
 
-  async function batchUpdate(items: NodeBatchItem[]): Promise<void> {
+  async function batchUpdate(items: NodeBatchItem[], label = '调整节点结构'): Promise<void> {
     const prevData = items
       .map((item) => nodes.value.find((n) => n.id === item.id))
       .filter(Boolean) as NodeDto[]
@@ -189,19 +218,20 @@ export const useNodesStore = defineStore('nodes', () => {
       if (item.edgeColor !== undefined) node.edgeColor = item.edgeColor
       if (item.edgeStyle !== undefined) node.edgeStyle = item.edgeStyle
     }
-    pushHistory({ type: 'batch', snapshot: prevData, nextData: items })
+    pushHistory({ type: 'batch', snapshot: prevData, nextData: items, label })
   }
 
   async function remove(nodeId: string): Promise<void> {
     const descendants = collectDescendants(nodeId)
     const allToDelete = [nodeId, ...descendants]
     const snapshot = nodes.value.filter((n) => allToDelete.includes(n.id))
+    const deletedRoot = snapshot.find((n) => n.id === nodeId)
     await nodesApi.deleteNode(mindMapId.value, nodeId)
     nodes.value = nodes.value.filter((n) => !allToDelete.includes(n.id))
     if (selectedNodeId.value && allToDelete.includes(selectedNodeId.value)) {
       selectedNodeId.value = null
     }
-    pushHistory({ type: 'delete', nodeId, snapshot })
+    pushHistory({ type: 'delete', nodeId, snapshot, label: `删除节点「${deletedRoot?.title ?? ''}」` })
   }
 
   function collectDescendants(parentId: string): string[] {
@@ -230,6 +260,37 @@ export const useNodesStore = defineStore('nodes', () => {
     const cmd = redoStack.value.pop()!
     undoStack.value.push(cmd)
     await applyRedo(cmd)
+  }
+
+  /** 跳到指定历史状态（PS 历史面板语义）。
+   *  cursor = undoStack.length 表示当前状态；targetCursor 为目标状态的操作数。
+   *  - targetCursor < cursor：回退（undo）cursor - targetCursor 步，即弹出 undo 栈顶若干条。
+   *  - targetCursor > cursor：前进（redo）targetCursor - cursor 步。
+   *  中间步骤只调 applyUndoCore/applyRedoCore（不 reload、不重复落库渲染），
+   *  最后统一 reloadTree 一次，避免 N 次后端往返 + N 次画布重建。 */
+  async function jumpToHistory(targetCursor: number): Promise<void> {
+    const cursor = undoStack.value.length
+    if (targetCursor === cursor) return
+    if (targetCursor < 0 || targetCursor > cursor + redoStack.value.length) return
+
+    if (targetCursor < cursor) {
+      // 回退 cursor - targetCursor 步
+      const steps = cursor - targetCursor
+      for (let i = 0; i < steps; i++) {
+        const cmd = undoStack.value.pop()!
+        redoStack.value.push(cmd)
+        await applyUndoCore(cmd)
+      }
+    } else {
+      // 前进 targetCursor - cursor 步
+      const steps = targetCursor - cursor
+      for (let i = 0; i < steps; i++) {
+        const cmd = redoStack.value.pop()!
+        undoStack.value.push(cmd)
+        await applyRedoCore(cmd)
+      }
+    }
+    await reloadTree()
   }
 
   async function applyUndoCore(cmd: HistoryCommand) {
@@ -393,6 +454,8 @@ export const useNodesStore = defineStore('nodes', () => {
     rootNode,
     canUndo,
     canRedo,
+    historyList,
+    historyCursor,
     findNode,
     getChildren,
     load,
@@ -404,6 +467,7 @@ export const useNodesStore = defineStore('nodes', () => {
     remove,
     undo,
     redo,
+    jumpToHistory,
     selectNode,
     reset,
     clearAll,

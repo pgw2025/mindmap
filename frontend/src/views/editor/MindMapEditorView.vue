@@ -476,6 +476,7 @@ import ShareDrawer from './components/ShareDrawer.vue'
 import VersionDrawer from './components/VersionDrawer.vue'
 import NodeContentModal from './components/NodeContentModal.vue'
 import NotePanel from './components/NotePanel.vue'
+import HistoryPanel from './components/HistoryPanel.vue'
 import NodeNoteTooltip from './components/NodeNoteTooltip.vue'
 import NodeImageTooltip from './components/NodeImageTooltip.vue'
 import OuterFrameStylePanel from './components/OuterFrameStylePanel.vue'
@@ -611,6 +612,7 @@ const versionDrawerRef = ref<InstanceType<typeof VersionDrawer> | null>(null)
 // —— 弹窗/抽屉可见状态 ——
 const shareDrawerVisible = ref(false)
 const versionsDrawerVisible = ref(false)
+const historyDrawerVisible = ref(false)
 const contentModalVisible = ref(false)
 const notePanelVisible = ref(false)
 
@@ -1116,7 +1118,7 @@ async function handleUpdateStyle(payload: NodeUpdatePayload) {
       return
     }
     if (items.length > 1) {
-      await nodesStore.batchUpdate(items)
+      await nodesStore.batchUpdate(items, '批量修改样式')
     } else {
       await nodesStore.update(selectedNodeId.value, payload)
     }
@@ -1765,6 +1767,15 @@ async function handleRedo() {
   reloadMindMap()
 }
 
+/** 历史面板跳转：排空挂起写入后，跳到指定状态并刷新画布。 */
+async function handleHistoryJump(targetCursor: number) {
+  if (hasPendingWriteOps()) {
+    await waitForPendingOps()
+  }
+  await nodesStore.jumpToHistory(targetCursor)
+  reloadMindMap()
+}
+
 /** 复制选中节点到剪贴板 */
 function handleCopy() {
   if (!selectedNodeId.value) return
@@ -2080,6 +2091,10 @@ watch(() => route.params.id, () => {
               <span class="pill-icon">↷</span>
             </button>
             <span class="group-divider"></span>
+            <button class="btn-tool-pill" @click="historyDrawerVisible = true" title="历史记录">
+              <span class="pill-icon">⏱</span>
+            </button>
+            <span class="group-divider"></span>
             <button class="btn-tool-pill" :disabled="!selectedNodeId" @click="handleCopy" title="复制选中节点 (Ctrl+C)">
               <span class="pill-icon">⧉</span>
             </button>
@@ -2150,6 +2165,12 @@ watch(() => route.params.id, () => {
               <span class="btn-label">{{getThemePreset(currentThemeId).name}}</span>
             </button>
           </NDropdown>
+          <!-- 应用明暗切换：只切 html.dark，画布配色由 watch(themeStore.isDark) → applyResolvedTheme 自动重算 -->
+          <button class="btn-action-ghost btn-action-mode" @click="themeStore.toggle()"
+            :title="themeStore.isDark ? '切换为浅色模式' : '切换为深色模式'">
+            <span class="btn-icon">{{ themeStore.isDark ? '☀️' : '🌙' }}</span>
+            <span class="btn-label">{{ themeStore.isDark ? '浅色' : '深色' }}</span>
+          </button>
         </div>
 
         <!-- 协同、历史与保存 -->
@@ -2264,6 +2285,9 @@ watch(() => route.params.id, () => {
     <!-- 版本历史抽屉（含新建版本弹窗） -->
     <VersionDrawer ref="versionDrawerRef" v-model:show="versionsDrawerVisible" :mind-map-id="mindMapId"
       :node-count="nodesStore.nodes.length" @rollback="handleVersionRollback" />
+
+    <!-- 历史记录抽屉（会话内撤销/重做命令栈） -->
+    <HistoryPanel v-model:show="historyDrawerVisible" @jump="handleHistoryJump" />
 
     <!-- 分享抽屉（含新建分享弹窗） -->
     <ShareDrawer v-model:show="shareDrawerVisible" :mind-map-id="mindMapId"

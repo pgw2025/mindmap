@@ -1108,8 +1108,13 @@ export function useMindMapSync(opts: {
       //    batchUpdate 成功后 pushHistory，产生一条 undo 记录）
       if (changed.length > 0) {
         const items = changed.map((c) => ({ id: c.backendId, isCollapsed: c.isCollapsed }))
+        const collapseLabel = mode === 'expand-all'
+          ? '展开全部节点'
+          : mode === 'collapse-all'
+            ? '折叠全部节点'
+            : '收起层级'
         await enqueueStructuralOp(
-          () => nodesStore.batchUpdate(items),
+          () => nodesStore.batchUpdate(items, collapseLabel),
           'collapse-batch'
         )
       }
@@ -1340,7 +1345,7 @@ export function useMindMapSync(opts: {
         }
       }
       if (items.length > 0) {
-        await nodesStore.batchUpdate(items)
+        await nodesStore.batchUpdate(items, '调整节点顺序')
       }
     } finally {
       nodesStore.endHistoryGroup()
