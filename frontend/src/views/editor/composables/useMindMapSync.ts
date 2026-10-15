@@ -1221,121 +1221,129 @@ export function useMindMapSync(opts: {
     // 取当前整棵渲染树的 data 快照，构造关系图
     const currentSnapshot = inst.getData() as any
     if (!currentSnapshot) return
-    const { parentOf, sortOrderOf } = buildRelationalMapsFromRaw(currentSnapshot)
+    // ★ 一次拖拽的所有结构变更（父节点移动 + 根子节点方向更新 + 兄弟重排）
+    //   合并成单条 compound 历史，撤销时一次回退，避免「第一次撤销观感无效」。
+    //   try/finally 保证 endHistoryGroup 一定执行，防止 API 失败时缓冲泄漏。
+    nodesStore.beginHistoryGroup()
+    try {
+      const { parentOf, sortOrderOf } = buildRelationalMapsFromRaw(currentSnapshot)
 
-    // 1. 收集需要结构检查的 uid：每个 diff 节点自身 + children 数组发生变化的全部新子节点
-    const targetUids = new Set<string>()
-    for (const diff of diffs) {
-      const uid = diff.data.data.uid
-      if (!uid) continue
-      targetUids.add(uid)
-      const oldUids = (diff.oldData?.children ?? []).map((c) => c.data.uid)
-      const newUids = (diff.data.children ?? []).map((c) => c.data.uid)
-      const childrenChanged =
-        oldUids.length !== newUids.length ||
-        newUids.some((u, i) => u !== oldUids[i])
-      if (childrenChanged) {
-        for (const cUid of newUids) targetUids.add(cUid)
-      }
-    }
-    if (targetUids.size === 0) return
-
-    // 2. 第一遍：父节点变化的节点执行 move。
-    //    必须先移动再做排序修正，否则旧父节点兄弟压缩排序时会与
-    //    尚未移走的节点发生 (MindMapId, ParentId, SortOrder) 唯一索引冲突。
-    //    P0 修复 2：父节点未变但拖拽换边的根节点直接子节点，原逻辑直接 continue
-    //    导致 direction 永远不同步（刷新后弹回原方向）；现改为单独走 update 同步。
-    for (const uid of targetUids) {
-      const backendId = await getBackendIdOrWait(uid)
-      if (!backendId) continue
-      const backendNode = nodesStore.findNode(backendId)
-      if (!backendNode) continue
-
-      const newParentUid = parentOf.get(uid) ?? null
-      const newParentBackendId = newParentUid
-        ? await getBackendIdOrWait(newParentUid) ?? null
-        : null
-
-      if (newParentBackendId === (backendNode.parentId ?? null)) {
-        // 父节点未变：仅当「根节点直接子节点 + 拖拽快照记录了方向」时单独同步。
-        // 只改方向走 update（move 会做两阶段 sortOrder 临时平移，对纯方向变更过重）。
-        // 快照在请求成功后才删除：失败时随 failedOps 重放可精确恢复方向。
-        const snapshotDir = dragDirSnapshot.get(uid)
-        if (
-          newParentBackendId === nodesStore.rootNode?.id &&
-          (snapshotDir === 'left' || snapshotDir === 'right')
-        ) {
-          const dirValue: 0 | 1 = snapshotDir === 'left' ? 0 : 1
-          if ((backendNode.direction ?? null) !== dirValue) {
-            await nodesStore.update(backendId, { direction: dirValue })
-          }
-          dragDirSnapshot.delete(uid)
-        }
-        continue
-      }
-
-      const newSortOrder = sortOrderOf.get(uid) ?? 0
-      const isNewParentRoot = newParentBackendId === nodesStore.rootNode?.id
-      let newDirection: 0 | 1 | undefined = undefined
-      if (isNewParentRoot) {
-        // P0 修复 1：优先消费拖拽方向快照，消除 100ms 节流窗口内的鼠标漂移；
-        // 无快照（非拖拽触发的结构变化，如撤销恢复）保留原鼠标位置兜底。
-        const snapshotDir = dragDirSnapshot.get(uid)
-        if (snapshotDir === 'left' || snapshotDir === 'right') {
-          newDirection = snapshotDir === 'left' ? 0 : 1
-        } else {
-          const { x: mouseCanvasX } = inst.toPos(lastMouseClientX, lastMouseClientY)
-          const { scaleX = 1, translateX = 0 } = inst.draw.transform()
-          const rootCanvasCenterX = (renderRoot.left + (renderRoot.width || 0) / 2) * scaleX + translateX
-          const targetDir = mouseCanvasX < rootCanvasCenterX ? 'left' : 'right'
-          newDirection = targetDir === 'left' ? 0 : 1
+      // 1. 收集需要结构检查的 uid：每个 diff 节点自身 + children 数组发生变化的全部新子节点
+      const targetUids = new Set<string>()
+      for (const diff of diffs) {
+        const uid = diff.data.data.uid
+        if (!uid) continue
+        targetUids.add(uid)
+        const oldUids = (diff.oldData?.children ?? []).map((c) => c.data.uid)
+        const newUids = (diff.data.children ?? []).map((c) => c.data.uid)
+        const childrenChanged =
+          oldUids.length !== newUids.length ||
+          newUids.some((u, i) => u !== oldUids[i])
+        if (childrenChanged) {
+          for (const cUid of newUids) targetUids.add(cUid)
         }
       }
+      if (targetUids.size === 0) return
 
-      await nodesStore.move(backendId, {
-        parentId: newParentBackendId,
-        sortOrder: newSortOrder,
-        direction: newDirection
-      })
-      // move 成功后才消费快照：失败重放时 parentOf 已重建、父已一致，
-      // 会落入上方「父节点未变」分支用快照补发方向，天然自愈
-      if (newDirection !== undefined) dragDirSnapshot.delete(uid)
-    }
-
-    // 3. 第二遍：提交「受影响父节点下完整兄弟集合」的 sortOrder。
-    //    修复 Duplicate entry 问题：此前只提交 targetUids 里排序变化的节点，
-    //    可能与该父节点下未提交的兄弟节点现有 sortOrder 撞 (MindMapId, ParentId, SortOrder)
-    //    唯一索引。现改为对每个受影响父节点，把其全部子节点按渲染树顺序
-    //    重编为 0..n-1 一并提交，保证请求自洽、无重复 sortOrder。
-    const affectedParentKeys = new Set<string | null>()
-    for (const uid of targetUids) {
-      const newParentUid = parentOf.get(uid) ?? null
-      affectedParentKeys.add(newParentUid)
-    }
-
-    const items: NodeBatchItem[] = []
-    const seenBackendIds = new Set<string>()
-    for (const parentUid of affectedParentKeys) {
-      // 收集该父节点下的全部子节点 uid（渲染树顺序）
-      const siblingUids: string[] = []
-      for (const [uid, p] of parentOf) {
-        if ((p ?? null) === (parentUid ?? null)) siblingUids.push(uid)
-      }
-      siblingUids.sort((a, b) => (sortOrderOf.get(a) ?? 0) - (sortOrderOf.get(b) ?? 0))
-
-      let order = 0
-      for (const uid of siblingUids) {
+      // 2. 第一遍：父节点变化的节点执行 move。
+      //    必须先移动再做排序修正，否则旧父节点兄弟压缩排序时会与
+      //    尚未移走的节点发生 (MindMapId, ParentId, SortOrder) 唯一索引冲突。
+      //    P0 修复 2：父节点未变但拖拽换边的根节点直接子节点，原逻辑直接 continue
+      //    导致 direction 永远不同步（刷新后弹回原方向）；现改为单独走 update 同步。
+      for (const uid of targetUids) {
         const backendId = await getBackendIdOrWait(uid)
         if (!backendId) continue
-        // 跳过已提交的节点（避免同一次 batch 内重复 id）
-        if (seenBackendIds.has(backendId)) continue
-        seenBackendIds.add(backendId)
-        items.push({ id: backendId, sortOrder: order })
-        order++
+        const backendNode = nodesStore.findNode(backendId)
+        if (!backendNode) continue
+
+        const newParentUid = parentOf.get(uid) ?? null
+        const newParentBackendId = newParentUid
+          ? await getBackendIdOrWait(newParentUid) ?? null
+          : null
+
+        if (newParentBackendId === (backendNode.parentId ?? null)) {
+          // 父节点未变：仅当「根节点直接子节点 + 拖拽快照记录了方向」时单独同步。
+          // 只改方向走 update（move 会做两阶段 sortOrder 临时平移，对纯方向变更过重）。
+          // 快照在请求成功后才删除：失败时随 failedOps 重放可精确恢复方向。
+          const snapshotDir = dragDirSnapshot.get(uid)
+          if (
+            newParentBackendId === nodesStore.rootNode?.id &&
+            (snapshotDir === 'left' || snapshotDir === 'right')
+          ) {
+            const dirValue: 0 | 1 = snapshotDir === 'left' ? 0 : 1
+            if ((backendNode.direction ?? null) !== dirValue) {
+              await nodesStore.update(backendId, { direction: dirValue })
+            }
+            dragDirSnapshot.delete(uid)
+          }
+          continue
+        }
+
+        const newSortOrder = sortOrderOf.get(uid) ?? 0
+        const isNewParentRoot = newParentBackendId === nodesStore.rootNode?.id
+        let newDirection: 0 | 1 | undefined = undefined
+        if (isNewParentRoot) {
+          // P0 修复 1：优先消费拖拽方向快照，消除 100ms 节流窗口内的鼠标漂移；
+          // 无快照（非拖拽触发的结构变化，如撤销恢复）保留原鼠标位置兜底。
+          const snapshotDir = dragDirSnapshot.get(uid)
+          if (snapshotDir === 'left' || snapshotDir === 'right') {
+            newDirection = snapshotDir === 'left' ? 0 : 1
+          } else {
+            const { x: mouseCanvasX } = inst.toPos(lastMouseClientX, lastMouseClientY)
+            const { scaleX = 1, translateX = 0 } = inst.draw.transform()
+            const rootCanvasCenterX = (renderRoot.left + (renderRoot.width || 0) / 2) * scaleX + translateX
+            const targetDir = mouseCanvasX < rootCanvasCenterX ? 'left' : 'right'
+            newDirection = targetDir === 'left' ? 0 : 1
+          }
+        }
+
+        await nodesStore.move(backendId, {
+          parentId: newParentBackendId,
+          sortOrder: newSortOrder,
+          direction: newDirection
+        })
+        // move 成功后才消费快照：失败重放时 parentOf 已重建、父已一致，
+        // 会落入上方「父节点未变」分支用快照补发方向，天然自愈
+        if (newDirection !== undefined) dragDirSnapshot.delete(uid)
       }
-    }
-    if (items.length > 0) {
-      await nodesStore.batchUpdate(items)
+
+      // 3. 第二遍：提交「受影响父节点下完整兄弟集合」的 sortOrder。
+      //    修复 Duplicate entry 问题：此前只提交 targetUids 里排序变化的节点，
+      //    可能与该父节点下未提交的兄弟节点现有 sortOrder 撞 (MindMapId, ParentId, SortOrder)
+      //    唯一索引。现改为对每个受影响父节点，把其全部子节点按渲染树顺序
+      //    重编为 0..n-1 一并提交，保证请求自洽、无重复 sortOrder。
+      const affectedParentKeys = new Set<string | null>()
+      for (const uid of targetUids) {
+        const newParentUid = parentOf.get(uid) ?? null
+        affectedParentKeys.add(newParentUid)
+      }
+
+      const items: NodeBatchItem[] = []
+      const seenBackendIds = new Set<string>()
+      for (const parentUid of affectedParentKeys) {
+        // 收集该父节点下的全部子节点 uid（渲染树顺序）
+        const siblingUids: string[] = []
+        for (const [uid, p] of parentOf) {
+          if ((p ?? null) === (parentUid ?? null)) siblingUids.push(uid)
+        }
+        siblingUids.sort((a, b) => (sortOrderOf.get(a) ?? 0) - (sortOrderOf.get(b) ?? 0))
+
+        let order = 0
+        for (const uid of siblingUids) {
+          const backendId = await getBackendIdOrWait(uid)
+          if (!backendId) continue
+          // 跳过已提交的节点（避免同一次 batch 内重复 id）
+          if (seenBackendIds.has(backendId)) continue
+          seenBackendIds.add(backendId)
+          items.push({ id: backendId, sortOrder: order })
+          order++
+        }
+      }
+      if (items.length > 0) {
+        await nodesStore.batchUpdate(items)
+      }
+    } finally {
+      nodesStore.endHistoryGroup()
     }
   }
 

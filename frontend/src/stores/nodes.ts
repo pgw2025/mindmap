@@ -13,11 +13,13 @@ import * as offlineDb from '@/offline/db'
 
 /** 命令历史记录，用于 undo/redo */
 interface HistoryCommand {
-  type: 'create' | 'update' | 'delete' | 'move' | 'batch'
+  type: 'create' | 'update' | 'delete' | 'move' | 'batch' | 'compound'
   nodeId?: string
   snapshot?: NodeDto | NodeDto[]
   prevData?: unknown
   nextData?: unknown
+  /** type === 'compound' 时承载被合并的子命令（如一次拖拽产生的 update/move/batch） */
+  subCommands?: HistoryCommand[]
 }
 
 export const useNodesStore = defineStore('nodes', () => {
@@ -56,7 +58,35 @@ export const useNodesStore = defineStore('nodes', () => {
       .sort((a, b) => a.sortOrder - b.sortOrder)
   }
 
+  /** 历史分组缓冲：beginHistoryGroup 期间所有 pushHistory 写入此处，
+   *  endHistoryGroup 时合并为单条 compound 历史，使一次复合操作（如一次拖拽
+   *  产生的 update/move + 兄弟重排 batch）只占一条 undo 记录，
+   *  撤销时一次回退全部子命令，避免「第一次撤销观感无效」。
+   *  buffer === null 表示当前不在分组期，pushHistory 直接入 undoStack。 */
+  let historyGroupBuffer: HistoryCommand[] | null = null
+
+  function beginHistoryGroup() {
+    historyGroupBuffer = []
+  }
+
+  function endHistoryGroup() {
+    const buf = historyGroupBuffer
+    historyGroupBuffer = null
+    if (!buf || buf.length === 0) return
+    if (buf.length === 1) {
+      // 单条无需包装，保持原有粒度
+      pushHistory(buf[0])
+      return
+    }
+    pushHistory({ type: 'compound', subCommands: buf })
+  }
+
   function pushHistory(cmd: HistoryCommand) {
+    // 分组期内：累积到 buffer，不直接入 undoStack
+    if (historyGroupBuffer !== null) {
+      historyGroupBuffer.push(cmd)
+      return
+    }
     undoStack.value.push(cmd)
     redoStack.value = []
     if (undoStack.value.length > 100) {
@@ -202,7 +232,7 @@ export const useNodesStore = defineStore('nodes', () => {
     await applyRedo(cmd)
   }
 
-  async function applyUndo(cmd: HistoryCommand) {
+  async function applyUndoCore(cmd: HistoryCommand) {
     switch (cmd.type) {
       case 'create':
         if (cmd.nodeId) {
@@ -263,11 +293,23 @@ export const useNodesStore = defineStore('nodes', () => {
           await nodesApi.batchUpdateNodes(mindMapId.value, { nodes: items })
         }
         break
+      case 'compound':
+        // 倒序回滚子命令（与入栈顺序相反），reloadTree 由 applyUndo 统一执行一次
+        if (cmd.subCommands) {
+          for (let i = cmd.subCommands.length - 1; i >= 0; i--) {
+            await applyUndoCore(cmd.subCommands[i])
+          }
+        }
+        break
     }
+  }
+
+  async function applyUndo(cmd: HistoryCommand) {
+    await applyUndoCore(cmd)
     await reloadTree()
   }
 
-  async function applyRedo(cmd: HistoryCommand) {
+  async function applyRedoCore(cmd: HistoryCommand) {
     switch (cmd.type) {
       case 'create':
         if (cmd.nextData) {
@@ -293,7 +335,19 @@ export const useNodesStore = defineStore('nodes', () => {
           await nodesApi.batchUpdateNodes(mindMapId.value, { nodes: items })
         }
         break
+      case 'compound':
+        // 正序重做子命令，reloadTree 由 applyRedo 统一执行一次
+        if (cmd.subCommands) {
+          for (const sub of cmd.subCommands) {
+            await applyRedoCore(sub)
+          }
+        }
+        break
     }
+  }
+
+  async function applyRedo(cmd: HistoryCommand) {
+    await applyRedoCore(cmd)
     await reloadTree()
   }
 
@@ -318,6 +372,7 @@ export const useNodesStore = defineStore('nodes', () => {
     isOfflineSnapshot.value = false
     undoStack.value = []
     redoStack.value = []
+    historyGroupBuffer = null
   }
 
   function clearAll() {
@@ -325,6 +380,7 @@ export const useNodesStore = defineStore('nodes', () => {
     selectedNodeId.value = null
     undoStack.value = []
     redoStack.value = []
+    historyGroupBuffer = null
   }
 
   return {
@@ -350,6 +406,8 @@ export const useNodesStore = defineStore('nodes', () => {
     redo,
     selectNode,
     reset,
-    clearAll
+    clearAll,
+    beginHistoryGroup,
+    endHistoryGroup
   }
 })
