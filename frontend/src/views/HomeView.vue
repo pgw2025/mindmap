@@ -1342,7 +1342,9 @@ onUnmounted(() => {
   }
 }
 
-:global(.dark) .cover-badge {
+/* 注意：不要写成 ":global(.dark) .xxx"——compiler-sfc 3.5.41 会把后代选择器丢掉，
+   编译产物只剩 ".dark"，深色覆盖全部失效。scoped 下请用 "html.dark .xxx"。 */
+html.dark .cover-badge {
   background: rgba(24, 28, 34, 0.8);
   color: var(--app-text-secondary, #9ca3af);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
@@ -1452,7 +1454,7 @@ onUnmounted(() => {
   }
 }
 
-:global(.dark) .status-pill {
+html.dark .status-pill {
   background: rgba(255, 255, 255, 0.06);
   color: var(--app-text-secondary, #9ca3af);
 
@@ -1506,7 +1508,7 @@ onUnmounted(() => {
   }
 }
 
-:global(.dark) .action-icon-btn {
+html.dark .action-icon-btn {
   color: var(--app-text-secondary, #9ca3af);
 
   &:hover {
